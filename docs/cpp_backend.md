@@ -70,7 +70,7 @@ arena. Destroy the Parser to free the tree.
 
 ## Balanced-bracket tokens (since 1.3.0)
 
-Tokens declared with `%balanced="<close>"` in the grammar source come
+Tokens declared with `%balanced='<close>'` in the grammar source come
 through to the emitted scanner via a per-grammar `kTokenBalanced[]`
 constexpr array (one entry per token, holding the close-delimiter byte
 or 0). After the DFA matches a balanced token, `next_token()` extends

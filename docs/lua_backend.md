@@ -60,7 +60,7 @@ filter re-runs. Same ordering and contract as the C and C++ backends.
 
 ## Balanced-bracket tokens (since 1.3.0)
 
-Tokens declared with `%balanced="<close>"` in the grammar source come
+Tokens declared with `%balanced='<close>'` in the grammar source come
 through to the emitted scanner via a `token_balanced` Lua table (one
 entry per token, holding the close-delimiter byte or 0). After the
 DFA matches a balanced token, `Parser:next_token()` extends the

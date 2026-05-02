@@ -152,7 +152,7 @@ A complete worked example is in
 
 ## Balanced-bracket tokens (since 1.3.0)
 
-Tokens declared with `%balanced="<close>"` in the grammar source come
+Tokens declared with `%balanced='<close>'` in the grammar source come
 through to the emitted scanner via a per-grammar `plox_<g>_token_balanced[]`
 array (one entry per token, holding the close-delimiter byte or 0). After
 the DFA matches a balanced token, the scanner extends the match by

@@ -74,7 +74,7 @@ the rest is the generic plox machinery.
 
 ## Balanced-bracket tokens (since 1.2.0; emitted shim 1.3.0)
 
-The Python runtime's Scanner has supported `%balanced="<close>"`
+The Python runtime's Scanner has supported `%balanced='<close>'`
 since 1.2.0 via its `balanced` constructor argument. The emitted
 shim wires this through automatically by reading the bundle's
 `lex.balanced` map via `balanced_from_json` and passing it to

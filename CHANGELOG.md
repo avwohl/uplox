@@ -5,6 +5,61 @@ All notable changes to plox land here. Format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) for the public
 surface (CLI, JSON bundle schema, Python API, hook firing points).
 
+## 2.0.0 — 2026-05-02
+
+Breaking change to the `.plox` grammar source format. v1 grammars do not
+parse under the new reader. All bundled examples (`calc`, `ambig_expr`,
+`scoped`, `plm_subset`, `plm_full`, `c_subset`, `plox_self`) and the
+self-host bootstrap have been ported.
+
+### Changed
+
+- **Token literals are single-quoted.** `LPAREN = '('` instead of
+  `LPAREN = "("`. Same for inline literals on rule RHS and for the
+  `%balanced='<close>'` attribute. The change matches yacc/bison
+  convention and keeps the grammar source's `'…'` and the regex `/…/`
+  visually distinct from target-language `"…"` strings inside action
+  bodies.
+- **Non-terminals are written `<name>` everywhere — both LHS and RHS.**
+  Bare identifiers on RHS are always terminal names. Case is no longer
+  the terminal / non-terminal signal, so identifier names (rule LHS,
+  terminal names, keyword spellings) can be any case. Token names are
+  no longer constrained to `[A-Z][A-Z0-9_]*`.
+- **`Symbol.kind` field replaces string-shape inspection.** Internal
+  to the IR; downstream consumers that read `prod.rhs` (already
+  resolved tuples of strings) are unaffected.
+
+### Added
+
+- **`%keyword_prefix` directive and `%keywords` section.** Listing
+  `HALT` under `%keywords` with `%keyword_prefix KW_` synthesises a
+  token named `KW_HALT` whose literal is `"HALT"`; bare `HALT` on rule
+  RHS resolves to `KW_HALT`. The win shows up in `plm_subset` /
+  `plm_full`, where ~30 lines of `HALT = "HALT"` boilerplate collapse
+  into one whitespace-separated list. Either the bare or the prefixed
+  spelling resolves on rule RHS, so generated code can reference
+  whichever is more idiomatic for the target language.
+
+### Test surface
+
+358 tests pass, ~68s wall on the reference machine. New `test_spec_keywords.py`
+adds 9 tests for `%keyword_prefix` / `%keywords` (default empty prefix,
+KW_-prefixed synthesis, multi-line lists, alias resolution, plus error
+paths for duplicate prefix directive, duplicate keyword, collision with
+an existing `%tokens` declaration, malformed identifier).
+
+### Migration
+
+There is no automatic migration. The substantive transformation is:
+1. `"x"` → `'x'` for every token literal and inline rule literal.
+2. Every non-terminal reference (LHS and RHS) gains `<>`: `expr` → `<expr>`.
+3. Optional: refactor `KW_FOO = "foo"` declarations into a `%keywords`
+   section with `%keyword_prefix`.
+
+The repository's bundled examples demonstrate both styles — `plm_subset`
+/ `plm_full` use `%keywords`; `c_subset` keeps explicit `KW_FOO = 'foo'`
+declarations to retain C-idiomatic uppercase code-side names.
+
 ## 1.4.0 — 2026-05-02
 
 Quality-of-life pass on parse-error diagnostics. Every backend now
