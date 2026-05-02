@@ -24,6 +24,7 @@ from ..lex.build import lex_from_ir
 from ..lex.scanner import Scanner
 from ..parse.grammar import GrammarError, compile_grammar
 from ..parse.lr1 import build_lr1
+from ..gen.c import emit_c
 from ..parse.glr import GLRParseError, glr_from_lr, glr_parse
 from ..parse.glr.runtime import AmbiguityNode, GLRNode
 from ..parse.runtime import HookRegistry, ParseError, parse as run_parser
@@ -180,12 +181,35 @@ def _cmd_check(args: argparse.Namespace) -> int:
 
 
 def _cmd_emit(args: argparse.Namespace) -> int:
-    print(
-        f"plox emit --target={args.target}: not yet implemented "
-        f"(targets land in Phase 7+)",
-        file=sys.stderr,
-    )
-    return 2
+    import json as _json
+    import os as _os
+
+    if args.target != "c":
+        print(
+            f"plox emit --target={args.target}: not yet implemented "
+            f"(only --target=c lands in Phase 7; others follow in Phase 8)",
+            file=sys.stderr,
+        )
+        return 2
+
+    with open(args.bundle, "r", encoding="utf-8") as fh:
+        bundle = _json.load(fh)
+    try:
+        header, impl = emit_c(bundle, prefix=args.prefix)
+    except ValueError as e:
+        print(f"{args.bundle}: {e}", file=sys.stderr)
+        return 1
+
+    grammar = (args.prefix or bundle.get("meta", {}).get("grammar") or "grammar").lower()
+    _os.makedirs(args.out, exist_ok=True)
+    header_path = _os.path.join(args.out, f"plox_{grammar}.h")
+    impl_path = _os.path.join(args.out, f"plox_{grammar}.c")
+    with open(header_path, "w", encoding="utf-8") as fh:
+        fh.write(header)
+    with open(impl_path, "w", encoding="utf-8") as fh:
+        fh.write(impl)
+    print(f"wrote {header_path}\nwrote {impl_path}")
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -234,10 +258,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_parse.set_defaults(func=_cmd_parse)
 
-    p_emit = sub.add_parser("emit", help="emit driver skeleton for a target language (Phase 7+)")
+    p_emit = sub.add_parser("emit", help="emit a C driver from a bundle (--target=c is supported in Phase 7)")
     p_emit.add_argument("bundle", help="path to JSON bundle")
     p_emit.add_argument("--target", required=True, choices=["c", "cpp", "py", "lua"])
     p_emit.add_argument("--out", required=True, help="output directory")
+    p_emit.add_argument(
+        "--prefix",
+        default=None,
+        help="override grammar name used as the symbol prefix (default: meta.grammar)",
+    )
     p_emit.set_defaults(func=_cmd_emit)
 
     return parser

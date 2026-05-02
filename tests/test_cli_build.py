@@ -77,9 +77,23 @@ def test_check_reports_reader_error(tmp_path, capsys):
     assert "expected" in err.lower()
 
 
-def test_emit_is_stubbed(tmp_path, capsys):
-    out = tmp_path / "out"
-    rc = main(["emit", "ignored.json", "--target", "c", "--out", str(out)])
+def test_emit_target_c_writes_files(tmp_path):
+    src = write_calc_grammar(tmp_path)
+    bundle = tmp_path / "calc.json"
+    main(["build", str(src), "-o", str(bundle)])
+    out = tmp_path / "gen"
+    rc = main(["emit", str(bundle), "--target", "c", "--out", str(out)])
+    assert rc == 0
+    assert (out / "plox_calc.h").exists()
+    assert (out / "plox_calc.c").exists()
+
+
+def test_emit_target_cpp_still_stubbed(tmp_path, capsys):
+    src = write_calc_grammar(tmp_path)
+    bundle = tmp_path / "calc.json"
+    main(["build", str(src), "-o", str(bundle)])
+    out = tmp_path / "gen"
+    rc = main(["emit", str(bundle), "--target", "cpp", "--out", str(out)])
     assert rc == 2
     assert "not yet implemented" in capsys.readouterr().err
 
