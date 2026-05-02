@@ -57,6 +57,7 @@ class _CppCtx:
 
         self.tokens: list[str] = list(lex["tokens"])
         self.skip_tokens: set[str] = set(lex.get("skip", []))
+        self.balanced: dict[str, str] = dict(lex.get("balanced") or {})
         self.non_terminals: list[str] = list(parse["non_terminals"])
         self.productions: list[dict] = list(parse["productions"])
         self.start_state: int = parse.get("start_state", 0)
@@ -216,6 +217,18 @@ def _emit_lex_tables(ctx: _CppCtx) -> list[str]:
     for tok, bit in zip(ctx.tokens, skip_bits):
         out.append(f"    {bit},  // {tok}")
     out.append("};")
+    out.append("")
+    out.append("// Per-token close-delimiter byte for %balanced= tokens.")
+    out.append("// 0 means the token is not balanced.")
+    out.append("constexpr int kTokenBalanced[kTokenCount] = {")
+    out.append("    0,  // _EndOfInput_")
+    for tok in ctx.tokens:
+        close_char = ctx.balanced.get(tok)
+        if close_char is None:
+            out.append(f"    0,  // {tok}")
+        else:
+            out.append(f"    {ord(close_char)},  // {tok}")
+    out.append("};")
     return out
 
 
@@ -341,6 +354,23 @@ def _emit_impl_struct(ctx: _CppCtx) -> list[str]:
         "                }",
         "            }",
         "            if (last_accept_end <= lex_pos) return -1;",
+        "            // %balanced= extension: extend the match by counting",
+        "            // nested open/close pairs until depth returns to zero.",
+        "            // Open is whatever the DFA already consumed at lex_pos.",
+        "            int close_b = kTokenBalanced[last_accept_kind];",
+        "            if (close_b) {",
+        "                int open_b = static_cast<unsigned char>(input[lex_pos]);",
+        "                int depth = 1;",
+        "                int j = last_accept_end;",
+        "                while (j < static_cast<int>(input.size()) && depth > 0) {",
+        "                    unsigned char b = static_cast<unsigned char>(input[j]);",
+        "                    if (b == open_b) ++depth;",
+        "                    else if (b == close_b) --depth;",
+        "                    ++j;",
+        "                }",
+        "                if (depth != 0) return -1;",
+        "                last_accept_end = j;",
+        "            }",
         "            int start = lex_pos;",
         "            int sline = lex_line, scol = lex_column;",
         "            for (int p = start; p < last_accept_end; ++p) {",

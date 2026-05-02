@@ -59,6 +59,7 @@ class _LuaCtx:
 
         self.tokens: list[str] = list(lex["tokens"])
         self.skip_tokens: set[str] = set(lex.get("skip", []))
+        self.balanced: dict[str, str] = dict(lex.get("balanced") or {})
         self.non_terminals: list[str] = list(parse["non_terminals"])
         self.productions: list[dict] = list(parse["productions"])
         self.start_state: int = parse.get("start_state", 0)
@@ -139,6 +140,18 @@ def _emit_lex_tables(ctx: _LuaCtx) -> list[str]:
     out.append("    [0] = 0,  -- _EndOfInput_")
     for tok, bit in zip(ctx.tokens, skip_bits):
         out.append(f"    [{ctx.token_index[tok]}] = {bit},  -- {tok}")
+    out.append("}")
+    out.append("")
+    out.append("-- Per-token close-delimiter byte for %balanced= tokens.")
+    out.append("-- 0 means the token is not balanced.")
+    out.append("local token_balanced = {")
+    out.append("    [0] = 0,  -- _EndOfInput_")
+    for tok in ctx.tokens:
+        close_char = ctx.balanced.get(tok)
+        if close_char is None:
+            out.append(f"    [{ctx.token_index[tok]}] = 0,  -- {tok}")
+        else:
+            out.append(f"    [{ctx.token_index[tok]}] = {ord(close_char)},  -- {tok}")
     out.append("}")
     return out
 
@@ -271,6 +284,27 @@ def _emit_runtime(ctx: _LuaCtx) -> list[str]:
         "            self.error = string.format('lexical error at line %d, column %d',",
         "                                       self.lex_line, self.lex_column)",
         "            return nil",
+        "        end",
+        "        -- %balanced= extension: extend the match by counting nested",
+        "        -- open/close pairs until depth returns to zero. Open is whatever",
+        "        -- the DFA already consumed at self.lex_pos.",
+        "        local close_b = token_balanced[last_accept_kind]",
+        "        if close_b ~= 0 then",
+        "            local open_b = string.byte(self.input, self.lex_pos)",
+        "            local depth = 1",
+        "            local j = last_accept_end",
+        "            while j <= #self.input and depth > 0 do",
+        "                local b = string.byte(self.input, j)",
+        "                if b == open_b then depth = depth + 1",
+        "                elseif b == close_b then depth = depth - 1 end",
+        "                j = j + 1",
+        "            end",
+        "            if depth ~= 0 then",
+        "                self.error = string.format('unterminated balanced token at line %d, column %d',",
+        "                                           self.lex_line, self.lex_column)",
+        "                return nil",
+        "            end",
+        "            last_accept_end = j",
         "        end",
         "        local start = self.lex_pos",
         "        local sline = self.lex_line",

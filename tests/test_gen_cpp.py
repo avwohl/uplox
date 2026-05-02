@@ -397,3 +397,108 @@ def test_cpp_header_uses_namespace(tmp_path):
     assert "class Parser" in text
     assert "enum class Token" in text
     assert "enum class NonTerminal" in text
+
+
+# ---- balanced-bracket tokens (%balanced=) ----------------------------------
+
+
+BAL_GRAMMAR_CPP = """
+%grammar bal
+
+%tokens
+WS     = /[ \\t\\n]+/    %skip
+IDENT  = /[A-Za-z_][A-Za-z0-9_]*/
+ACTION = "{" %balanced="}"
+
+%rules
+top  : top item | item ;
+item : IDENT ACTION ;
+"""
+
+
+def build_bal_bundle_cpp() -> dict:
+    from plox.lex.build import balanced_tokens
+
+    ir = read_source(BAL_GRAMMAR_CPP)
+    dfa, tokens, skip = lex_from_ir(ir)
+    table = build_lr1(compile_grammar(ir))
+    bundle = empty_bundle(ir.name)
+    bundle["lex"] = dfa_to_json(
+        dfa, tokens=tokens, skip=skip, balanced=balanced_tokens(ir)
+    )
+    bundle["parse"] = table_to_json(table)
+    return bundle
+
+
+def test_cpp_supports_balanced_token(tmp_path):
+    """End-to-end: emit C++ for a grammar with `%balanced="}"`, compile, run.
+    The scanner must consume each balanced run as a single ACTION token,
+    so an action body with nested `{}` ends in one token, not several."""
+    bundle = build_bal_bundle_cpp()
+    _h, c = emit_to_cpp(tmp_path, bundle)
+    assert "kTokenBalanced" in c.read_text()
+
+    driver = tmp_path / "main.cpp"
+    driver.write_text(r"""
+#include <cstdio>
+#include <cstring>
+#include "plox_bal.hpp"
+
+using namespace plox::bal;
+
+static void count_actions(const Node* n, int* lens, int cap, int& cnt) {
+    if (!n) return;
+    if (n->is_terminal) {
+        if (n->kind == static_cast<int>(Token::ACTION)) {
+            if (cnt < cap) lens[cnt] = static_cast<int>(n->text.size());
+            ++cnt;
+        }
+        return;
+    }
+    for (auto* c : n->children) count_actions(c, lens, cap, cnt);
+}
+
+int main(int argc, char** argv) {
+    const char* src = (argc > 1) ? argv[1] : "";
+    Parser p(src);
+    if (!p.parse()) {
+        std::fprintf(stderr, "parse error: %s\n", p.error().c_str());
+        return 1;
+    }
+    int lens[16]; int cnt = 0;
+    count_actions(p.root(), lens, 16, cnt);
+    std::printf("actions=%d", cnt);
+    for (int i = 0; i < cnt; ++i) std::printf(" len%d=%d", i, lens[i]);
+    std::printf("\n");
+    return 0;
+}
+""")
+    binary = tmp_path / "bal"
+    cxx_compile(driver, c, out=binary, include=tmp_path)
+
+    src = "first { with { nested } stuff } second { simple }"
+    out = subprocess.run([str(binary), src], capture_output=True, text=True, check=True)
+    line = out.stdout.strip()
+    assert line.startswith("actions=2"), line
+    assert "len0=25" in line and "len1=10" in line, line
+
+
+def test_cpp_balanced_unterminated_returns_error(tmp_path):
+    bundle = build_bal_bundle_cpp()
+    _h, c = emit_to_cpp(tmp_path, bundle)
+    driver = tmp_path / "main.cpp"
+    driver.write_text(r"""
+#include <cstdio>
+#include "plox_bal.hpp"
+int main(int argc, char** argv) {
+    const char* src = (argc > 1) ? argv[1] : "x { unterminated";
+    plox::bal::Parser p(src);
+    bool ok = p.parse();
+    if (!ok) std::fprintf(stderr, "%s\n", p.error().c_str());
+    return ok ? 0 : 1;
+}
+""")
+    binary = tmp_path / "bal_err"
+    cxx_compile(driver, c, out=binary, include=tmp_path)
+    r = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
+    assert r.returncode != 0

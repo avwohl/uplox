@@ -45,6 +45,7 @@ def dfa_to_json(
     *,
     tokens: list[str],
     skip: list[str] | None = None,
+    balanced: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Serialise ``dfa`` plus token metadata into the lex section dict.
 
@@ -53,6 +54,11 @@ def dfa_to_json(
     Both must contain only names present in the DFA's accept labels (the
     serialiser does not enforce this; the bundle validator in
     :mod:`plox.tables.schema` is the appropriate gate).
+
+    ``balanced`` maps token names to their closing-delimiter characters
+    for the ``%balanced=`` runtime-extension feature; absent or empty means
+    no balanced tokens. The key is omitted from the serialised dict when
+    empty so old bundles round-trip unchanged.
     """
     states_json: list[dict[str, Any]] = []
     for s in range(dfa.state_count()):
@@ -67,13 +73,16 @@ def dfa_to_json(
             entry["edges"] = edges
         states_json.append(entry)
 
-    return {
+    out: dict[str, Any] = {
         "alphabet_size": ALPHABET_SIZE,
         "start": dfa.start,
         "tokens": list(tokens),
         "skip": list(skip or []),
         "states": states_json,
     }
+    if balanced:
+        out["balanced"] = dict(sorted(balanced.items()))
+    return out
 
 
 def dfa_from_json(section: dict[str, Any]) -> tuple[DFA, list[str], list[str]]:
@@ -81,6 +90,7 @@ def dfa_from_json(section: dict[str, Any]) -> tuple[DFA, list[str], list[str]]:
 
     Tolerates and ignores unknown keys so future schema-compatible extensions
     do not break old readers (the schema bump rule is in ``docs/grammar_format.md``).
+    Use :func:`balanced_from_json` to read the balanced-token map separately.
     """
     if section.get("alphabet_size", ALPHABET_SIZE) != ALPHABET_SIZE:
         raise ValueError(
@@ -100,3 +110,15 @@ def dfa_from_json(section: dict[str, Any]) -> tuple[DFA, list[str], list[str]]:
             transitions[sid][b] = tgt
     dfa = DFA(transitions=transitions, accepts=accepts, start=section.get("start", 0))
     return dfa, list(section.get("tokens", [])), list(section.get("skip", []))
+
+
+def balanced_from_json(section: dict[str, Any]) -> dict[str, str]:
+    """Read the ``%balanced=`` map from a serialised lex section.
+
+    Pre-1.2 bundles have no ``balanced`` key; that is just an empty map. The
+    key is also absent (rather than ``{}``) when no token in the grammar
+    uses the feature, so the bundle remains byte-identical to a pre-1.2
+    bundle for grammars that don't opt in.
+    """
+    raw = section.get("balanced") or {}
+    return {str(k): str(v) for k, v in raw.items()}

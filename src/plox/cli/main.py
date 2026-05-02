@@ -32,7 +32,9 @@ from ..parse.glr import GLRParseError, glr_from_lr, glr_parse
 from ..parse.glr.runtime import AmbiguityNode, GLRNode
 from ..parse.runtime import HookRegistry, ParseError, parse as run_parser
 from ..spec.reader import ReaderError, read_file
+from ..lex.build import balanced_tokens
 from ..tables import (
+    balanced_from_json,
     dfa_from_json,
     dfa_to_json,
     dump_bundle,
@@ -60,7 +62,9 @@ def _cmd_build(args: argparse.Namespace) -> int:
         return 1
 
     bundle = empty_bundle(ir.name)
-    bundle["lex"] = dfa_to_json(dfa, tokens=tokens, skip=skip)
+    bundle["lex"] = dfa_to_json(
+        dfa, tokens=tokens, skip=skip, balanced=balanced_tokens(ir)
+    )
 
     if not args.lex_only:
         try:
@@ -100,7 +104,11 @@ def _cmd_parse(args: argparse.Namespace) -> int:
         return 1
 
     dfa, _tokens, skip = dfa_from_json(bundle["lex"])
-    scanner = Scanner(dfa=dfa, skip_tokens=frozenset(skip))
+    scanner = Scanner(
+        dfa=dfa,
+        skip_tokens=frozenset(skip),
+        balanced=balanced_from_json(bundle["lex"]),
+    )
     table = table_from_json(bundle["parse"])
 
     if args.input == "-":

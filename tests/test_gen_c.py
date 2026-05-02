@@ -571,3 +571,130 @@ def test_invalid_prefix_rejected(tmp_path):
     bundle = build_calc_bundle()
     with pytest.raises(ValueError):
         emit_c(bundle, prefix="bad-name")  # hyphen is not a valid C ident
+
+
+# ---- 5. Balanced-bracket tokens (%balanced=) --------------------------------
+
+
+BAL_GRAMMAR = """
+%grammar bal
+
+%tokens
+WS     = /[ \\t\\n]+/    %skip
+IDENT  = /[A-Za-z_][A-Za-z0-9_]*/
+ACTION = "{" %balanced="}"
+
+%rules
+top  : top item | item ;
+item : IDENT ACTION ;
+"""
+
+
+def build_bal_bundle() -> dict:
+    from plox.lex.build import balanced_tokens
+
+    ir = read_source(BAL_GRAMMAR)
+    dfa, tokens, skip = lex_from_ir(ir)
+    grammar = compile_grammar(ir)
+    table = build_lr1(grammar)
+    bundle = empty_bundle(ir.name)
+    bundle["lex"] = dfa_to_json(
+        dfa, tokens=tokens, skip=skip, balanced=balanced_tokens(ir)
+    )
+    bundle["parse"] = table_to_json(table)
+    return bundle
+
+
+def test_emitted_c_supports_balanced_token(tmp_path):
+    """End-to-end: emit C for a grammar with `%balanced="}"`, compile, and
+    feed input where `{ ... }` action bodies contain nested braces. The
+    scanner must consume each balanced run as a single ACTION token, so
+    the parse tree has one ACTION per top-level item even when the body
+    contains additional `{}` pairs."""
+    bundle = build_bal_bundle()
+    _h, c = emit_to(tmp_path, bundle)
+    text = c.read_text()
+    assert "plox_bal_token_balanced" in text, "balanced array missing from emit"
+
+    driver = tmp_path / "driver.c"
+    driver.write_text(r"""
+#include "plox_bal.h"
+#include <stdio.h>
+#include <string.h>
+
+/* Walk the tree and count ACTION leaves; print their lengths in order. */
+static int count_actions(const plox_bal_node *n, int *lens, int cap, int *out_n) {
+    if (!n) return 0;
+    if (n->is_terminal) {
+        if (n->kind == PLOX_BAL_TOK_ACTION) {
+            if (*out_n < cap) lens[*out_n] = n->text_len;
+            ++(*out_n);
+        }
+        return 0;
+    }
+    for (int i = 0; i < n->num_children; ++i) {
+        count_actions(n->children[i], lens, cap, out_n);
+    }
+    return 0;
+}
+
+int main(int argc, char **argv) {
+    const char *src = (argc > 1) ? argv[1] : "";
+    int n = (int)strlen(src);
+    plox_bal_ctx *ctx = plox_bal_create(src, n);
+    plox_bal_node *root = NULL;
+    if (plox_bal_parse(ctx, &root) != 0) {
+        fprintf(stderr, "parse error: %s\n", plox_bal_error(ctx));
+        plox_bal_destroy(ctx);
+        return 1;
+    }
+    int lens[16]; int cnt = 0;
+    count_actions(root, lens, 16, &cnt);
+    printf("actions=%d", cnt);
+    for (int i = 0; i < cnt; ++i) printf(" len%d=%d", i, lens[i]);
+    printf("\n");
+    plox_bal_destroy(ctx);
+    return 0;
+}
+""")
+    binary = tmp_path / "bal"
+    cc_compile(c, driver, out=binary, include=tmp_path)
+
+    # Two items; the first action body has a nested `{}`, the second is
+    # plain. Each ACTION token's text_len includes the outer braces, so
+    # the lengths are deterministic.
+    src = "first { with { nested } stuff } second { simple }"
+    out = subprocess.run([str(binary), src], capture_output=True, text=True, check=True)
+    line = out.stdout.strip()
+    assert line.startswith("actions=2"), line
+    # `{ with { nested } stuff }` is 25 chars including the outer braces.
+    # `{ simple }` is 10.
+    assert "len0=25" in line and "len1=10" in line, line
+
+
+def test_emitted_c_balanced_unterminated_returns_error(tmp_path):
+    bundle = build_bal_bundle()
+    _h, c = emit_to(tmp_path, bundle)
+    driver = tmp_path / "driver.c"
+    driver.write_text(r"""
+#include "plox_bal.h"
+#include <stdio.h>
+#include <string.h>
+int main(int argc, char **argv) {
+    const char *src = (argc > 1) ? argv[1] : "x { unterminated";
+    int n = (int)strlen(src);
+    plox_bal_ctx *ctx = plox_bal_create(src, n);
+    plox_bal_node *root = NULL;
+    int rc = plox_bal_parse(ctx, &root);
+    if (rc != 0) {
+        fprintf(stderr, "%s\n", plox_bal_error(ctx));
+    }
+    plox_bal_destroy(ctx);
+    return rc == 0 ? 0 : 1;
+}
+""")
+    binary = tmp_path / "bal_err"
+    cc_compile(c, driver, out=binary, include=tmp_path)
+    result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
+    assert result.returncode != 0
+    assert "unterminated" in result.stderr.lower()

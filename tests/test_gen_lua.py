@@ -329,3 +329,94 @@ def test_lua_invalid_prefix_rejected():
     bundle = build_bundle()
     with pytest.raises(ValueError):
         emit_lua(bundle, prefix="bad-name")
+
+
+# ---- balanced-bracket tokens (%balanced=) ----------------------------------
+
+
+BAL_GRAMMAR_LUA = """
+%grammar bal
+
+%tokens
+WS     = /[ \\t\\n]+/    %skip
+IDENT  = /[A-Za-z_][A-Za-z0-9_]*/
+ACTION = "{" %balanced="}"
+
+%rules
+top  : top item | item ;
+item : IDENT ACTION ;
+"""
+
+
+def build_bal_bundle_lua() -> dict:
+    from plox.lex.build import balanced_tokens
+
+    ir = read_source(BAL_GRAMMAR_LUA)
+    dfa, tokens, skip = lex_from_ir(ir)
+    table = build_lr1(compile_grammar(ir))
+    bundle = empty_bundle(ir.name)
+    bundle["lex"] = dfa_to_json(
+        dfa, tokens=tokens, skip=skip, balanced=balanced_tokens(ir)
+    )
+    bundle["parse"] = table_to_json(table)
+    return bundle
+
+
+def test_lua_supports_balanced_token(tmp_path):
+    """End-to-end: emit Lua for a grammar with `%balanced="}"`, run via
+    the Lua interpreter on input where action bodies contain nested `{}`.
+    Each balanced run comes through as a single ACTION token whose text
+    spans the full body, including the outer braces."""
+    bundle = build_bal_bundle_lua()
+    text = emit_lua(bundle)
+    (tmp_path / "plox_bal.lua").write_text(text)
+    assert "token_balanced" in text
+
+    driver = tmp_path / "main.lua"
+    driver.write_text(f"""
+package.path = '{tmp_path}/?.lua;' .. package.path
+local M = require('plox_bal')
+local p = M.new(arg[1])
+if not p:parse() then
+    io.stderr:write('parse error: ' .. (p.error or '?') .. '\\n')
+    os.exit(1)
+end
+
+local lens = {{}}
+local function walk(n)
+    if n.is_terminal then
+        if n.kind == M.TOK.ACTION then
+            lens[#lens + 1] = #n.text
+        end
+        return
+    end
+    for _, c in ipairs(n.children) do walk(c) end
+end
+walk(p.root)
+io.write(string.format('actions=%d', #lens))
+for i, ln in ipairs(lens) do io.write(string.format(' len%d=%d', i - 1, ln)) end
+io.write('\\n')
+""")
+
+    src = "first { with { nested } stuff } second { simple }"
+    out = subprocess.run([LUA, str(driver), src], capture_output=True, text=True, check=True)
+    line = out.stdout.strip()
+    assert line.startswith("actions=2"), line
+    assert "len0=25" in line and "len1=10" in line, line
+
+
+def test_lua_balanced_unterminated_returns_error(tmp_path):
+    bundle = build_bal_bundle_lua()
+    (tmp_path / "plox_bal.lua").write_text(emit_lua(bundle))
+    driver = tmp_path / "main.lua"
+    driver.write_text(f"""
+package.path = '{tmp_path}/?.lua;' .. package.path
+local M = require('plox_bal')
+local p = M.new('x {{ unterminated')
+local ok = p:parse()
+if not ok then io.stderr:write((p.error or '?') .. '\\n') end
+os.exit(ok and 0 or 1)
+""")
+    r = subprocess.run([LUA, str(driver)], capture_output=True, text=True, timeout=10)
+    assert r.returncode != 0
+    assert "unterminated" in r.stderr.lower()

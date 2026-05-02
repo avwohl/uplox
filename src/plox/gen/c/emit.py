@@ -71,6 +71,10 @@ class _EmitContext:
 
         self.tokens: list[str] = list(lex["tokens"])  # declaration order
         self.skip_tokens: set[str] = set(lex.get("skip", []))
+        # %balanced= map: token name -> closing-delimiter character (single
+        # char). Tokens not in the map have a 0 entry in the emitted
+        # token_balanced array.
+        self.balanced: dict[str, str] = dict(lex.get("balanced") or {})
         self.non_terminals: list[str] = list(parse["non_terminals"])  # sorted from JSON
         self.productions: list[dict] = list(parse["productions"])
         self.start_state: int = parse.get("start_state", 0)
@@ -281,6 +285,19 @@ def _emit_lex_tables(ctx: _EmitContext) -> list[str]:
     out.append("    0, /* TOK__EOI_ */")
     for tok, bit in zip(ctx.tokens, skip_bits):
         out.append(f"    {bit}, /* TOK_{tok} */")
+    out.append("};")
+    out.append("")
+    # Per-token close-delimiter byte for %balanced= tokens. 0 means the token
+    # is not balanced. The opening byte is whatever the DFA matched, read
+    # back from the input at scan time.
+    out.append(f"static const int plox_{g}_token_balanced[PLOX_{ctx.upper}_TOK__COUNT__] = {{")
+    out.append("    0, /* TOK__EOI_ */")
+    for tok in ctx.tokens:
+        close_char = ctx.balanced.get(tok)
+        if close_char is None:
+            out.append(f"    0, /* TOK_{tok} */")
+        else:
+            out.append(f"    {ord(close_char)}, /* TOK_{tok} */")
     out.append("};")
     return out
 
@@ -548,6 +565,27 @@ def _emit_lexer(ctx: _EmitContext) -> list[str]:
         "        if (last_accept_end <= c->lex_pos) {",
         f"            plox_{g}__set_error(c, \"lexical error\");",
         "            return -1;",
+        "        }",
+        "        /* %balanced= extension: if the matched token has a non-zero",
+        "         * close byte, extend the match by counting nested open/close",
+        "         * pairs until depth returns to zero. The open byte is whatever",
+        "         * the DFA already consumed at c->lex_pos. */",
+        f"        int close_b = plox_{g}_token_balanced[last_accept_kind];",
+        "        if (close_b) {",
+        "            int open_b = (unsigned char)c->input[c->lex_pos];",
+        "            int depth = 1;",
+        "            int j = last_accept_end;",
+        "            while (j < c->input_len && depth > 0) {",
+        "                unsigned char b = (unsigned char)c->input[j];",
+        "                if (b == open_b) ++depth;",
+        "                else if (b == close_b) --depth;",
+        "                ++j;",
+        "            }",
+        "            if (depth != 0) {",
+        f"                plox_{g}__set_error(c, \"unterminated balanced token\");",
+        "                return -1;",
+        "            }",
+        "            last_accept_end = j;",
         "        }",
         "        int start = c->lex_pos;",
         "        int start_line = c->lex_line;",
