@@ -5,6 +5,43 @@ All notable changes to plox land here. Format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) for the public
 surface (CLI, JSON bundle schema, Python API, hook firing points).
 
+## 1.4.0 — 2026-05-02
+
+Quality-of-life pass on parse-error diagnostics. Every backend now
+produces the same shape of message: the unexpected token (or
+"unexpected end of input"), the source position when applicable, and
+the set of terminals the offending state has actions for, capped at
+12 with a `+N more` suffix.
+
+### Added
+
+- **LR runtime (`plox.parse.runtime`): expected-token list in
+  `ParseError`.** The error message now reads
+  `unexpected token 'X' 'x' at line N, column M; expected one of: A, B, C`.
+  The synthetic end-of-input token is rendered as
+  `unexpected end of input` rather than leaking the internal
+  line=0/column=0 coordinates; the END_MARKER terminal is rendered
+  as `<end of input>` in the expected list, not the raw `$` the
+  LR table uses internally. The `ParseError.token` field is
+  unchanged, so hosts already inspecting it keep working.
+- **GLR runtime (`plox.parse.glr.runtime`): same shape on
+  `GLRParseError`.** The expected list is the union across live
+  stack tops at the point of failure, since any of those tops could
+  have been the one to absorb the lookahead.
+- **C, C++, Lua emitted parsers: parity error format.** Each emitted
+  parser walks its own action row at error time (no extra
+  generated-table storage) to produce the same wording as the
+  Python runtime. The Lua emitter gained a `kTokenCount` constant
+  to drive the iteration; the C emitter widened the error buffer
+  from 200 bytes to 1024 to fit longer expected lists.
+
+### Test surface
+
+349 tests, ~57s wall on the reference machine. New coverage in this
+cycle: 3 LR-runtime tests pinning the new message shape; 4 emitter
+tests (one per non-Python backend, plus a second C test covering
+the non-EOI path) verifying the binaries produce the same wording.
+
 ## 1.3.0 — 2026-05-02
 
 Closes the cross-language parity gap for the `%balanced=` lexer feature
