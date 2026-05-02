@@ -1,15 +1,17 @@
 """``plox`` command entry point.
 
-Subcommands (planned):
+Subcommands:
 
-* ``plox build <grammar.plox>``   — build the JSON bundle.
-* ``plox emit  <bundle.json> --target=c|cpp|py|lua --out=<dir>`` — drive a backend.
-* ``plox check <grammar.plox>``   — parse the grammar and report conflicts only.
 * ``plox version``                — print plox version and schema version.
-
-Only ``version`` is wired up so far; everything else is a Phase-2+ deliverable
-and is intentionally a stub that prints "not yet implemented" so that the
-``plox`` script remains callable.
+* ``plox build <grammar.plox> -o <out.json>``
+                                  — build the JSON bundle. In Phase 2 only the
+                                    lex section is populated; the parse / ast /
+                                    hooks sections are emitted empty so backends
+                                    can already start consuming bundles.
+* ``plox check <grammar.plox>``   — parse + lower without emitting JSON; reports
+                                    syntax errors and lex-construction failures.
+* ``plox emit  <bundle.json> --target=c|cpp|py|lua --out=<dir>``
+                                  — drive a backend. Stubbed until Phase 7-8.
 """
 
 from __future__ import annotations
@@ -18,6 +20,9 @@ import argparse
 import sys
 
 from .. import PLOX_SCHEMA_VERSION, __version__
+from ..lex.build import lex_from_ir
+from ..spec.reader import ReaderError, read_file
+from ..tables import dfa_to_json, dump_bundle, empty_bundle
 
 
 def _cmd_version(_args: argparse.Namespace) -> int:
@@ -25,8 +30,50 @@ def _cmd_version(_args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_not_implemented(args: argparse.Namespace) -> int:
-    print(f"plox {args.command}: not yet implemented", file=sys.stderr)
+def _cmd_build(args: argparse.Namespace) -> int:
+    try:
+        ir = read_file(args.source)
+    except ReaderError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    try:
+        dfa, tokens, skip = lex_from_ir(ir)
+    except ValueError as e:
+        print(f"{args.source}: {e}", file=sys.stderr)
+        return 1
+
+    bundle = empty_bundle(ir.name)
+    bundle["lex"] = dfa_to_json(dfa, tokens=tokens, skip=skip)
+    text = dump_bundle(bundle)
+
+    if args.output == "-":
+        sys.stdout.write(text)
+    else:
+        with open(args.output, "w", encoding="utf-8") as fh:
+            fh.write(text)
+    return 0
+
+
+def _cmd_check(args: argparse.Namespace) -> int:
+    try:
+        ir = read_file(args.source)
+        lex_from_ir(ir)
+    except (ReaderError, ValueError) as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    print(
+        f"{args.source}: {ir.name} — {len(ir.tokens)} tokens, "
+        f"{len(ir.hooks)} hooks (rules section not validated in Phase 2)"
+    )
+    return 0
+
+
+def _cmd_emit(args: argparse.Namespace) -> int:
+    print(
+        f"plox emit --target={args.target}: not yet implemented "
+        f"(targets land in Phase 7+)",
+        file=sys.stderr,
+    )
     return 2
 
 
@@ -40,9 +87,24 @@ def build_parser() -> argparse.ArgumentParser:
     p_version = sub.add_parser("version", help="print plox and schema versions")
     p_version.set_defaults(func=_cmd_version)
 
-    for stub in ("build", "emit", "check"):
-        p = sub.add_parser(stub, help=f"{stub} — not yet implemented")
-        p.set_defaults(func=_cmd_not_implemented)
+    p_build = sub.add_parser("build", help="compile a .plox grammar to a JSON bundle")
+    p_build.add_argument("source", help="path to .plox source file")
+    p_build.add_argument(
+        "-o", "--output",
+        default="-",
+        help="output bundle path; '-' (default) writes to stdout",
+    )
+    p_build.set_defaults(func=_cmd_build)
+
+    p_check = sub.add_parser("check", help="parse and validate a .plox grammar without emitting")
+    p_check.add_argument("source", help="path to .plox source file")
+    p_check.set_defaults(func=_cmd_check)
+
+    p_emit = sub.add_parser("emit", help="emit driver skeleton for a target language (Phase 7+)")
+    p_emit.add_argument("bundle", help="path to JSON bundle")
+    p_emit.add_argument("--target", required=True, choices=["c", "cpp", "py", "lua"])
+    p_emit.add_argument("--out", required=True, help="output directory")
+    p_emit.set_defaults(func=_cmd_emit)
 
     return parser
 

@@ -1,0 +1,84 @@
+"""End-to-end CLI tests: ``plox build`` produces a loadable bundle."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from plox.cli.main import main
+from plox.lex.scanner import Scanner
+from plox.tables import dfa_from_json
+
+
+def write_calc_grammar(tmp_path: Path) -> Path:
+    src = tmp_path / "calc.plox"
+    src.write_text(
+        "%grammar calc\n"
+        "%options\n"
+        "start = expr\n"
+        "%tokens\n"
+        "NUMBER = /[0-9]+/\n"
+        'PLUS   = "+"\n'
+        'MINUS  = "-"\n'
+        "WS     = /[ \\t\\n]+/    %skip\n"
+        "%rules\n"
+        "expr : expr PLUS NUMBER | NUMBER ;\n"
+    )
+    return src
+
+
+def test_build_writes_bundle(tmp_path, capsys):
+    src = write_calc_grammar(tmp_path)
+    out = tmp_path / "calc.json"
+    rc = main(["build", str(src), "-o", str(out)])
+    assert rc == 0
+    bundle = json.loads(out.read_text())
+    assert bundle["plox_schema"] == "1"
+    assert bundle["meta"]["grammar"] == "calc"
+    assert bundle["lex"]["tokens"] == ["NUMBER", "PLUS", "MINUS", "WS"]
+    assert bundle["lex"]["skip"] == ["WS"]
+
+
+def test_built_bundle_drives_scanner(tmp_path):
+    src = write_calc_grammar(tmp_path)
+    out = tmp_path / "calc.json"
+    rc = main(["build", str(src), "-o", str(out)])
+    assert rc == 0
+    bundle = json.loads(out.read_text())
+    dfa, tokens, skip = dfa_from_json(bundle["lex"])
+    sc = Scanner(dfa=dfa, skip_tokens=frozenset(skip))
+    toks = sc.scan_all("12 + 34 - 5")
+    assert [t.name for t in toks] == ["NUMBER", "PLUS", "NUMBER", "MINUS", "NUMBER"]
+
+
+def test_build_to_stdout(tmp_path, capsys):
+    src = write_calc_grammar(tmp_path)
+    rc = main(["build", str(src)])
+    assert rc == 0
+    out = capsys.readouterr().out
+    bundle = json.loads(out)
+    assert bundle["lex"]["tokens"][0] == "NUMBER"
+
+
+def test_check_passes(tmp_path, capsys):
+    src = write_calc_grammar(tmp_path)
+    rc = main(["check", str(src)])
+    assert rc == 0
+    msg = capsys.readouterr().out
+    assert "calc" in msg and "4 tokens" in msg
+
+
+def test_check_reports_reader_error(tmp_path, capsys):
+    src = tmp_path / "bad.plox"
+    src.write_text("not a grammar directive\n")
+    rc = main(["check", str(src)])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "expected" in err.lower()
+
+
+def test_emit_is_stubbed(tmp_path, capsys):
+    out = tmp_path / "out"
+    rc = main(["emit", "ignored.json", "--target", "c", "--out", str(out)])
+    assert rc == 2
+    assert "not yet implemented" in capsys.readouterr().err

@@ -34,6 +34,13 @@ class NFA:
     start: int = 0
     accepts: dict[int, str] = field(default_factory=dict)
     """Map state -> accepted token name. A state with no entry here is non-accepting."""
+    token_priority: dict[str, int] = field(default_factory=dict)
+    """Map token name -> declaration index. Lower wins ties at DFA accept resolution.
+
+    Set by :func:`combine`, since priority only has meaning when multiple tokens are
+    competing in the same recogniser. Single-token NFAs leave this empty; the DFA
+    stage treats absent entries as priority infinity.
+    """
 
     def state_count(self) -> int:
         return len(self.transitions)
@@ -135,24 +142,28 @@ def build(node: Node, token_name: str = "TOKEN") -> NFA:
 
 
 def combine(nfas: list[tuple[str, NFA]]) -> NFA:
-    """Merge per-token NFAs into one with a single start state.
+    """Merge per-token NFAs into one with a single shared start state.
 
-    On accept-set conflicts (one final state somehow reachable for multiple
-    tokens after subset construction) the DFA stage applies the longest-match
-    + earliest-declaration rule. At the NFA level we simply preserve every
-    token's accepting state.
+    The list order *is* the priority order: the token at index 0 wins ties over
+    every later token. The DFA stage uses this when multiple NFA accept states
+    end up in the same DFA subset (combined with longest-match, this gives the
+    classic flex/lex tie-break: longest match, then earliest-declaration).
+
+    The per-tuple ``name`` overrides whatever the source NFA had already labelled
+    its accept state with. This is the common case — callers build a single-token
+    NFA with a placeholder name and assign the real one here.
     """
     if not nfas:
         raise ValueError("combine requires at least one NFA")
     combined = NFA()
     combined.start = 0
     combined.transitions.append([])  # state 0 is the new shared start
-    for name, src in nfas:
+    for priority, (name, src) in enumerate(nfas):
         offset = len(combined.transitions)
         for trans in src.transitions:
             combined.transitions.append([(label, dst + offset) for (label, dst) in trans])
         combined.transitions[0].append((EPSILON, src.start + offset))
-        for accept_state, accepted_name in src.accepts.items():
-            # Per-token name wins; if the caller passed `name`, it overrides.
-            combined.accepts[accept_state + offset] = name or accepted_name
+        for accept_state in src.accepts:
+            combined.accepts[accept_state + offset] = name
+        combined.token_priority[name] = priority
     return combined
