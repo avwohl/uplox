@@ -1,10 +1,10 @@
-"""Phase 9 progress: plm_full grammar covers more PL/M-80 constructs.
+"""plm_full standalone tests — what the grammar parses without the
+preprocessor.
 
-The plan's Phase 9 deliverable is "port remaining uc* front-ends; declare
-v1." Full bdos.plm parsing is a meaningful step but isn't fully achievable
-without an upstream LITERALLY macro expander (EQU LITERALLY 'LITERALLY'
-self-modifies the lexer). The tests below cover what the plm_full grammar
-*does* handle on top of plm_subset:
+End-to-end pipeline coverage (plm_pre + plm_full, including the
+EQU-as-LITERALLY-alias bootstrap, $-directives, and case-insensitive
+folding) lives in ``tests/test_preprocess_plm.py``. The tests below
+just check what the LR core handles directly:
 
 * Module-level labeled DO blocks (BDOS-style)
 * LITERALLY / DATA / INITIAL / AT / BASED in declarations

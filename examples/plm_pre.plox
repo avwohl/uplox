@@ -1,0 +1,114 @@
+# PL/M-80 preprocessor grammar — the macro layer.
+#
+# plm_pre runs ahead of plm_full. It handles the parts of PL/M that are
+# inherently text-based and don't fit the LR core:
+#
+#   * LITERALLY definitions:  NAME LITERALLY 'replacement-body'
+#                             (and the EQU alias used by some sources)
+#   * Token-stream macro substitution for any IDENT later in the source
+#     that matches a recorded LITERALLY name
+#   * $-control directives:   $Q=1   $I=5   $RIGHTMARGIN=80
+#                             $INCLUDE (:F1:CPIO.PLB)
+#
+# The directive set is bounded by what the bundled CP/M PL/M sources
+# actually use — `$Q`, `$I`, `$RIGHTMARGIN`, `$INCLUDE`. There is no
+# `$IF` / `$COND` / `$ELSE` / `$ENDIF` in the corpus (those are an
+# ASM86 / PL/M-86 feature) so we don't model conditional compilation
+# here. If a future source needs it, it goes in the same grammar; the
+# main parser stays untouched.
+#
+# The grammar treats everything that isn't a LITERALLY definition or a
+# `$`-directive as opaque pass-through tokens. The lexer is the same
+# shape as plm_full's lexer plus one new DOLLAR_DIR token for line-start
+# directives — `$<upper>...` to end of line — so a token like `$Q=1`
+# arrives as a single unit and the action gets the whole directive text
+# in $1.
+#
+# Output is the concern of the host driver: actions on each rule call
+# back into the driver to record macro definitions, record pragmas, or
+# emit pass-through token text. The emitted Python module ships a
+# turnkey driver that produces a transformed PL/M source string ready
+# to feed plm_full.
+
+%grammar plm_pre
+
+%options
+start = file
+
+%keyword_prefix KW_
+%keywords
+LITERALLY
+
+%hooks
+record_macro  post_reduce
+
+%tokens
+WS         = /[ \t\r\n]+/                        %skip
+COMMENT    = /\/\*([^*]|\*+[^*\/])*\*+\//        %skip
+
+# `$<UPPER>...` line-start directive — captured as a single token so
+# the action sees the whole `$Q=1` / `$INCLUDE (:F1:CPIO.PLB)` body
+# in one piece. Declared first to win the longest-match tie against
+# IDENT, which (unlike plm_full's IDENT) does not admit a leading `$`
+# in this grammar — see below.
+DOLLAR_DIR = /\$[A-Za-z][^\n]*/
+
+NUMBER     = /[0-9][0-9A-Fa-f$]*[BbDdHhOoQq]?/
+STRING     = /'([^'\n]|'')*'/
+
+# Identifiers do *not* start with `$` here — that prefix is owned by
+# DOLLAR_DIR. PL/M-80 does allow `$` mid-identifier as a soft hyphen
+# (`MY$VAR`, `00$00$10$01B`); that's preserved.
+IDENT      = /[A-Za-z_][A-Za-z0-9_$]*/
+
+# Operators and delimiters, copied from plm_full's set so the same
+# input lexes identically (modulo the DOLLAR_DIR addition above).
+LE         = '<='
+GE         = '>='
+NE         = '<>'
+EQ         = '='
+LT         = '<'
+GT         = '>'
+OP_PLUS    = '+'
+OP_MINUS   = '-'
+STAR       = '*'
+SLASH      = '/'
+LPAREN     = '('
+RPAREN     = ')'
+COMMA      = ','
+SEMI       = ';'
+COLON      = ':'
+DOT        = '.'
+
+%rules
+
+# A file is a sequence of items. Each item is either a directive line
+# (recorded as a pragma, dropped from output), a LITERALLY definition
+# (recorded in the macro table, dropped from output), or any other
+# token (emitted to the output buffer; if it's an IDENT and the macro
+# table has it, the body is substituted instead). The host driver
+# walks the parse tree to do the actual substitution and recording —
+# no per-production %hook is needed; the tree shape carries the
+# classification.
+<file>  : <items> ;
+
+<items> : <items> <item>
+        |
+        ;
+
+<item>  : DOLLAR_DIR
+        | IDENT LITERALLY STRING            %hook=record_macro
+        | IDENT
+        | <other>
+        ;
+
+# Everything else is a pass-through token. The driver's action on
+# `<other> : X` emits the token text verbatim to the output buffer.
+# Listing every token kind explicitly (rather than a generic OPAQUE
+# regex) keeps the lexer compatible with plm_full byte-for-byte.
+<other> : NUMBER
+        | STRING
+        | LE | GE | NE | EQ | LT | GT
+        | OP_PLUS | OP_MINUS | STAR | SLASH
+        | LPAREN | RPAREN | COMMA | SEMI | COLON | DOT
+        ;

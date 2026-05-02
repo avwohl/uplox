@@ -59,6 +59,7 @@ LE         = '<='
 GE         = '>='
 NE         = '<>'
 
+ASSIGN_EMBED = ':='
 EQ         = '='
 LT         = '<'
 GT         = '>'
@@ -100,8 +101,10 @@ DOT        = '.'
               ;
 
 # proc_signature wraps everything between PROCEDURE and the SEMI that
-# starts the body. Variants: BYTE / ADDRESS return type + parens + attrs.
-<proc_signature> : <proc_return> <proc_params> <proc_attrs> ';' ;
+# starts the body. PL/M-80 order is `PROCEDURE [params] [return-type]
+# [attrs] ;` — the return type follows the parameter list, not preceding
+# it.
+<proc_signature> : <proc_params> <proc_return> <proc_attrs> ';' ;
 
 <proc_return> : BYTE
               | ADDRESS
@@ -134,6 +137,7 @@ DOT        = '.'
               |
               ;
 <body_item>   : <declare_stmt>
+              | <proc_decl>
               | <stmt>
               ;
 
@@ -158,10 +162,19 @@ DOT        = '.'
 #   data-init:      NAME DATA (...)
 #   literally:      NAME LITERALLY 'value' / NAME EQU 'value'
 #   structure:      NAME STRUCTURE ( ... ) [attrs]
-<decl_item>   : <decl_names> <based_opt> <array_size_opt> <type_spec> <attrs_opt>
-              | <decl_names> DATA '(' <arg_list> ')'
+<decl_item>   : <decl_names> <based_opt> <array_size_opt> <decl_tail>
               | IDENT LITERALLY STRING
-              | IDENT STRUCTURE '(' <struct_member_list> ')' <attrs_opt>
+              ;
+
+# A typed decl_item ends in a type-spec (with optional attrs), a DATA
+# initializer, or a STRUCTURE body. Unifying these tails into one
+# non-terminal keeps the shared prefix (`decl_names based_opt
+# array_size_opt`) intact and lets the array-of-structures form
+# `DECLARE POINTS(5) STRUCTURE(...)` parse via the same rule as
+# scalar declarations.
+<decl_tail>   : <type_spec> <attrs_opt>
+              | DATA '(' <arg_list> ')'
+              | STRUCTURE '(' <struct_member_list> ')' <attrs_opt>
               ;
 
 <decl_names>  : IDENT
@@ -209,7 +222,7 @@ DOT        = '.'
                      | <struct_member_list> ',' <struct_member>
                      ;
 
-<struct_member> : <decl_names> <type_spec> ;
+<struct_member> : <decl_names> <array_size_opt> <type_spec> ;
 
 # --- statements -----------------------------------------------------------
 
@@ -255,7 +268,14 @@ DOT        = '.'
 <enable_stmt>  : ENABLE ';' ;
 <disable_stmt> : DISABLE ';' ;
 
-<assignment_stmt> : <primary> '=' <expr> ';' ;
+# Multi-target assignment: `A, B, C = expr;` writes the same value
+# to every primary in the list. Common in BDOS-style code for things
+# like `CURREC, CURTRK = 0;`. The list collapses to a single primary
+# in the common case, so single-target writes still parse.
+<assignment_stmt> : <primary_list> '=' <expr> ';' ;
+<primary_list>    : <primary>
+                  | <primary_list> ',' <primary>
+                  ;
 
 # DO blocks come in five flavours:
 #   plain         DO; ... END;
@@ -271,7 +291,14 @@ DOT        = '.'
 
 # --- expressions ---------------------------------------------------------
 
-<expr>        : <or_xor> ;
+# Embedded assignment: `(T := expr)` evaluates `expr`, assigns it to
+# `T`, and yields the value. PL/M-80 allows this anywhere an expression
+# is permitted, conventionally inside parens to disambiguate from a
+# regular `=` assignment statement (which is its own top-level
+# construct ending in ';').
+<expr>        : <or_xor>
+              | <primary> ':=' <expr>
+              ;
 
 <or_xor>      : <or_xor> OR  <and_e>
               | <or_xor> XOR <and_e>
@@ -314,16 +341,22 @@ DOT        = '.'
 
 <primary>     : '.' '(' <arg_list> ')'
               | '.' <qualname>
+              | '.' STRING                  # location-of a string literal
               | <qualname>
               | NUMBER
               | STRING
               | '(' <expr> ')'
               ;
 
+# Qualname covers a chain of `.member` accesses with optional
+# argument-style parens at any position — `FOO`, `FOO(I)`,
+# `REC.FIELD`, `REC.FIELD(I)`, `OUTER.INNER(X).LEAF` all qualify.
+# The trailing parens carry both array indexing and call args; PL/M
+# doesn't syntactically distinguish them at this level.
 <qualname>    : IDENT
-              | IDENT '(' <arg_list> ')'
-              | IDENT '(' ')'
               | <qualname> '.' IDENT
+              | <qualname> '(' <arg_list> ')'
+              | <qualname> '(' ')'
               ;
 
 <arg_list>    : <arg_list> ',' <expr>
