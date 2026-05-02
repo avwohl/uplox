@@ -310,6 +310,22 @@ def _emit_parse_tables(ctx: _EmitContext) -> list[str]:
     out.append("};")
     out.append("")
 
+    # Default-reduction table: -1 for "no default", otherwise the production
+    # index to reduce by when ACTION lookup yields 0. Required for grammars
+    # whose host updates a name table between tokens (typedef-name etc.) —
+    # see plox.parse.lr1.LRTable.default_reductions.
+    default_reductions = [-1] * n_states
+    for entry in ctx.parse["states"]:
+        if "default_reduction" in entry:
+            default_reductions[entry["id"]] = entry["default_reduction"]
+    out.append(f"static const int plox_{g}_default_reduction[PLOX_{ctx.upper}_PARSE_STATE_COUNT] = {{")
+    chunk = 16
+    for i in range(0, n_states, chunk):
+        row = ", ".join(str(v) for v in default_reductions[i : i + chunk])
+        out.append(f"    {row},")
+    out.append("};")
+    out.append("")
+
     # Production metadata.
     out.append(f"typedef struct {{")
     out.append("    int lhs;     /* nt_kind */")
@@ -518,10 +534,20 @@ def _emit_parser(ctx: _EmitContext) -> list[str]:
         "        int s = c->state_stack[c->stack_top - 1];",
         f"        int act = plox_{g}_action[s][la_kind];",
         "        if (act == 0) {",
-        "            char buf[200];",
-        f"            snprintf(buf, sizeof(buf), \"unexpected token %s at line %d, column %d\", plox_{g}_token_name(la_kind), la_line, la_col);",
-        f"            plox_{g}__set_error(c, buf);",
-        "            return -1;",
+        f"            int dr = plox_{g}_default_reduction[s];",
+        "            if (dr >= 0) {",
+        "                /* Default reduction: the only valid actions in this",
+        "                   state all reduce by the same production. Reducing",
+        "                   eagerly lets a host-installed token rewriter (e.g.",
+        "                   the C typedef-name hack) update its tables before",
+        "                   the next ACTION lookup classifies the lookahead. */",
+        "                act = -(dr + 1);",
+        "            } else {",
+        "                char buf[200];",
+        f"                snprintf(buf, sizeof(buf), \"unexpected token %s at line %d, column %d\", plox_{g}_token_name(la_kind), la_line, la_col);",
+        f"                plox_{g}__set_error(c, buf);",
+        "                return -1;",
+        "            }",
         "        }",
         "        if (act == -32768) {",
         "            /* ACCEPT: top of value stack is the start symbol value. */",

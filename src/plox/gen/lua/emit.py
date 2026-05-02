@@ -185,6 +185,21 @@ def _emit_parse_tables(ctx: _LuaCtx) -> list[str]:
         out.append("    { " + ", ".join(str(v) for v in goto[s]) + " },")
     out.append("}")
     out.append("")
+
+    # default_reduction[state+1] = production index (0-indexed) to reduce by,
+    # or -1 if the state has no default reduction. See LRTable.default_reductions.
+    default_reductions = [-1] * n_states
+    for entry in ctx.parse["states"]:
+        if "default_reduction" in entry:
+            default_reductions[entry["id"]] = entry["default_reduction"]
+    out.append("-- default_reduction[state+1]: production to reduce when ACTION misses, or -1.")
+    out.append("local default_reduction = {")
+    chunk = 16
+    for i in range(0, n_states, chunk):
+        out.append("    " + ", ".join(str(v) for v in default_reductions[i : i + chunk]) + ",")
+    out.append("}")
+    out.append("")
+
     out.append("local productions = {")
     for p in ctx.productions:
         out.append(f"    {{ lhs = {ctx.nt_index[p['lhs']]}, rhs_len = {len(p['rhs'])} }},")
@@ -284,13 +299,23 @@ def _emit_runtime(ctx: _LuaCtx) -> list[str]:
         "    local la_kind, la_pos, la_len, la_line, la_col = self:next_token()",
         "    if la_kind == nil then return false end",
         "",
-        "    while true do",
+    "    while true do",
         "        local s = state_stack[#state_stack]",
         "        local act = action[s + 1][la_kind + 1]",
         "        if act == 0 then",
-        "            self.error = string.format('unexpected token %s at line %d, column %d',",
-        "                                       M.token_name(la_kind), la_line, la_col)",
-        "            return false",
+        "            local dr = default_reduction[s + 1]",
+        "            if dr >= 0 then",
+        "                -- Default reduction: this state's only valid action is",
+        "                -- to reduce by `dr`. Doing it eagerly lets a host-side",
+        "                -- token rewriter (e.g. C typedef-name hack) update its",
+        "                -- tables before the next ACTION lookup classifies the",
+        "                -- pending lookahead. See LRTable.default_reductions.",
+        "                act = -(dr + 1)",
+        "            else",
+        "                self.error = string.format('unexpected token %s at line %d, column %d',",
+        "                                           M.token_name(la_kind), la_line, la_col)",
+        "                return false",
+        "            end",
         "        end",
         "        if act == kActionAccept then",
         "            self.root = value_stack[#value_stack]",

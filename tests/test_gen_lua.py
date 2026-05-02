@@ -179,6 +179,13 @@ print('ok')
     assert "ok" in r.stdout
 
 
+def test_lua_carries_default_reduction_table(tmp_path):
+    bundle = build_bundle()
+    text = emit_lua(bundle)
+    assert "default_reduction" in text, "default reduction table missing"
+    assert "default_reduction[s + 1]" in text
+
+
 def test_lua_invalid_prefix_rejected():
     bundle = build_bundle()
     with pytest.raises(ValueError):

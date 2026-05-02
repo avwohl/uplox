@@ -104,6 +104,13 @@ def test_cpp_compiles_clean(tmp_path):
     assert obj.exists()
 
 
+def test_cpp_carries_default_reduction_table(tmp_path):
+    _h, c = emit_to_cpp(tmp_path, build_bundle(CALC))
+    text = c.read_text()
+    assert "kDefaultReduction" in text, "default reduction array missing"
+    assert "kDefaultReduction[s]" in text
+
+
 CPP_CALC_DRIVER = """
 #include <iostream>
 #include <sstream>

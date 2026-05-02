@@ -243,6 +243,20 @@ def _emit_parse_tables(ctx: _CppCtx) -> list[str]:
         out.append("    { " + ", ".join(str(v) for v in goto[s]) + " },")
     out.append("};")
     out.append("")
+
+    # Default reduction per state, or -1. Used by the parser when ACTION
+    # lookup misses; see plox.parse.lr1.LRTable.default_reductions.
+    default_reductions = [-1] * n_states
+    for entry in ctx.parse["states"]:
+        if "default_reduction" in entry:
+            default_reductions[entry["id"]] = entry["default_reduction"]
+    out.append("constexpr int kDefaultReduction[kParseStateCount] = {")
+    chunk = 16
+    for i in range(0, n_states, chunk):
+        out.append("    " + ", ".join(str(v) for v in default_reductions[i : i + chunk]) + ",")
+    out.append("};")
+    out.append("")
+
     out.append("struct Production { int lhs; int rhs_len; };")
     out.append("constexpr Production kProductions[kProductionCount] = {")
     for p in ctx.productions:
@@ -356,11 +370,20 @@ def _emit_parser(ctx: _CppCtx) -> list[str]:
         "        int s = im.state_stack.back();",
         "        int act = kAction[s][la_kind];",
         "        if (act == 0) {",
-        "            char buf[200];",
-        "            std::snprintf(buf, sizeof(buf), \"unexpected token %s at line %d, column %d\",",
-        "                          token_name(la_kind), la_line, la_col);",
-        "            error_ = buf;",
-        "            return false;",
+        "            int dr = kDefaultReduction[s];",
+        "            if (dr >= 0) {",
+        "                /* See LRTable.default_reductions. Reducing eagerly",
+        "                   on a state with only one valid reduction lets a",
+        "                   host-side token rewriter (e.g. C typedef-name)",
+        "                   update its tables before the next ACTION lookup. */",
+        "                act = -(dr + 1);",
+        "            } else {",
+        "                char buf[200];",
+        "                std::snprintf(buf, sizeof(buf), \"unexpected token %s at line %d, column %d\",",
+        "                              token_name(la_kind), la_line, la_col);",
+        "                error_ = buf;",
+        "                return false;",
+        "            }",
         "        }",
         "        if (act == kActionAccept) {",
         "            root_ = im.value_stack.back();",

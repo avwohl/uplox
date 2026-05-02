@@ -328,6 +328,18 @@ def test_header_uses_consistent_prefix(tmp_path):
     assert "plox_calc__" not in text
 
 
+def test_emitted_c_carries_default_reduction_table(tmp_path):
+    """The C emitter writes a per-state default_reduction array. Even calc
+    has populated default reductions; this test pins the wiring without
+    requiring a full feedback grammar."""
+    bundle = build_calc_bundle()
+    _h, c = emit_to(tmp_path, bundle)
+    text = c.read_text()
+    assert "plox_calc_default_reduction" in text, "default_reduction array missing"
+    # And the parser body must consult it on action miss.
+    assert "default_reduction[s]" in text
+
+
 def test_emit_with_explicit_prefix_overrides_grammar_name(tmp_path):
     bundle = build_calc_bundle()
     h, _c = emit_to(tmp_path, bundle, prefix="myparser")
