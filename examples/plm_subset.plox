@@ -1,0 +1,305 @@
+# PL/M-80 subset grammar — Phase 5 milestone (the first "real" plox grammar).
+#
+# Targets the constructs used by the sample program examples/hello_cpm.plm
+# in the uplm80 repo: address literals, procedures (EXTERNAL and definition),
+# DECLARE statements with simple types, DECLARE DATA, CALL with arguments,
+# location-of operator, RETURN, IF/THEN/ELSE, DO/END blocks, expressions
+# with PL/M-80's precedence ladder.
+#
+# Out of scope for v0:
+#   * Macros (LITERALLY)
+#   * Conditional compilation directives ($COND, $IF, $INCLUDE, ...)
+#   * STRUCTURE types
+#   * BASED variables (basic form supported), INITIAL, AT clauses
+#   * Iterative DO with TO/BY, DO CASE
+#
+# About 60 productions over 60+ terminals — well past calc, into territory
+# that exercises plox's LR(1) builder properly.
+#
+# Conflict-resolution decisions:
+#   * Dangling-else is split into matched/unmatched stmt non-terminals.
+#   * The `.expr` location-of operator wraps a separate `qualname`
+#     non-terminal so DOT recursion can't conflict with member access.
+#   * DATA(...) initializer lists share `arg_list` with function calls — no
+#     separate data_value, no reduce/reduce against primary.
+
+%grammar plm_subset
+
+%options
+start = module
+
+%tokens
+# --- whitespace and comments ----------------------------------------------
+WS         = /[ \t\r\n]+/                        %skip
+COMMENT    = /\/\*([^*]|\*+[^*\/])*\*+\//        %skip
+
+# --- literals --------------------------------------------------------------
+NUMBER     = /[0-9][0-9A-Fa-f$]*[BbDdHhOoQq]?/
+STRING     = /'([^'\n]|'')*'/
+
+# --- keywords (declared before IDENT so longest-match + earlier-decl wins) -
+PROCEDURE  = "PROCEDURE"
+EXTERNAL   = "EXTERNAL"
+REENTRANT  = "REENTRANT"
+INTERRUPT  = "INTERRUPT"
+PUBLIC     = "PUBLIC"
+DECLARE    = "DECLARE"
+INITIAL    = "INITIAL"
+DATA       = "DATA"
+LITERALLY  = "LITERALLY"
+LABEL      = "LABEL"
+BYTE       = "BYTE"
+ADDRESS    = "ADDRESS"
+BASED      = "BASED"
+AT         = "AT"
+KW_IF      = "IF"
+THEN       = "THEN"
+ELSE       = "ELSE"
+DO         = "DO"
+WHILE      = "WHILE"
+CASE       = "CASE"
+BY         = "BY"
+TO         = "TO"
+END        = "END"
+CALL       = "CALL"
+RETURN     = "RETURN"
+GOTO       = "GOTO"
+GO         = "GO"
+HALT       = "HALT"
+ENABLE     = "ENABLE"
+DISABLE    = "DISABLE"
+KW_AND     = "AND"
+KW_OR      = "OR"
+KW_XOR     = "XOR"
+KW_NOT     = "NOT"
+KW_MOD     = "MOD"
+KW_PLUS    = "PLUS"
+KW_MINUS   = "MINUS"
+EOF_KW     = "EOF"
+
+# --- identifiers (last so keywords match first by declaration order) ------
+IDENT      = /[A-Za-z_$][A-Za-z0-9_$]*/
+
+# --- multi-char operators (must come before single-char prefixes) ---------
+LE         = "<="
+GE         = ">="
+NE         = "<>"
+
+# --- single-char operators and delimiters ---------------------------------
+EQ         = "="
+LT         = "<"
+GT         = ">"
+PLUS       = "+"
+MINUS      = "-"
+STAR       = "*"
+SLASH      = "/"
+LPAREN     = "("
+RPAREN     = ")"
+COMMA      = ","
+SEMI       = ";"
+COLON      = ":"
+DOT        = "."
+
+%rules
+
+# Top level: a module is a sequence of items, optionally terminated by
+# the EOF keyword that some PL/M sources use.
+module      : items
+            | items EOF_KW
+            ;
+
+items       : items item
+            | item
+            ;
+
+item        : address_literal
+            | proc_decl
+            | declare_stmt
+            | stmt
+            ;
+
+# 0100H: — address-literal at the start of the module.
+address_literal : NUMBER COLON ;
+
+# --- procedures -----------------------------------------------------------
+
+proc_decl   : IDENT COLON PROCEDURE proc_params proc_attrs SEMI proc_body
+            ;
+
+proc_params : LPAREN ident_list RPAREN
+            | LPAREN RPAREN
+            |
+            ;
+
+proc_attrs  : proc_attrs proc_attr
+            |
+            ;
+
+proc_attr   : EXTERNAL
+            | PUBLIC
+            | REENTRANT
+            | INTERRUPT NUMBER
+            ;
+
+# An EXTERNAL declaration has no body before END; a regular procedure has
+# zero or more inner declarations followed by zero or more statements.
+proc_body   : block_decls block_stmts END opt_end_label SEMI
+            | block_decls END opt_end_label SEMI
+            ;
+
+block_decls : block_decls declare_stmt
+            |
+            ;
+
+block_stmts : block_stmts stmt
+            | stmt
+            ;
+
+opt_end_label : IDENT
+              |
+              ;
+
+ident_list  : IDENT
+            | ident_list COMMA IDENT
+            ;
+
+# --- declarations ---------------------------------------------------------
+
+declare_stmt : DECLARE decl_list SEMI ;
+
+decl_list   : decl_list COMMA decl_item
+            | decl_item
+            ;
+
+decl_item   : decl_names type_spec
+            | decl_names DATA LPAREN arg_list RPAREN
+            ;
+
+decl_names  : IDENT
+            | LPAREN ident_list RPAREN
+            ;
+
+# Simple types only: BYTE, ADDRESS, optional length-as-array (N), BASED.
+type_spec   : BYTE
+            | ADDRESS
+            | LABEL
+            | BYTE LPAREN NUMBER RPAREN
+            | ADDRESS LPAREN NUMBER RPAREN
+            | BYTE BASED IDENT
+            | ADDRESS BASED IDENT
+            ;
+
+# --- statements -----------------------------------------------------------
+
+stmt        : matched_stmt
+            | unmatched_stmt
+            ;
+
+matched_stmt   : matched_if
+               | non_if_stmt
+               ;
+
+unmatched_stmt : unmatched_if ;
+
+matched_if     : KW_IF expr THEN matched_stmt ELSE matched_stmt ;
+unmatched_if   : KW_IF expr THEN stmt
+               | KW_IF expr THEN matched_stmt ELSE unmatched_stmt
+               ;
+
+non_if_stmt : assignment_stmt
+            | call_stmt
+            | return_stmt
+            | goto_stmt
+            | halt_stmt
+            | enable_stmt
+            | disable_stmt
+            | do_block
+            | null_stmt
+            ;
+
+null_stmt   : SEMI ;
+
+call_stmt   : CALL primary SEMI ;
+
+return_stmt : RETURN SEMI
+            | RETURN expr SEMI
+            ;
+
+goto_stmt   : GOTO IDENT SEMI
+            | GO TO IDENT SEMI
+            ;
+
+halt_stmt    : HALT SEMI ;
+enable_stmt  : ENABLE SEMI ;
+disable_stmt : DISABLE SEMI ;
+
+assignment_stmt : primary EQ expr SEMI ;
+
+do_block    : DO SEMI block_stmts END opt_end_label SEMI
+            | DO WHILE expr SEMI block_stmts END opt_end_label SEMI
+            ;
+
+# --- expressions ---------------------------------------------------------
+# Precedence (loose to tight, per PL/M-80):
+#    or_xor  ->  and  ->  not_e  ->  rel_e  ->  add_e  ->  mul_e  ->  unary  ->  primary
+
+expr        : or_xor ;
+
+or_xor      : or_xor KW_OR  and_e
+            | or_xor KW_XOR and_e
+            | and_e
+            ;
+
+and_e       : and_e KW_AND not_e
+            | not_e
+            ;
+
+not_e       : KW_NOT not_e
+            | rel_e
+            ;
+
+rel_e       : add_e EQ add_e
+            | add_e LT add_e
+            | add_e GT add_e
+            | add_e LE add_e
+            | add_e GE add_e
+            | add_e NE add_e
+            | add_e
+            ;
+
+add_e       : add_e PLUS  mul_e
+            | add_e MINUS mul_e
+            | add_e KW_PLUS  mul_e
+            | add_e KW_MINUS mul_e
+            | mul_e
+            ;
+
+mul_e       : mul_e STAR  unary
+            | mul_e SLASH unary
+            | mul_e KW_MOD unary
+            | unary
+            ;
+
+unary       : MINUS unary
+            | primary
+            ;
+
+# `primary` has three top-level shapes; nesting under `qualname` keeps
+# `.X.Y` parsing as `location_of(X.Y)` without DOT shift/reduce ambiguity.
+primary     : DOT LPAREN arg_list RPAREN     # constant-list pointer .( ... )
+            | DOT qualname                   # location-of
+            | qualname
+            | NUMBER
+            | STRING
+            | LPAREN expr RPAREN
+            ;
+
+qualname    : IDENT
+            | IDENT LPAREN arg_list RPAREN
+            | IDENT LPAREN RPAREN
+            | qualname DOT IDENT
+            ;
+
+arg_list    : arg_list COMMA expr
+            | expr
+            ;
