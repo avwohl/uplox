@@ -162,6 +162,24 @@ def _emit_header(ctx: _EmitContext) -> str:
     out.append(f"const char    *plox_{g}_token_name(int token_kind);")
     out.append(f"const char    *plox_{g}_nt_name(int nt_kind);")
     out.append("")
+    out.append("/* --- token-filter (lexer feedback) --- */")
+    out.append("/*")
+    out.append(" * Token filter callback: receives the parser context, the lookahead's")
+    out.append(" * terminal kind, and a pointer to the matched token text (NOT NUL-")
+    out.append(" * terminated; use la_len). Returns the (possibly rewritten) terminal")
+    out.append(" * kind. The runtime invokes the filter on every freshly fetched")
+    out.append(" * lookahead and again after every reduction (so a host that updates")
+    out.append(" * its typedef-name table from a hook on the typedef-declaration")
+    out.append(" * production sees the change applied to the pending lookahead before")
+    out.append(" * the next ACTION lookup). Set to NULL (the default) to disable.")
+    out.append(" *")
+    out.append(" * The user_data pointer is passed through unchanged; use it to point")
+    out.append(" * at your typedef table or whatever per-parse host state the filter")
+    out.append(" * needs. plox does not own this pointer.")
+    out.append(" */")
+    out.append(f"typedef int (*plox_{g}_token_filter_fn)(plox_{g}_ctx *ctx, int la_kind, const char *la_text, int la_len, void *user_data);")
+    out.append(f"void plox_{g}_set_token_filter(plox_{g}_ctx *ctx, plox_{g}_token_filter_fn fn, void *user_data);")
+    out.append("")
 
     out.append('#ifdef __cplusplus')
     out.append('}')
@@ -390,6 +408,10 @@ def _emit_ctx_struct(ctx: _EmitContext) -> list[str]:
         f"    plox_{g}_node **all_nodes;",
         "    int    num_nodes;",
         "    int    cap_nodes;",
+        "",
+        "    /* Optional token filter (set via plox_<g>_set_token_filter). */",
+        f"    int  (*token_filter)(plox_{g}_ctx *ctx, int la_kind, const char *la_text, int la_len, void *user_data);",
+        "    void  *token_filter_data;",
         "};",
     ]
 
@@ -462,6 +484,12 @@ def _emit_lifecycle(ctx: _EmitContext) -> list[str]:
         "    c->has_error = 1;",
         "    snprintf(c->error_buf, sizeof(c->error_buf), \"%s\", msg ? msg : \"parse error\");",
         "}",
+        "",
+        f"void plox_{g}_set_token_filter(plox_{g}_ctx *c, plox_{g}_token_filter_fn fn, void *user_data) {{",
+        "    if (!c) return;",
+        "    c->token_filter = fn;",
+        "    c->token_filter_data = user_data;",
+        "}",
     ]
 
 
@@ -529,6 +557,7 @@ def _emit_parser(ctx: _EmitContext) -> list[str]:
         "",
         "    int la_kind, la_pos, la_len, la_line, la_col;",
         f"    if (plox_{g}__next_token(c, &la_kind, &la_pos, &la_len, &la_line, &la_col) != 0) return -1;",
+        "    if (c->token_filter) la_kind = c->token_filter(c, la_kind, c->input + la_pos, la_len, c->token_filter_data);",
         "",
         "    while (1) {",
         "        int s = c->state_stack[c->stack_top - 1];",
@@ -570,6 +599,7 @@ def _emit_parser(ctx: _EmitContext) -> list[str]:
         "            c->value_stack[c->stack_top] = leaf;",
         "            c->stack_top++;",
         f"            if (plox_{g}__next_token(c, &la_kind, &la_pos, &la_len, &la_line, &la_col) != 0) return -1;",
+        "            if (c->token_filter) la_kind = c->token_filter(c, la_kind, c->input + la_pos, la_len, c->token_filter_data);",
         "            continue;",
         "        }",
         "        /* act < 0 and != -32768 -> REDUCE by production -(act + 1). */",
@@ -607,6 +637,10 @@ def _emit_parser(ctx: _EmitContext) -> list[str]:
         "        c->state_stack[c->stack_top] = target;",
         "        c->value_stack[c->stack_top] = node;",
         "        c->stack_top++;",
+        "        /* Re-apply the filter so a host hook on the just-reduced",
+        "           production has a chance to update its tables before the",
+        "           next ACTION lookup classifies the still-pending lookahead. */",
+        "        if (c->token_filter) la_kind = c->token_filter(c, la_kind, c->input + la_pos, la_len, c->token_filter_data);",
         "    }",
         "}",
     ]

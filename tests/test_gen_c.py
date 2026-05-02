@@ -328,6 +328,92 @@ def test_header_uses_consistent_prefix(tmp_path):
     assert "plox_calc__" not in text
 
 
+def test_emitted_c_supports_token_filter(tmp_path):
+    """End-to-end: install a token filter from a C driver, parse input,
+    confirm the filter rewrote terminals as we asked.
+
+    Grammar shape: NAME and IDENT have the same regex (NAME wins because
+    it's declared first; here we declare IDENT first so NAME is never
+    produced by the lexer — only by the filter). The grammar accepts
+    `prog : (NAME | IDENT) SEMI` so we can tell which terminal each input
+    parsed as by inspecting the kind of the leaf in the tree."""
+    SRC = """
+%grammar tf
+
+%tokens
+WS    = /[ \\t\\n]+/  %skip
+SEMI  = ";"
+IDENT = /[A-Za-z_][A-Za-z0-9_]*/
+NAME  = /[A-Za-z_][A-Za-z0-9_]*/
+
+%rules
+prog : item ;
+item : IDENT SEMI
+     | NAME  SEMI
+     ;
+"""
+    ir = read_source(SRC)
+    dfa, tokens, skip = lex_from_ir(ir)
+    grammar = compile_grammar(ir)
+    table = build_lr1(grammar)
+    bundle = empty_bundle(ir.name)
+    bundle["lex"] = dfa_to_json(dfa, tokens=tokens, skip=skip)
+    bundle["parse"] = table_to_json(table)
+
+    _h, c = emit_to(tmp_path, bundle)
+    text = c.read_text()
+    assert "plox_tf_set_token_filter" in text
+    assert "token_filter" in text
+    assert "token_filter_data" in text
+
+    # Driver: rewrite IDENT to NAME when the source starts with capital T.
+    driver = tmp_path / "driver.c"
+    driver.write_text(r"""
+#include "plox_tf.h"
+#include <stdio.h>
+#include <string.h>
+
+static int rewrite_T(plox_tf_ctx *ctx, int la_kind, const char *la_text, int la_len, void *ud) {
+    (void)ctx; (void)ud; (void)la_len;
+    if (la_kind == PLOX_TF_TOK_IDENT && la_text[0] == 'T') {
+        return PLOX_TF_TOK_NAME;
+    }
+    return la_kind;
+}
+
+int main(int argc, char **argv) {
+    const char *src = (argc > 1) ? argv[1] : "Tx;";
+    int n = (int)strlen(src);
+    plox_tf_ctx *ctx = plox_tf_create(src, n);
+    plox_tf_set_token_filter(ctx, rewrite_T, NULL);
+    plox_tf_node *root = NULL;
+    int rc = plox_tf_parse(ctx, &root);
+    if (rc != 0) {
+        fprintf(stderr, "parse error: %s\n", plox_tf_error(ctx));
+        plox_tf_destroy(ctx);
+        return 1;
+    }
+    /* `item` -> IDENT SEMI | NAME SEMI; the leaf at children[0] tells us
+       which terminal kind the parser saw after filtering. */
+    plox_tf_node *item = root->children[0];
+    plox_tf_node *first = item->children[0];
+    printf("%s\n", plox_tf_token_name(first->kind));
+    plox_tf_destroy(ctx);
+    return 0;
+}
+""")
+    binary = tmp_path / "tf"
+    cc_compile(c, driver, out=binary, include=tmp_path)
+
+    # Capital-T identifier: filter rewrites to NAME.
+    out = subprocess.run([str(binary), "Tx;"], capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == "NAME"
+
+    # Lower-case: filter passes through; lexer's IDENT is what the parser sees.
+    out = subprocess.run([str(binary), "abc;"], capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == "IDENT"
+
+
 def test_emitted_c_carries_default_reduction_table(tmp_path):
     """The C emitter writes a per-state default_reduction array. Even calc
     has populated default reductions; this test pins the wiring without

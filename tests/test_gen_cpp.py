@@ -104,6 +104,68 @@ def test_cpp_compiles_clean(tmp_path):
     assert obj.exists()
 
 
+def test_cpp_supports_token_filter_end_to_end(tmp_path):
+    """Same shape as test_emitted_c_supports_token_filter: install a filter
+    that rewrites IDENT to NAME for words starting with 'T', verify the
+    parser sees the rewritten kind."""
+    SRC = """
+%grammar tf
+
+%tokens
+WS    = /[ \\t\\n]+/  %skip
+SEMI  = ";"
+IDENT = /[A-Za-z_][A-Za-z0-9_]*/
+NAME  = /[A-Za-z_][A-Za-z0-9_]*/
+
+%rules
+prog : item ;
+item : IDENT SEMI
+     | NAME  SEMI
+     ;
+"""
+    h, cpp = emit_to_cpp(tmp_path, build_bundle(SRC))
+    header_text = h.read_text()
+    impl_text = cpp.read_text()
+    assert "set_token_filter" in header_text
+    assert "TokenFilter" in header_text
+    assert "token_filter_(" in impl_text
+
+    driver = tmp_path / "driver.cpp"
+    driver.write_text(r"""
+#include "plox_tf.hpp"
+#include <cstdio>
+#include <string>
+
+int main(int argc, char** argv) {
+    std::string src = (argc > 1) ? argv[1] : "Tx;";
+    plox::tf::Parser p(src);
+    p.set_token_filter([](plox::tf::Parser&, int la_kind, std::string_view la_text) {
+        if (la_kind == 3 /* IDENT */ && !la_text.empty() && la_text[0] == 'T') {
+            return 4; /* NAME */
+        }
+        return la_kind;
+    });
+    if (!p.parse()) {
+        fprintf(stderr, "parse error: %s\n", p.error().c_str());
+        return 1;
+    }
+    auto* root = p.root();
+    auto* item = root->children[0];
+    auto* first = item->children[0];
+    printf("%s\n", plox::tf::Parser::token_name(first->kind));
+    return 0;
+}
+""")
+    binary = tmp_path / "tf"
+    cxx_compile(cpp, driver, out=binary, include=tmp_path)
+
+    out = subprocess.run([str(binary), "Tx;"], capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == "NAME"
+
+    out = subprocess.run([str(binary), "abc;"], capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == "IDENT"
+
+
 def test_cpp_carries_default_reduction_table(tmp_path):
     _h, c = emit_to_cpp(tmp_path, build_bundle(CALC))
     text = c.read_text()

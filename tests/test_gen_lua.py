@@ -186,6 +186,65 @@ def test_lua_carries_default_reduction_table(tmp_path):
     assert "default_reduction[s + 1]" in text
 
 
+def test_lua_supports_token_filter_end_to_end(tmp_path):
+    """Same shape as the C / C++ test: install a filter that rewrites
+    IDENT -> NAME for words starting with 'T'. Verifies the Lua emitter's
+    Parser:set_token_filter mechanism wires through correctly."""
+    SRC = """
+%grammar tf
+
+%tokens
+WS    = /[ \\t\\n]+/  %skip
+SEMI  = ";"
+IDENT = /[A-Za-z_][A-Za-z0-9_]*/
+NAME  = /[A-Za-z_][A-Za-z0-9_]*/
+
+%rules
+prog : item ;
+item : IDENT SEMI
+     | NAME  SEMI
+     ;
+"""
+    ir = read_source(SRC)
+    dfa, tokens, skip = lex_from_ir(ir)
+    table = build_lr1(compile_grammar(ir))
+    bundle = empty_bundle(ir.name)
+    bundle["lex"] = dfa_to_json(dfa, tokens=tokens, skip=skip)
+    bundle["parse"] = table_to_json(table)
+    text = emit_lua(bundle)
+    assert "set_token_filter" in text
+    module_path = tmp_path / "plox_tf.lua"
+    module_path.write_text(text)
+
+    driver = tmp_path / "driver.lua"
+    driver.write_text(rf"""
+package.path = '{tmp_path}/?.lua;' .. package.path
+local M = require('plox_tf')
+
+local p = M.new(arg[1] or "Tx;")
+-- IDENT is the third declared token (kind=3 in the 0-indexed enum: $, WS, SEMI, IDENT, NAME).
+-- Use the exposed enum to be safe.
+p:set_token_filter(function(parser, kind, text, len)
+    if kind == M.TOK.IDENT and string.sub(text, 1, 1) == 'T' then
+        return M.TOK.NAME
+    end
+    return kind
+end)
+if not p:parse() then
+    io.stderr:write('parse error: ' .. (p.error or '?') .. '\n')
+    os.exit(1)
+end
+
+local item = p.root.children[1]
+local first = item.children[1]
+print(M.token_name(first.kind))
+""")
+    out = subprocess.run([LUA, str(driver), "Tx;"], capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == "NAME"
+    out = subprocess.run([LUA, str(driver), "abc;"], capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == "IDENT"
+
+
 def test_lua_invalid_prefix_rejected():
     bundle = build_bundle()
     with pytest.raises(ValueError):

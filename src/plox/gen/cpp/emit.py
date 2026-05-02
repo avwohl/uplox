@@ -74,7 +74,7 @@ class _CppCtx:
 
 def _emit_header(ctx: _CppCtx) -> str:
     g = ctx.grammar.lower()
-    out: list[str] = [GENERATED_NOTE, "#pragma once", "", "#include <cstddef>", "#include <memory>", "#include <string>", "#include <string_view>", "#include <vector>", "", f"namespace plox::{g} {{", ""]
+    out: list[str] = [GENERATED_NOTE, "#pragma once", "", "#include <cstddef>", "#include <functional>", "#include <memory>", "#include <string>", "#include <string_view>", "#include <vector>", "", f"namespace plox::{g} {{", ""]
 
     out.append("/* Token kinds: synthetic end-of-input plus every declared token. */")
     out.append("enum class Token : int {")
@@ -128,11 +128,21 @@ def _emit_header(ctx: _CppCtx) -> str:
     out.append("    static const char* token_name(int kind);")
     out.append("    static const char* nt_name(int kind);")
     out.append("")
+    out.append("    /* Token filter (lexer feedback). Mirrors the C runtime: receives")
+    out.append("       the lookahead's terminal kind and matched text; returns the")
+    out.append("       (possibly rewritten) terminal kind. Invoked on every fetch and")
+    out.append("       again after every reduction so a host updating its typedef")
+    out.append("       table from semantic action / hook still gets the lookahead")
+    out.append("       reclassified before the next ACTION lookup. Default is no-op. */")
+    out.append("    using TokenFilter = std::function<int(Parser& parser, int la_kind, std::string_view la_text)>;")
+    out.append("    void set_token_filter(TokenFilter f) { token_filter_ = std::move(f); }")
+    out.append("")
     out.append("private:")
     out.append("    struct Impl;")
     out.append("    std::unique_ptr<Impl> impl_;")
     out.append("    Node*       root_ = nullptr;")
     out.append("    std::string error_;")
+    out.append("    TokenFilter token_filter_;")
     out.append("};")
     out.append("")
     out.append(f"}}  // namespace plox::{g}")
@@ -365,6 +375,7 @@ def _emit_parser(ctx: _CppCtx) -> list[str]:
         "    int la_pos, la_len, la_line, la_col;",
         "    int la_kind = im.next_token(la_pos, la_len, la_line, la_col);",
         "    if (la_kind < 0) { error_ = \"lexical error\"; return false; }",
+        "    if (token_filter_) la_kind = token_filter_(*this, la_kind, im.input.substr(la_pos, la_len));",
         "",
         "    while (true) {",
         "        int s = im.state_stack.back();",
@@ -401,6 +412,7 @@ def _emit_parser(ctx: _CppCtx) -> list[str]:
         "            im.value_stack.push_back(raw);",
         "            la_kind = im.next_token(la_pos, la_len, la_line, la_col);",
         "            if (la_kind < 0) { error_ = \"lexical error\"; return false; }",
+        "            if (token_filter_) la_kind = token_filter_(*this, la_kind, im.input.substr(la_pos, la_len));",
         "            continue;",
         "        }",
         "        int prod = -act - 1;",
@@ -432,6 +444,10 @@ def _emit_parser(ctx: _CppCtx) -> list[str]:
         "        }",
         "        im.state_stack.push_back(target);",
         "        im.value_stack.push_back(raw);",
+        "        /* Re-apply the filter so the just-fired post_reduce-equivalent",
+        "           (semantic action / hook) has a chance to update host state",
+        "           before the next ACTION lookup classifies the lookahead. */",
+        "        if (token_filter_) la_kind = token_filter_(*this, la_kind, im.input.substr(la_pos, la_len));",
         "    }",
         "}",
     ]
