@@ -1,0 +1,154 @@
+# plox itself, expressed in the .plox DSL.
+#
+# The bootstrap is plox/spec/reader.py, a hand-written recursive-descent
+# parser. This file is the *self-host* grammar: a .plox source that
+# describes the .plox source format. plox can build it and produce a
+# parser that reads .plox files. The plan called for self-host once the
+# generator was stable; this is that.
+#
+# What's covered:
+#
+#   * %grammar / %options / %tokens / %hooks / %rules sections
+#   * tokens with regex /.../ or literal "..." patterns and the optional
+#     %skip flag
+#   * BNF rules with `|` alternatives, `;` terminator, and the optional
+#     `%hook=<name>` annotation per alternative
+#
+# What's deferred (out of scope for this self-host pass):
+#
+#   * Embedded action bodies `{ ... }` — they require balanced-brace
+#     matching, which is a non-LR construct. The bootstrap reader handles
+#     them directly; a host using this grammar must strip actions in a
+#     pre-pass (or use the bootstrap reader for full fidelity).
+#   * `%prec <terminal>` annotations — not yet used by any plox grammar.
+#
+# Symmetry note: this grammar uses lower-case rule names and UPPER_CASE
+# terminal names, exactly like the rest of the plox examples.
+
+%grammar plox_self
+
+%options
+start = file
+
+%tokens
+WS         = /[ \t\r\n]+/                  %skip
+COMMENT    = /#[^\n]*/                     %skip
+
+# Section directives are lexed as a single percent-prefixed token so they
+# don't collide with rule-named "grammar", "options", etc.
+PCT_GRAMMAR = "%grammar"
+PCT_OPTIONS = "%options"
+PCT_TOKENS  = "%tokens"
+PCT_HOOKS   = "%hooks"
+PCT_RULES   = "%rules"
+PCT_SKIP    = "%skip"
+PCT_HOOK    = "%hook"
+PCT_PREC    = "%prec"
+
+EQ         = "="
+COLON      = ":"
+SEMI       = ";"
+PIPE       = "|"
+
+# Regex literals: /.../ with escapes. The character class `[^/\\]` rules
+# out unescaped slashes; `\\.` admits any escaped char.
+REGEX      = /\/([^\/\\]|\\.)*\//
+
+# String literals: "..." with escapes.
+STRING     = /"([^"\\]|\\.)*"/
+
+# Identifiers (rule names, terminal names, hook names, option keys/values).
+IDENT      = /[A-Za-z_][A-Za-z0-9_]*/
+
+%rules
+
+# A .plox file is the %grammar declaration followed by zero or more
+# named sections in any order.
+file : grammar_decl sections
+     ;
+
+grammar_decl : PCT_GRAMMAR IDENT ;
+
+sections : sections section
+         |
+         ;
+
+section : options_section
+        | tokens_section
+        | hooks_section
+        | rules_section
+        ;
+
+# --- options ---------------------------------------------------------------
+
+options_section : PCT_OPTIONS option_lines ;
+
+option_lines : option_lines option_line
+             |
+             ;
+
+option_line : IDENT EQ option_value ;
+
+option_value : IDENT
+             | STRING
+             ;
+
+# --- tokens ----------------------------------------------------------------
+
+tokens_section : PCT_TOKENS token_lines ;
+
+token_lines : token_lines token_line
+            |
+            ;
+
+token_line : IDENT EQ token_pattern
+           | IDENT EQ token_pattern PCT_SKIP
+           ;
+
+token_pattern : REGEX
+              | STRING
+              ;
+
+# --- hooks -----------------------------------------------------------------
+
+hooks_section : PCT_HOOKS hook_lines ;
+
+hook_lines : hook_lines hook_line
+           |
+           ;
+
+# A hook line is `<name> <when>` where both are bare identifiers. The
+# bootstrap reader validates that <when> is one of the four legal events;
+# we leave that to the host since it's a semantic check, not syntactic.
+hook_line : IDENT IDENT ;
+
+# --- rules -----------------------------------------------------------------
+
+rules_section : PCT_RULES rule_list ;
+
+rule_list : rule_list rule
+          | rule
+          ;
+
+rule : IDENT COLON alts SEMI ;
+
+alts : alts PIPE alt
+     | alt
+     ;
+
+alt : symbols opt_hook ;
+
+symbols : symbols symbol
+        |
+        ;
+
+# A symbol on the RHS is either a rule reference / terminal name (IDENT)
+# or an inline string literal (anonymous terminal).
+symbol : IDENT
+       | STRING
+       ;
+
+# `%hook=<name>` annotation, optional per alternative.
+opt_hook : PCT_HOOK EQ IDENT
+         |
+         ;
