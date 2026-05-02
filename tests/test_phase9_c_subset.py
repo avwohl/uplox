@@ -62,10 +62,10 @@ def test_c_subset_no_conflicts(built):
 
 def test_c_subset_state_count_in_range(built):
     _scanner, table = built
-    # 1553 with struct/union/enum + switch + casts. Allow generous slack
-    # so the test stays green through small grammar tweaks; flag if it
-    # explodes.
-    assert 700 <= len(table.states) <= 2500, len(table.states)
+    # 1649 with struct/union/enum + switch + casts + array-size-as-expr +
+    # preproc skip. Allow generous slack so the test stays green through
+    # small grammar tweaks; flag if it explodes.
+    assert 700 <= len(table.states) <= 2600, len(table.states)
 
 
 def test_c_simple_function_definition(built):
@@ -712,6 +712,22 @@ UC80_SAMPLES = [
     "test_string2.c",
     "test_long_simple.c",
     "test_unsigned.c",
+    # Files with #include but only built-in types — parse cleanly because
+    # the preproc skip strips the directives and the bodies don't use any
+    # libc-typedef'd names as types.
+    "test_long_init.c",
+    "test_ctype.c",
+]
+
+
+# Files that use libc-typedef'd identifiers (FILE, jmp_buf) as types. Plox
+# can't know these from source alone — the host pre-populates the tracker
+# with the typedefs imported from system headers, mirroring how a real C
+# compiler resolves them through #include processing.
+UC80_LIBC_TYPEDEF_SAMPLES = [
+    ("test_null_eof.c", {"FILE"}),
+    ("test_fileio.c", {"FILE"}),
+    ("test_setjmp.c", {"jmp_buf"}),
 ]
 
 
@@ -723,3 +739,21 @@ def test_uc80_example_parses(built, name):
     scanner, table = built
     tree = parse_str(scanner, table, path.read_text())
     assert isinstance(tree, ParseNode) and tree.kind == "translation_unit"
+
+
+@pytest.mark.parametrize("name,seeded", UC80_LIBC_TYPEDEF_SAMPLES)
+def test_uc80_example_parses_with_libc_typedefs(built, name, seeded):
+    """Parse uc80 fixtures that use libc-typedef'd names (FILE, jmp_buf)
+    as type-specs. The tracker is pre-populated to mirror how a host
+    using c_subset would import typedefs from system headers."""
+    path = UC80_FIXTURES / name
+    if not path.exists():
+        pytest.skip(f"uc80 fixture {name} missing")
+    scanner, table = built
+    tracker = TypedefTracker()
+    tracker.names |= seeded
+    hooks = HookRegistry(ignore_missing=True)
+    hooks.register("record_typedef", tracker.record_declaration)
+    tree = parse(table, scanner.scan(path.read_text()), hooks=hooks, token_filter=tracker.filter)
+    assert isinstance(tree, ParseNode) and tree.kind == "translation_unit"
+    assert seeded <= tracker.names

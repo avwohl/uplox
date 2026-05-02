@@ -48,6 +48,13 @@ WS         = /[ \t\r\n]+/                        %skip
 LINE_COMMENT = /\/\/[^\n]*/                      %skip
 BLOCK_COMMENT = /\/\*([^*]|\*+[^*\/])*\*+\//     %skip
 
+# Preprocessor lines are dropped by the lexer — they belong to a separate
+# pass that hosts run before plox sees the input. The skip handles the
+# common case of single-line `#include`, `#define NAME 123`, `#if`, `#endif`.
+# Multi-line `#define` with `\` continuations isn't modelled; uc-family code
+# almost always avoids those.
+PREPROC    = /#[^\n]*/                           %skip
+
 # Numeric and string literals.
 INT_LIT    = /(0[xX][0-9A-Fa-f]+|0[0-7]*|[1-9][0-9]*)[uUlL]*/
 CHAR_LIT   = /'([^'\\\n]|\\.)+'/
@@ -262,7 +269,7 @@ type_qualifier_list : type_qualifier_list type_qualifier
 
 direct_declarator : IDENT
                   | LPAREN declarator RPAREN
-                  | direct_declarator LBRACKET INT_LIT RBRACKET
+                  | direct_declarator LBRACKET conditional_expr RBRACKET
                   | direct_declarator LBRACKET RBRACKET
                   | direct_declarator LPAREN parameter_list RPAREN
                   | direct_declarator LPAREN RPAREN
