@@ -1,0 +1,33 @@
+# Tiny four-function calculator. Used as a smoke-test grammar throughout
+# Phases 2-4. Not yet parseable — the reader and downstream stages land in
+# later phases — but the syntax here is the v0 frozen DSL.
+
+%grammar calc
+
+%options
+start = expr
+
+%tokens
+NUMBER = /[0-9]+/
+PLUS   = "+"
+MINUS  = "-"
+STAR   = "*"
+SLASH  = "/"
+LPAREN = "("
+RPAREN = ")"
+WS     = /[ \t\n]+/   %skip
+
+%rules
+expr  : expr PLUS term        { $$ = $1 + $3; }
+      | expr MINUS term       { $$ = $1 - $3; }
+      | term                  { $$ = $1; }
+      ;
+
+term  : term STAR factor      { $$ = $1 * $3; }
+      | term SLASH factor     { $$ = $1 / $3; }
+      | factor                { $$ = $1; }
+      ;
+
+factor : NUMBER               { $$ = $1; }
+       | LPAREN expr RPAREN   { $$ = $2; }
+       ;
