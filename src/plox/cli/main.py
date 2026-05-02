@@ -27,6 +27,7 @@ from ..parse.lr1 import build_lr1
 from ..gen.c import emit_c
 from ..gen.cpp import emit_cpp
 from ..gen.lua import emit_lua
+from ..gen.py import emit_py
 from ..parse.glr import GLRParseError, glr_from_lr, glr_parse
 from ..parse.glr.runtime import AmbiguityNode, GLRNode
 from ..parse.runtime import HookRegistry, ParseError, parse as run_parser
@@ -208,10 +209,16 @@ def _cmd_emit(args: argparse.Namespace) -> int:
                 fh.write(module_text)
             print(f"wrote {module_path}")
             return 0
+        elif args.target == "py":
+            module_text = emit_py(bundle, prefix=args.prefix)
+            module_path = _os.path.join(args.out, f"plox_{grammar}.py")
+            with open(module_path, "w", encoding="utf-8") as fh:
+                fh.write(module_text)
+            print(f"wrote {module_path}")
+            return 0
         else:
             print(
-                f"plox emit --target={args.target}: not yet implemented "
-                f"(c/cpp/lua land in Phase 7-8; py is a Phase-9 follow-up)",
+                f"plox emit --target={args.target}: unknown target",
                 file=sys.stderr,
             )
             return 2
