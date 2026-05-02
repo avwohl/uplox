@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "plox"
-version = "1.1.0"
+version = "1.2.0"
 description = "Compiler front-end generator: grammar source to canonical JSON tables plus C/C++/Python/Lua drivers"
 readme = "README.md"
 license = "GPL-3.0-or-later"

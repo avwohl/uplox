@@ -5,6 +5,83 @@ All notable changes to plox land here. Format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) for the public
 surface (CLI, JSON bundle schema, Python API, hook firing points).
 
+## 1.2.0 — 2026-05-02
+
+Closes the post-1.0 deferred-grammar list and lifts the action-body
+carve-out from the self-host grammar. The c_subset grammar now covers
+the C constructs the v1.0 release notes explicitly punted on; the
+bootstrap reader is no longer required for hosts that want to read
+real .plox files (with action bodies) via plox_self.plox.
+
+### Added
+
+- **c_subset: variadic `...`.** `parameter_type_list = parameter_list
+  | parameter_list COMMA ELLIPSIS`. The COMMA-ELLIPSIS form enforces
+  the C rule that `...` cannot appear as the only parameter.
+- **c_subset: multi-line preprocessor macros.** PREPROC's body now
+  matches `[^\n\\] | \\\n | \\.`, so `\<newline>` line continuations
+  inside `#define` directives are absorbed into the skip token.
+- **c_subset: bit-fields.** struct_declarator gains
+  `declarator COLON conditional_expr` and the anonymous
+  `COLON conditional_expr` form (zero-width forces alignment, etc.).
+- **c_subset: designated initializers (C99).** `{ .x = 1, .y = 2 }`,
+  `{ [3] = 9 }`, chained `{ .inner.z = 7, [1][1] = 9 }`, and the
+  C99-allowed positional/designated mix all parse.
+- **c_subset: compound literals (C99).** `(type){init_list}` joins
+  postfix_expr. Sharing the `LPAREN type_name RPAREN` prefix with
+  cast_expr is resolved by one-token lookahead (LBRACE picks the
+  compound literal; anything else picks the cast).
+- **c_subset: full abstract declarators.** type_name's previous
+  shape is replaced by the standard C99 abstract_declarator +
+  direct_abstract_declarator recursion. This admits
+  `int (*)(int)`, `int (*)[5]`, `int *[3]` etc. wherever
+  type_name appears (casts, compound literals, _Generic
+  associations, sizeof).
+- **c_subset: `_Generic` (C11).** primary_expr admits
+  `_Generic ( assignment_expr , generic_assoc_list )`; each
+  association is `type_name : assignment_expr` or
+  `default : assignment_expr`. Reuses KW_DEFAULT.
+- **c_subset: `sizeof(type)`.** unary_expr gains
+  `KW_SIZEOF LPAREN type_name RPAREN`. Disambiguated from the
+  existing `sizeof unary_expr` form by the token after LPAREN —
+  type-keyword/qualifier/struct/union/enum/TYPEDEF_NAME picks the
+  type_name path; expression-starters keep the old path.
+- **Lexer: `%balanced=<close>` token attribute.** A new lexer-runtime
+  feature: a token can declare itself balanced-bracket; after the DFA
+  matches the opening pattern, the scanner extends the match by
+  counting nested instances of (open, close) until depth returns to
+  zero. The opening byte is whatever the DFA already consumed. Used
+  for content that is not a regular language — target-language action
+  bodies inside the .plox DSL itself are the canonical example.
+- **plox_self.plox: action bodies covered end-to-end.** ACTION_BODY
+  is declared with `%balanced="}"`; alt has a new optional
+  ACTION_BODY suffix; token-line syntax recognises `%balanced=`
+  itself (so plox_self can describe its own use of the feature).
+  The strip-actions pre-pass that hosts used as a workaround is no
+  longer required — every committed example .plox, including
+  calc.plox's eight action bodies and plox_self.plox's own
+  description, parses verbatim through plox_self.
+
+### Status of post-1.0 follow-ups
+
+- **Done in this cycle**: variadic `...`, multi-line preprocessor
+  macros, bit-fields, designated initializers, compound literals,
+  full abstract declarators (function-pointer abstract declarators,
+  `(int (*)(int))`-style), `_Generic`, embedded action bodies in
+  the self-host grammar via the new `%balanced=` lexer feature,
+  plus `sizeof(type)` rounding out the abstract-declarator work.
+- **Still deferred**: full `bdos.plm` (needs an upstream LITERALLY
+  macro expander, not a plox concern). The c_subset deferred list
+  from the 1.1.0 entry is now empty.
+
+### Test surface
+
+336 tests, ~57s wall on the reference machine. New coverage in this
+cycle: 31 c_subset tests across the seven new grammar features, plus
+3 self-host tests covering nested, multi-line, and unterminated
+action bodies. The state count for c_subset went 1649 → 2175 (no
+new conflicts); plox_self went 52 → 54 with ACTION_BODY threaded in.
+
 ## 1.1.0 — 2026-05-02
 
 Backwards-compatible additions to the C, C++, and Lua backends, plus
