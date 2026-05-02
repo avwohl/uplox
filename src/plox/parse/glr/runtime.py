@@ -92,6 +92,36 @@ class GLRParseError(Exception):
         self.token = token
 
 
+def _format_error(table, stacks: list, lookahead: Token) -> str:
+    """Format a GLR parse error matching the LR runtime's style.
+
+    The expected list is the union of expected terminals across every live
+    stack's top state — any of those tops could have been the right one
+    just before the error.
+    """
+    raw_expected: set[str] = set()
+    for s in stacks:
+        top = s.top()
+        for (state, term) in table.actions:
+            if state == top:
+                raw_expected.add(term)
+    expected = sorted(
+        "<end of input>" if t == END_MARKER else t for t in raw_expected
+    )
+    if expected:
+        shown = expected[:12]
+        suffix = "" if len(expected) <= 12 else f", ... +{len(expected) - 12} more"
+        expect_msg = f"; expected one of: {', '.join(shown)}{suffix}"
+    else:
+        expect_msg = ""
+    if lookahead.offset < 0:
+        return f"unexpected end of input{expect_msg}"
+    return (
+        f"unexpected token {lookahead.name!r} {lookahead.text!r} at "
+        f"line {lookahead.line}, column {lookahead.column}{expect_msg}"
+    )
+
+
 # ---- Stack ------------------------------------------------------------------
 
 
@@ -165,11 +195,11 @@ class _GLRDriver:
         accepted: list[ForestValue] = []
 
         while True:
+            pre_reduce = stacks
             stacks = self._reduce_phase(stacks, lookahead)
             if not stacks and not accepted:
                 raise GLRParseError(
-                    f"unexpected token {lookahead.name!r} {lookahead.text!r} at "
-                    f"line {lookahead.line}, column {lookahead.column}",
+                    _format_error(self.table, pre_reduce, lookahead),
                     token=lookahead,
                 )
 
@@ -184,15 +214,15 @@ class _GLRDriver:
                 if accepted:
                     return _pack_alternatives(accepted)
                 raise GLRParseError(
-                    f"unexpected end of input at line {lookahead.line}",
+                    _format_error(self.table, stacks, lookahead),
                     token=lookahead,
                 )
 
+            pre_shift = stacks
             stacks = self._shift_phase(stacks, lookahead)
             if not stacks:
                 raise GLRParseError(
-                    f"unexpected token {lookahead.name!r} {lookahead.text!r} at "
-                    f"line {lookahead.line}, column {lookahead.column}",
+                    _format_error(self.table, pre_shift, lookahead),
                     token=lookahead,
                 )
 

@@ -88,6 +88,45 @@ def test_parse_error_on_bad_input():
     assert err.token.text == "+"
 
 
+def test_parse_error_lists_expected_tokens():
+    """The error message includes the set of terminals the current state has
+    actions for. After `1 +` the parser has just shifted PLUS and expects a
+    factor-starter — NUMBER or LPAREN — so both should appear in the
+    expected list and the unexpected `+` should not."""
+    scanner, table = calc_pipeline()
+    with pytest.raises(ParseError) as exc:
+        parse(table, scanner.scan("1 + + 2"))
+    msg = str(exc.value)
+    assert "expected one of:" in msg
+    assert "NUMBER" in msg
+    assert "LPAREN" in msg
+
+
+def test_parse_error_renders_eoi_as_text():
+    """The synthetic end-marker token has line=0/col=0 and an empty text;
+    the error message should say "unexpected end of input" rather than
+    leaking those internal coordinates."""
+    scanner, table = calc_pipeline()
+    with pytest.raises(ParseError) as exc:
+        parse(table, scanner.scan("1 +"))
+    msg = str(exc.value)
+    assert "unexpected end of input" in msg
+    # No misleading "line 0, column 0" leak from the synthetic end-marker.
+    assert "line 0" not in msg
+
+
+def test_parse_error_renders_end_marker_in_expected_list():
+    """When the end-marker is one of the legal continuations (e.g. after a
+    complete expression), the expected list shows '<end of input>', not the
+    raw '$' character used internally by the LR table."""
+    scanner, table = calc_pipeline()
+    with pytest.raises(ParseError) as exc:
+        parse(table, scanner.scan("1 2"))
+    msg = str(exc.value)
+    assert "<end of input>" in msg
+    assert "$" not in msg
+
+
 def test_pre_shift_hook_fires_for_every_terminal():
     scanner, table = calc_pipeline()
     seen = []

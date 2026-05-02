@@ -274,8 +274,27 @@ def _on_error(ctx: ParseContext, tok: Token) -> None:
     cb = ctx.hooks.callbacks.get("on_error")
     if cb is not None:
         cb(ctx, {"when": "on_error", "token": tok, "state_stack": list(ctx.state_stack)})
-    raise ParseError(
-        f"unexpected token {tok.name!r} {tok.text!r} at "
-        f"line {tok.line}, column {tok.column}",
-        token=tok,
-    )
+    state = ctx.state_stack[-1]
+    # Render the synthetic end-marker as "<end of input>" in the expected
+    # list; that's friendlier than the raw "$" the LR table uses internally.
+    raw_expected = sorted(t for (s, t) in ctx.table.action if s == state)
+    expected = ["<end of input>" if t == END_MARKER else t for t in raw_expected]
+    if expected:
+        # Cap the displayed list: in expression contexts the FOLLOW set can be
+        # large enough that the message becomes a wall of token names; the
+        # first dozen are usually enough to figure out what shape was wanted.
+        shown = expected[:12]
+        suffix = "" if len(expected) <= 12 else f", ... +{len(expected) - 12} more"
+        expect_msg = f"; expected one of: {', '.join(shown)}{suffix}"
+    else:
+        expect_msg = ""
+    # The synthetic end-of-input token carries offset=-1, line=0, column=0;
+    # render it as "end of input" rather than a misleading line:col pair.
+    if tok.offset < 0:
+        message = f"unexpected end of input{expect_msg}"
+    else:
+        message = (
+            f"unexpected token {tok.name!r} {tok.text!r} at "
+            f"line {tok.line}, column {tok.column}{expect_msg}"
+        )
+    raise ParseError(message, token=tok)
