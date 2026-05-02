@@ -5,12 +5,14 @@ All notable changes to plox land here. Format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) for the public
 surface (CLI, JSON bundle schema, Python API, hook firing points).
 
-## Unreleased
+## 1.1.0 — 2026-05-02
 
-Backwards-compatible additions to the C, C++, and Lua backends. Each one
-mirrors a runtime feature that had been Python-only, closing the parity
-gap so non-Python hosts can implement the C typedef-name hack and other
-lexer-feedback grammars end-to-end in their target language.
+Backwards-compatible additions to the C, C++, and Lua backends, plus
+the self-host bootstrap and a perf pass on the LR(1) builder. Each of
+the backend additions mirrors a runtime feature that had been
+Python-only in 1.0.0, closing the parity gap so non-Python hosts can
+implement the C typedef-name hack and other lexer-feedback grammars
+end-to-end in their target language.
 
 ### Added
 
