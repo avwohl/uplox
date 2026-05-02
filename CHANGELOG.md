@@ -68,6 +68,14 @@ end-to-end in their target language.
   literals, designated initializers, `_Generic`, bit-fields, multi-line
   preprocessor macros, embedded action bodies in the self-host grammar.
 
+### Test surface
+
+305 tests, ~45s wall on the reference machine. New coverage in this
+cycle: end-to-end typedef-name hack tests for the C, C++, and Lua
+backends (each parsing `typedef Foo; Foo;` with both a token filter and
+a post-reduce hook installed), 17 self-host tests covering the
+`plox_self.plox` grammar against every committed example .plox.
+
 ## 1.0.0 — 2026-05-02
 
 First stable release. All nine phases of the original plan land here.
@@ -144,15 +152,15 @@ grammar name so two grammars can link into the same binary.
 
 ### Out of scope (post-v1)
 
+The 1.0.0 release notes called these out as deferred. The 1.1.0 entry
+above lists which ones moved into scope; the rest remain out for now.
+
 - Full `bdos.plm`: needs an upstream LITERALLY macro expander.
 - Function-pointer abstract declarators (`(int (*)(int)) p`), variadic
   `...`, compound literals, designated initializers, `_Generic`,
   bit-fields. None are common in uc-family code.
 - Multi-line `\`-continued preprocessor macros.
-- Token filter ABI in the C/C++/Lua backends. The Python backend exposes
-  the runtime callback directly; non-Python hosts that need typedef-name
-  resolution have to filter their token stream upstream of the parser
-  for now. *(Lifted in the Unreleased section above.)*
+- Token filter ABI in the C / C++ / Lua backends — *lifted in 1.1.0.*
 
 ### Test surface
 

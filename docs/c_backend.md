@@ -24,37 +24,41 @@ same shell.
 
 ## Public API
 
-For grammar named `calc`:
+For a grammar named `calc`:
 
 ```c
 typedef struct plox_calc_ctx plox_calc_ctx;
 
 typedef enum {
-    PLOX_CALC_TOK_END = 0,           /* synthetic end-of-input */
+    PLOX_CALC_TOK__EOI_ = 0,        /* synthetic end-of-input marker */
     PLOX_CALC_TOK_NUMBER,
     PLOX_CALC_TOK_PLUS,
     /* ... one entry per declared token */
+    PLOX_CALC_TOK__COUNT__
 } plox_calc_token_kind;
 
 typedef enum {
-    PLOX_CALC_NT__START__ = 0,      /* augmented start */
+    PLOX_CALC_NT__START__ = 0,      /* augmented start non-terminal */
     PLOX_CALC_NT_EXPR,
     PLOX_CALC_NT_TERM,
     /* ... one entry per declared rule */
+    PLOX_CALC_NT__COUNT__
 } plox_calc_nt_kind;
 
-typedef struct {
-    int          kind;          /* token kind for leaves, nonterminal kind otherwise */
+typedef struct plox_calc_node plox_calc_node;
+struct plox_calc_node {
+    int          kind;          /* token kind for leaves, non-terminal kind otherwise */
     int          is_terminal;   /* nonzero for token leaves */
-    int          production;    /* -1 for terminals */
-    int          line;          /* both forms carry source position */
+    int          production;    /* -1 for terminals; production index otherwise */
+    int          line;
     int          column;
-    const char  *text;          /* leaves: lexeme (into input buffer); else NULL */
+    const char  *text;          /* leaves: lexeme (into input buffer); non-NUL-terminated */
     int          text_len;
-    struct plox_calc_node **children;
+    plox_calc_node **children;
     int          num_children;
-} plox_calc_node;
+};
 
+/* Lifecycle */
 plox_calc_ctx *plox_calc_create(const char *input, int input_len);
 void           plox_calc_destroy(plox_calc_ctx *ctx);
 int            plox_calc_parse(plox_calc_ctx *ctx, plox_calc_node **out_root);
@@ -65,26 +69,108 @@ const char *plox_calc_token_name(int token_kind);
 const char *plox_calc_nt_name(int nt_kind);
 ```
 
-* `plox_calc_create` allocates a ctx and copies a pointer into the input
+* `plox_calc_create` allocates a ctx and stores a pointer into the input
   buffer. The caller owns the input buffer; it must outlive the ctx.
 * `plox_calc_parse` returns 0 on success. The output tree is owned by
   the ctx and freed by `plox_calc_destroy`.
 * On parse error, `plox_calc_error` returns a stable C string describing
   the first error; the parser stops at the first unrecoverable error.
 
-## What's *not* in v0
+## Lexer feedback (since 1.1.0)
 
-* Hook callbacks. The Python runtime resolves named hooks to callables;
-  for C, the equivalent would be a registry-of-function-pointers. Phase 7
-  defers this — generate the parse tree, let the host walk it. The
-  callback registry lands in a Phase 7 follow-up.
+For grammars that need parser state to influence terminal classification —
+the C typedef-name hack is the canonical case — the emitted parser
+exposes two callbacks. They fire in the same order the Python runtime
+uses, so a host that prototyped the logic in Python ports without
+surprises.
+
+### Token filter
+
+```c
+typedef int (*plox_calc_token_filter_fn)(
+    plox_calc_ctx *ctx,
+    int            la_kind,
+    const char    *la_text,    /* into input buffer; not NUL-terminated */
+    int            la_len,
+    void          *user_data);
+
+void plox_calc_set_token_filter(
+    plox_calc_ctx               *ctx,
+    plox_calc_token_filter_fn    fn,
+    void                        *user_data);
+```
+
+The runtime invokes the filter on every freshly fetched lookahead and
+again after every reduction. Returning a different kind reroutes the
+parser's next ACTION lookup; returning `la_kind` unchanged is a no-op.
+
+### Post-reduce hook
+
+```c
+typedef void (*plox_calc_post_reduce_fn)(
+    plox_calc_ctx  *ctx,
+    int             prod_index,
+    plox_calc_node *node,
+    void           *user_data);
+
+void plox_calc_set_post_reduce(
+    plox_calc_ctx             *ctx,
+    plox_calc_post_reduce_fn   fn,
+    void                      *user_data);
+```
+
+Fires after every successful reduction (the augmented-start production
+is internal and not surfaced). The hook runs **before** the token filter
+re-runs on the pending lookahead, so any state change is visible by the
+next ACTION lookup.
+
+### Pattern: typedef-name in C
+
+```c
+static int filter(plox_calc_ctx *ctx, int la_kind, const char *t, int len, void *ud) {
+    typedef_set_t *s = ud;
+    if (la_kind == PLOX_CALC_TOK_IDENT && set_contains(s, t, len)) {
+        return PLOX_CALC_TOK_TYPEDEF_NAME;
+    }
+    return la_kind;
+}
+
+static void on_reduce(plox_calc_ctx *ctx, int prod, plox_calc_node *n, void *ud) {
+    typedef_set_t *s = ud;
+    if (prod == TYPEDEF_DECL_PROD && n->num_children >= 2) {
+        plox_calc_node *id = n->children[1];
+        set_add(s, id->text, id->text_len);
+    }
+}
+
+plox_calc_set_token_filter(ctx, filter, &my_typedefs);
+plox_calc_set_post_reduce(ctx, on_reduce, &my_typedefs);
+```
+
+A complete worked example is in
+[`tests/test_gen_c.py::test_emitted_c_typedef_name_hack_end_to_end`](../tests/test_gen_c.py).
+
+## Default reductions
+
+The emitted ACTION table is sparse; a state whose only valid actions are
+all reduce-X for the same production X gets a `-1`-default entry in
+`plox_<g>_default_reduction[]`. The driver consults that on ACTION miss
+before erroring. This is what makes the typedef-name hack work in
+canonical LR(1) — without default reductions, the parser errors before
+the post-reduce hook can update the host's typedef set.
+
+## What's still out of scope
+
 * Custom semantic actions. The grammar's `{ ... }` action text is copied
-  into the bundle but ignored by the C emitter. Hosts that want
-  per-production semantic actions either walk the tree post-parse or wait
-  for the action-injection feature.
+  into the JSON bundle but ignored by the C emitter. Hosts that want
+  per-production semantic actions either walk the parse tree post-parse
+  or use the post-reduce hook described above (which carries the
+  production index and the just-built node — most "semantic action" use
+  cases reduce to that).
 * Error recovery. The driver stops at the first error.
 
 These restrictions match what the uc* front-ends actually need from a
-parse-only port and don't compromise the re-entrancy guarantee. They
-cover everything except hand-written name resolution that the existing
-front-ends can keep doing on the resulting tree.
+parse-only port and don't compromise the re-entrancy guarantee. Name
+resolution, type checking, and similar concerns happen on the resulting
+tree using the host's existing logic — exactly the integration the
+front-ends were written against.

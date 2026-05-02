@@ -9,7 +9,7 @@ The JSON bundle is the contract. Backends are independent and replaceable. plox 
 
 ## Status
 
-**v1.0.0** — all nine phases of the original plan are landed. See `CHANGELOG.md` for what shipped. The grammar DSL, the JSON bundle schema, and the hook firing points are stable; future minor releases will be backwards-compatible at all three layers.
+**v1.1.0** — all nine phases of the original plan landed in [v1.0.0](CHANGELOG.md#100--2026-05-02); v1.1.0 closes feature parity between the Python runtime and the C / C++ / Lua backends, ships the self-host bootstrap, and speeds up the LR(1) builder by ~30%. See [CHANGELOG.md](CHANGELOG.md) for the full release notes. The grammar DSL, the JSON bundle schema, and the hook firing points are stable; future minor releases will be backwards-compatible at all three layers.
 
 ## Goals
 
@@ -25,40 +25,44 @@ src/plox/
   spec/        grammar source reader, IR
   lex/         regex → NFA → DFA construction, minimization
   parse/       LR(1) item-set construction, table builder
-    glr/       GLR extension (phase 6)
+    glr/       GLR extension
   ast/         node schema, default builder actions
-  hooks/       pluggable parse-time callbacks
+  hooks/       pluggable parse-time callbacks (TypedefTracker, ScopedNameTable, …)
   tables/      JSON schema, canonical serializer
   gen/
     c/         C backend (re-entrant, context-struct based)
     cpp/       C++ backend (class per grammar, namespaced)
-    py/        Python backend
-    lua/       Lua backend
+    py/        Python backend (embeds bundle, reuses runtime)
+    lua/       Lua backend (single 5.3+ module per grammar)
   cli/         `plox` command
 tests/
-examples/
-docs/
+examples/      .plox grammars (calc, plm_subset, plm_full, c_subset, plox_self, …)
+docs/          DSL spec, per-backend notes
 ```
 
 ## Phasing
 
-All nine phases of the original plan landed in v1.0.0:
+All nine phases of the original plan landed in v1.0.0; the v1.1.0 polish round closed the few items the v1.0.0 release notes called out as deferred.
 
 | Phase | Deliverable                                                              | Shipped |
 |-------|--------------------------------------------------------------------------|---------|
-| 1     | Repo skeleton, pyproject, CI, license, grammar source format frozen      | yes     |
-| 2     | Lexer pipeline: regex → NFA → DFA → JSON, Python driver, tests           | yes     |
-| 3     | LR(1) parser builder, conflict reporting, JSON, Python driver            | yes     |
-| 4     | AST schema + default builder + hooks framework                           | yes     |
-| 5     | Port the smallest uc* front-end as the first real grammar (`plm_subset`) | yes     |
-| 6     | GLR extension                                                            | yes     |
-| 7     | C backend (re-entrant) — the highest-value target                        | yes     |
-| 8     | C++ and Lua backends                                                     | yes     |
-| 9     | Port remaining uc* front-ends; declare v1                                | yes     |
+| 1     | Repo skeleton, pyproject, CI, license, grammar source format frozen      | 1.0.0   |
+| 2     | Lexer pipeline: regex → NFA → DFA → JSON, Python driver, tests           | 1.0.0   |
+| 3     | LR(1) parser builder, conflict reporting, JSON, Python driver            | 1.0.0   |
+| 4     | AST schema + default builder + hooks framework                           | 1.0.0   |
+| 5     | Port the smallest uc* front-end as the first real grammar (`plm_subset`) | 1.0.0   |
+| 6     | GLR extension                                                            | 1.0.0   |
+| 7     | C backend (re-entrant) — the highest-value target                        | 1.0.0   |
+| 8     | C++ and Lua backends                                                     | 1.0.0   |
+| 9     | Port remaining uc* front-ends; declare v1                                | 1.0.0   |
+| —     | C / C++ / Lua: token-filter ABI + post-reduce hook                       | 1.1.0   |
+| —     | Self-host bootstrap (`plox_self.plox`)                                   | 1.1.0   |
+| —     | LR(1) build perf (~30% on c_subset)                                      | 1.1.0   |
 
 ## Quick start
 
 ```bash
+plox version                                  # plox 1.1.0 (schema 1)
 plox build  examples/calc.plox -o calc.json   # grammar -> bundle
 plox check  examples/calc.plox                # build + report conflicts
 plox parse  calc.json input.txt               # parse a file
@@ -67,6 +71,28 @@ plox emit   calc.json --target=cpp --out=gen  # emit C++ driver
 plox emit   calc.json --target=lua --out=gen  # emit Lua driver
 plox emit   calc.json --target=py  --out=gen  # emit Python driver
 ```
+
+`plox build` accepts `--lex-only` to omit the parse table when a host
+only needs the lexer; `plox parse` accepts `--glr` to use the GLR
+runtime when the bundle preserves conflicts.
+
+## Lexer feedback (typedef-name and friends)
+
+Some grammars need the parser to influence what the lexer returns —
+the canonical example is C's `typedef foo;` followed by `foo x;`,
+where `foo` lexes as a different terminal in the second position than
+the first. plox handles this with a **token filter** callback the host
+installs alongside its **post-reduce** hook:
+
+* The post-reduce hook fires after every reduction; the host updates
+  whatever state it needs (a typedef set, a scope stack, …).
+* The token filter receives every freshly fetched lookahead (and
+  re-runs after every reduce) and returns the (possibly rewritten)
+  terminal kind.
+
+Both callbacks are exposed in all four backends. The Python runtime
+also ships `plox.hooks.TypedefTracker`, a turnkey helper that
+implements the full classical hack on top of these primitives.
 
 ## Bundled example grammars
 
@@ -77,6 +103,15 @@ plox emit   calc.json --target=py  --out=gen  # emit Python driver
 - `plm_full` — extends `plm_subset` to the constructs Digital Research's BDOS uses (LITERALLY, INITIAL, AT, BASED, iterative DO TO/BY, DO CASE, structures). Parses the first 162 lines of the real `bdos.plm` source end-to-end.
 - `c_subset` — a meaningful subset of C: function definitions, full statement repertoire (if/else/while/for/do-while/switch/break/continue/goto/return), expressions with C precedence, struct/union/enum, casts, the typedef-name lexer hack, and a preprocessor skip. Parses 21 of uc80's example C programs (vendored as fixtures).
 - `plox_self` — the .plox DSL described in itself. Parses every other example grammar in this list, including its own definition. Action bodies (`{ ... }`) are out of scope; hosts strip them in a pre-pass.
+
+## Documentation
+
+- [`docs/grammar_format.md`](docs/grammar_format.md) — the `.plox` DSL spec.
+- [`docs/c_backend.md`](docs/c_backend.md) — generated C API.
+- [`docs/cpp_backend.md`](docs/cpp_backend.md) — generated C++ API.
+- [`docs/lua_backend.md`](docs/lua_backend.md) — generated Lua module.
+- [`docs/py_backend.md`](docs/py_backend.md) — generated Python module.
+- [`CHANGELOG.md`](CHANGELOG.md) — versioned release notes.
 
 ## License
 
