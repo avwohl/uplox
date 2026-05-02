@@ -49,11 +49,12 @@ LINE_COMMENT = /\/\/[^\n]*/                      %skip
 BLOCK_COMMENT = /\/\*([^*]|\*+[^*\/])*\*+\//     %skip
 
 # Preprocessor lines are dropped by the lexer — they belong to a separate
-# pass that hosts run before plox sees the input. The skip handles the
-# common case of single-line `#include`, `#define NAME 123`, `#if`, `#endif`.
-# Multi-line `#define` with `\` continuations isn't modelled; uc-family code
-# almost always avoids those.
-PREPROC    = /#[^\n]*/                           %skip
+# pass that hosts run before plox sees the input. The body matches: a char
+# that's neither newline nor backslash, OR a `\` followed by a newline (the
+# C line-continuation), OR a `\` followed by any non-newline (so `\"`, `\t`
+# etc. inside strings and char-literals don't end the directive). The
+# directive is terminated by an unescaped newline.
+PREPROC    = /#([^\n\\]|\\\n|\\.)*/              %skip
 
 # Numeric and string literals.
 INT_LIT    = /(0[xX][0-9A-Fa-f]+|0[0-7]*|[1-9][0-9]*)[uUlL]*/
@@ -211,12 +212,19 @@ struct_decl_list : struct_decl_list struct_decl
                  ;
 
 # Members: typed declarators, no initializers (different from the top-level
-# init_declarator). Bit-fields are not modelled.
+# init_declarator). Bit-fields written `name : width` (named) or `: width`
+# (anonymous, used for padding) parse via the explicit struct_declarator
+# non-terminal.
 struct_decl : decl_specs struct_declarator_list SEMI ;
 
-struct_declarator_list : struct_declarator_list COMMA declarator
-                       | declarator
+struct_declarator_list : struct_declarator_list COMMA struct_declarator
+                       | struct_declarator
                        ;
+
+struct_declarator : declarator
+                  | declarator COLON conditional_expr
+                  | COLON conditional_expr
+                  ;
 
 # enum: tag + body (with or without trailing comma), just a body, or just a tag.
 enum_specifier : KW_ENUM IDENT LBRACE enumerator_list RBRACE
@@ -271,9 +279,13 @@ direct_declarator : IDENT
                   | LPAREN declarator RPAREN
                   | direct_declarator LBRACKET conditional_expr RBRACKET
                   | direct_declarator LBRACKET RBRACKET
-                  | direct_declarator LPAREN parameter_list RPAREN
+                  | direct_declarator LPAREN parameter_type_list RPAREN
                   | direct_declarator LPAREN RPAREN
                   ;
+
+parameter_type_list : parameter_list
+                    | parameter_list COMMA ELLIPSIS
+                    ;
 
 parameter_list : parameter_list COMMA parameter
                | parameter

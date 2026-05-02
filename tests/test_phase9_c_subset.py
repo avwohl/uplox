@@ -686,6 +686,116 @@ void run(void) {
     assert isinstance(tree, ParseNode) and tree.kind == "translation_unit"
 
 
+# --- v1.2 deferred-item additions ------------------------------------------
+
+
+def test_c_variadic_function_declaration(built):
+    scanner, table = built
+    src = "int printf(const char *fmt, ...);\n"
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode) and tree.kind == "translation_unit"
+
+
+def test_c_variadic_function_definition_and_call(built):
+    scanner, table = built
+    src = """
+int printf(const char *fmt, ...);
+int main(void) {
+    printf("%d %d %d\\n", 1, 2, 3);
+    return 0;
+}
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_variadic_requires_one_named_param(built):
+    """Per C, `...` cannot appear as the only parameter; the grammar enforces
+    this by requiring `parameter_list COMMA ELLIPSIS` rather than a bare
+    ELLIPSIS."""
+    scanner, table = built
+    src = "int bad(...);\n"
+    from plox.parse.runtime import ParseError
+
+    with pytest.raises(ParseError):
+        parse_str(scanner, table, src)
+
+
+def test_c_multiline_preprocessor_macro(built):
+    """`\\<newline>` line continuations inside a #define are absorbed by the
+    PREPROC skip token. The whole directive — across as many physical lines
+    as it spans — is dropped before parsing begins."""
+    scanner, table = built
+    src = (
+        "#define MAX(a, b)  \\\n"
+        "    ((a) > (b) ? \\\n"
+        "     (a) : (b))\n"
+        "int main(void) { return 0; }\n"
+    )
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode) and tree.kind == "translation_unit"
+
+
+def test_c_multiline_preprocessor_with_string_escape(built):
+    """A `\\\"` inside the directive is not the end of a string — the PREPROC
+    body treats `\\` followed by any non-newline character as a single unit,
+    so escapes inside string literals on the directive line don't confuse
+    line-continuation handling."""
+    scanner, table = built
+    src = (
+        '#define MSG "line one \\\\n" \\\n'
+        '            "line two"\n'
+        "int main(void) { return 0; }\n"
+    )
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_bit_fields_named_and_anonymous(built):
+    scanner, table = built
+    src = """
+struct flags {
+    unsigned int active : 1;
+    unsigned int kind   : 3;
+    unsigned int        : 4;
+    unsigned int count  : 24;
+};
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_bit_field_zero_width_for_alignment(built):
+    """`int : 0` is a special form that forces alignment to the next storage
+    unit. The grammar accepts it as any other anonymous bit-field; whether
+    the *value* is zero is a semantic concern, not a syntactic one."""
+    scanner, table = built
+    src = """
+struct aligned {
+    int a : 4;
+    int   : 0;
+    int b : 4;
+};
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_bit_field_width_can_be_constant_expression(built):
+    """The width is a conditional_expr, so any compile-time constant works.
+    No fold or evaluation happens here — we only check the shape parses."""
+    scanner, table = built
+    src = """
+struct widths {
+    int a : 4 + 4;
+    int b : (1 << 3);
+    int c : KIND_MASK | OWNER_MASK;
+};
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
 # --- real uc80 source files ------------------------------------------------
 # Vendored from /home/wohl/src/uc80/examples — small, hand-written K&R-style
 # C programs the uc80 compiler is supposed to handle. Parsing them here
