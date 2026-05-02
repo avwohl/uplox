@@ -24,6 +24,8 @@ from ..lex.build import lex_from_ir
 from ..lex.scanner import Scanner
 from ..parse.grammar import GrammarError, compile_grammar
 from ..parse.lr1 import build_lr1
+from ..parse.glr import GLRParseError, glr_from_lr, glr_parse
+from ..parse.glr.runtime import AmbiguityNode, GLRNode
 from ..parse.runtime import HookRegistry, ParseError, parse as run_parser
 from ..spec.reader import ReaderError, read_file
 from ..tables import (
@@ -104,11 +106,18 @@ def _cmd_parse(args: argparse.Namespace) -> int:
             text = fh.read()
 
     try:
-        # The CLI is a smoke tool; we don't try to resolve hooks the way a
-        # real host driver would. Unknown names just no-op so any grammar
-        # builds and parses end-to-end.
-        tree = run_parser(table, scanner.scan(text), hooks=HookRegistry(ignore_missing=True))
-    except ParseError as e:
+        if args.glr:
+            tree = glr_parse(glr_from_lr(table), scanner.scan(text))
+        else:
+            # The LR runtime is a smoke tool here; we don't try to resolve
+            # hooks the way a real host driver would. Unknown names no-op so
+            # any grammar builds and parses end-to-end.
+            tree = run_parser(
+                table,
+                scanner.scan(text),
+                hooks=HookRegistry(ignore_missing=True),
+            )
+    except (ParseError, GLRParseError) as e:
         print(f"{args.input}: {e}", file=sys.stderr)
         return 1
 
@@ -122,10 +131,16 @@ def _render_tree(tree, indent: int = 0) -> str:
     pad = "  " * indent
     if isinstance(tree, Token):
         return f"{pad}{tree.name} {tree.text!r}"
-    if isinstance(tree, ParseNode):
+    if isinstance(tree, (ParseNode, GLRNode)):
         lines = [f"{pad}{tree.kind}"]
         for c in tree.children:
             lines.append(_render_tree(c, indent + 1))
+        return "\n".join(lines)
+    if isinstance(tree, AmbiguityNode):
+        lines = [f"{pad}AMBIGUITY[{tree.kind}] ({len(tree.alternatives)} alternatives)"]
+        for i, alt in enumerate(tree.alternatives):
+            lines.append(f"{pad}  alt {i + 1}:")
+            lines.append(_render_tree(alt, indent + 2))
         return "\n".join(lines)
     return f"{pad}{tree!r}"
 
@@ -211,6 +226,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="path to input file; '-' reads from stdin",
         nargs="?",
         default="-",
+    )
+    p_parse.add_argument(
+        "--glr",
+        action="store_true",
+        help="parse with the GLR runtime (handles ambiguous grammars; produces a parse forest)",
     )
     p_parse.set_defaults(func=_cmd_parse)
 
