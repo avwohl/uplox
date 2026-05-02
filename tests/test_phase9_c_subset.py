@@ -62,9 +62,10 @@ def test_c_subset_no_conflicts(built):
 
 def test_c_subset_state_count_in_range(built):
     _scanner, table = built
-    # 1447 with struct/union/enum + switch. Allow generous slack so the
-    # test stays green through small grammar tweaks; flag if it explodes.
-    assert 700 <= len(table.states) <= 2400, len(table.states)
+    # 1553 with struct/union/enum + switch + casts. Allow generous slack
+    # so the test stays green through small grammar tweaks; flag if it
+    # explodes.
+    assert 700 <= len(table.states) <= 2500, len(table.states)
 
 
 def test_c_simple_function_definition(built):
@@ -546,6 +547,78 @@ Node_t *head;
     tree, tracker = parse_with_typedef_tracking(scanner, table, src)
     assert isinstance(tree, ParseNode)
     assert tracker.names == {"Node_t"}
+
+
+def test_cast_to_builtin_type(built):
+    """`(int) x` and `(char *) p` parse without the typedef-name hack —
+    the lookahead is a type keyword, unambiguous."""
+    scanner, table = built
+    src = """
+int test(void *p) {
+    int x = (int) 42;
+    char *s = (char *) p;
+    return x;
+}
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_cast_to_pointer_type(built):
+    scanner, table = built
+    src = """
+int test(int x) {
+    return *(int *) &x;
+}
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_cast_to_typedef_name_round_trips_through_filter(built):
+    """`(MyInt) x` is the parser's classic ambiguity. With the
+    TypedefTracker filter rewriting `MyInt` to TYPEDEF_NAME, the cast
+    parses as a cast — without it, the parser would treat `(MyInt)` as a
+    parenthesised IDENT expression."""
+    scanner, table = built
+    src = """
+typedef int MyInt;
+
+int test(int x) {
+    return (MyInt) x + 1;
+}
+"""
+    tree, tracker = parse_with_typedef_tracking(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+    assert "MyInt" in tracker.names
+
+
+def test_cast_to_typedef_pointer(built):
+    scanner, table = built
+    src = """
+typedef int Word;
+
+int test(void *p) {
+    return *(Word *) p;
+}
+"""
+    tree, tracker = parse_with_typedef_tracking(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+    assert tracker.names == {"Word"}
+
+
+def test_paren_expression_still_parses(built):
+    """Sanity: with casts in the grammar, plain parenthesised expressions
+    still parse — the LPAREN-IDENT pair routes through expr, not type_name,
+    because IDENT (not TYPEDEF_NAME) is in the expression FIRST set."""
+    scanner, table = built
+    src = """
+int test(int a, int b) {
+    return (a + b) * 2;
+}
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
 
 
 def test_uc80_test_typedef_fixture(built):

@@ -27,10 +27,8 @@
 # Out of scope for the v0 sketch:
 #
 #   * Preprocessor (#include, #define, #if) — must be expanded upstream
-#   * Casts `(type) expr` — needs the typedef-name machinery on the
-#     **expression** side too (cast_expr is a separate front for the
-#     `(type) unary_expr` form). Doable on top of TypedefTracker but not
-#     wired up here.
+#   * Function-pointer casts `(int (*)(int)) p` — would need full abstract
+#     declarators in type_name. Pointer casts `(MyType *) p` are covered.
 #   * Variadic functions (...)
 #   * Compound literals, designated initializers, _Generic
 #   * Bit-fields
@@ -449,10 +447,21 @@ multiplicative_expr : multiplicative_expr STAR    cast_expr
                     | cast_expr
                     ;
 
-# We deliberately *don't* include casts in v0 — `(type) expr` is ambiguous
-# with `(expr) op expr` without the typedef-name lexer hack. Real uc_core
-# code uses casts heavily; that's a Phase-9 follow-up.
-cast_expr : unary_expr ;
+# Casts use the typedef-name lexer hack: after the host installs a token
+# filter and a typedef-tracking hook, `(MyInt) x` lexes its IDENT as
+# TYPEDEF_NAME, which disambiguates `LPAREN type_name RPAREN cast_expr`
+# (a cast) from `LPAREN expr RPAREN op ...` (a parenthesised expression).
+# type_name is a simplified shape: optional pointer suffix, no abstract
+# declarator (so function-pointer casts like `(int (*)(int))` aren't
+# accepted yet). uc_core uses pointer casts heavily and that's covered;
+# function-pointer casts are rare and a Phase-9 follow-up.
+cast_expr : unary_expr
+          | LPAREN type_name RPAREN cast_expr
+          ;
+
+type_name : decl_specs
+          | decl_specs pointer
+          ;
 
 unary_expr : postfix_expr
            | INC unary_expr
