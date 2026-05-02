@@ -93,6 +93,7 @@ KW_TYPEDEF = "typedef"
 KW_SWITCH  = "switch"
 KW_CASE    = "case"
 KW_DEFAULT = "default"
+KW_GENERIC = "_Generic"
 
 IDENT      = /[A-Za-z_][A-Za-z0-9_]*/
 
@@ -495,21 +496,30 @@ cast_expr : unary_expr
           | LPAREN type_name RPAREN cast_expr
           ;
 
-# Abstract declarator — the right-hand side of casts and compound-literal
-# types. Pointer prefix and trailing array suffix are covered here;
-# function-pointer abstract declarators (`(*)(int)`) are out of scope and
-# tracked separately as a Phase-9 follow-up.
+# Abstract declarator — the right-hand side of casts, compound-literal
+# types, and _Generic associations. Mirrors the standard C99 abstract
+# declarator: pointer prefix, parenthesised inner declarator, trailing
+# array brackets, trailing function parameter parens. This admits
+# `int *`, `int [3]`, `int (*)(int)`, `int (*)[4]`, etc.
 type_name : decl_specs
-          | decl_specs pointer
-          | decl_specs type_array_suffix
-          | decl_specs pointer type_array_suffix
+          | decl_specs abstract_declarator
           ;
 
-type_array_suffix : LBRACKET conditional_expr RBRACKET
-                  | LBRACKET RBRACKET
-                  | type_array_suffix LBRACKET conditional_expr RBRACKET
-                  | type_array_suffix LBRACKET RBRACKET
-                  ;
+abstract_declarator : pointer
+                    | pointer direct_abstract_declarator
+                    | direct_abstract_declarator
+                    ;
+
+direct_abstract_declarator : LPAREN abstract_declarator RPAREN
+                           | direct_abstract_declarator LBRACKET conditional_expr RBRACKET
+                           | direct_abstract_declarator LBRACKET RBRACKET
+                           | direct_abstract_declarator LPAREN parameter_type_list RPAREN
+                           | direct_abstract_declarator LPAREN RPAREN
+                           | LBRACKET conditional_expr RBRACKET
+                           | LBRACKET RBRACKET
+                           | LPAREN parameter_type_list RPAREN
+                           | LPAREN RPAREN
+                           ;
 
 unary_expr : postfix_expr
            | INC unary_expr
@@ -521,6 +531,7 @@ unary_expr : postfix_expr
            | TILDE cast_expr
            | BANG  cast_expr
            | KW_SIZEOF unary_expr
+           | KW_SIZEOF LPAREN type_name RPAREN
            ;
 
 postfix_expr : primary_expr
@@ -540,7 +551,19 @@ primary_expr : IDENT
              | CHAR_LIT
              | STRING_LIT
              | LPAREN expr RPAREN
+             | KW_GENERIC LPAREN assignment_expr COMMA generic_assoc_list RPAREN
              ;
+
+generic_assoc_list : generic_assoc_list COMMA generic_association
+                   | generic_association
+                   ;
+
+# Each association is `type_name : expr` or `default : expr`. The COLON is
+# unambiguous in this context — _Generic is the only place an association
+# list appears.
+generic_association : type_name COLON assignment_expr
+                    | KW_DEFAULT COLON assignment_expr
+                    ;
 
 argument_list : argument_list COMMA assignment_expr
               | assignment_expr

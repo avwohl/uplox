@@ -888,6 +888,136 @@ int main(void) {
     assert isinstance(tree, ParseNode)
 
 
+def test_c_generic_basic_with_default(built):
+    scanner, table = built
+    src = "int main(int x) { return _Generic(x, int: 1, default: 0); }\n"
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_generic_multiple_type_arms(built):
+    scanner, table = built
+    src = """
+int main(int x) {
+    return _Generic(x, int: 1, char: 2, long: 3, default: 0);
+}
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_generic_with_pointer_types(built):
+    """type_name in each association reuses the abstract-declarator form
+    introduced for compound literals — so `int *: ...` parses."""
+    scanner, table = built
+    src = """
+int main(int *p) {
+    return _Generic(p, int *: 1, char *: 2, default: 0);
+}
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_generic_default_can_appear_first(built):
+    """The grammar treats the association list as a comma-separated set;
+    `default` does not need to appear last."""
+    scanner, table = built
+    src = """
+int main(int x) {
+    return _Generic(x, default: 0, int: 1);
+}
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_function_pointer_abstract_declarator_in_cast(built):
+    """`(int (*)(int)) p` — the canonical function-pointer cast that
+    type_name didn't accept until abstract_declarator landed."""
+    scanner, table = built
+    src = """
+int main(int x) {
+    int (*p)(int) = 0;
+    return ((int (*)(int)) p)(x);
+}
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_function_pointer_in_generic(built):
+    scanner, table = built
+    src = """
+int main(int *p) {
+    return _Generic(p, int (*)(int): 1, default: 0);
+}
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_array_of_pointers_compound_literal(built):
+    scanner, table = built
+    src = "int main(void) { int *a = (int *[3]){0}; return 0; }\n"
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_pointer_to_array_parameter(built):
+    """`int (*p)[5]` — pointer-to-array as a parameter declarator. Uses
+    the same parenthesised-pointer form as function pointers."""
+    scanner, table = built
+    src = "int main(int (*p)[5]) { return (*p)[0]; }\n"
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_sizeof_with_type_name(built):
+    """`sizeof(type)` — a separate alternative from `sizeof unary_expr`.
+    Disambiguated by the token after LPAREN: a type-keyword or
+    TYPEDEF_NAME → type_name path; an expression-starter → primary_expr
+    inside `sizeof unary_expr`."""
+    scanner, table = built
+    src = """
+int main(void) {
+    int a = sizeof(int);
+    int b = sizeof(int *);
+    int c = sizeof(int (*)(int));
+    return a + b + c;
+}
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_sizeof_expression_still_works(built):
+    """`sizeof x` and `sizeof(x)` (expression form) parse via the
+    `sizeof unary_expr` alternative, unchanged after the type_name
+    alternative was added."""
+    scanner, table = built
+    src = """
+int main(int x) {
+    int a = sizeof x;
+    int b = sizeof(x);
+    return a + b;
+}
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_sizeof_typedef_name(built):
+    """sizeof(FOO) where FOO is typedef'd takes the type_name path
+    via TYPEDEF_NAME (not IDENT). This pins the typedef-name lexer
+    feedback through the new sizeof form."""
+    scanner, table = built
+    src = "typedef int FOO; int main(void) { return sizeof(FOO); }\n"
+    tree, tracker = parse_with_typedef_tracking(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+    assert "FOO" in tracker.names
+
+
 # --- real uc80 source files ------------------------------------------------
 # Vendored from /home/wohl/src/uc80/examples — small, hand-written K&R-style
 # C programs the uc80 compiler is supposed to handle. Parsing them here
