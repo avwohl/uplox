@@ -5,6 +5,51 @@ All notable changes to plox land here. Format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) for the public
 surface (CLI, JSON bundle schema, Python API, hook firing points).
 
+## Unreleased
+
+Backwards-compatible additions to the C, C++, and Lua backends. Each one
+mirrors a runtime feature that had been Python-only, closing the parity
+gap so non-Python hosts can implement the C typedef-name hack and other
+lexer-feedback grammars end-to-end in their target language.
+
+### Added
+
+- **C, C++, Lua: token-filter ABI.** Hosts can install a callback that
+  receives the lookahead's terminal kind and source text and returns
+  the (possibly rewritten) terminal kind. Fires on every freshly fetched
+  lookahead and again after every reduction. Mirrors the Python
+  runtime's `token_filter=` parameter.
+  - C:   `plox_<g>_set_token_filter(ctx, fn, user_data)`
+  - C++: `parser.set_token_filter(std::function<...>)` (TokenFilter typedef)
+  - Lua: `parser:set_token_filter(function ... end)`
+- **C, C++, Lua: post-reduce hook.** A general callback invoked after
+  every successful reduction, before the runtime re-applies the token
+  filter. Hosts use it to update typedef tables, scope stacks, error
+  counters — anything they want visible to the next action lookup.
+  - C:   `plox_<g>_set_post_reduce(ctx, fn, user_data)`
+  - C++: `parser.set_post_reduce(std::function<...>)` (PostReduce typedef)
+  - Lua: `parser:set_post_reduce(function ... end)`
+- **GLR runtime: default-reduction parity with LR.** `GLRTable.default_reductions`
+  is propagated from the underlying LR table; the GLR reduce phase
+  consults it when no explicit actions exist for the current
+  (state, lookahead). Lexer-feedback grammars now work the same under GLR.
+- **End-to-end typedef-name tests.** Three new tests (one per non-Python
+  backend) exercise the full classical hack: a tiny grammar where
+  `typedef Foo;` registers Foo and a subsequent `Foo;` parses via the
+  TNAME-prefixed alternative. Together with the Python-side test that
+  shipped in 1.0.0, the hack is now covered end-to-end across all four
+  backends.
+
+### Status of post-1.0 follow-ups
+
+- **Done in this cycle**: token-filter ABI, post-reduce hook, GLR
+  default-reduction symmetry — the items the 1.0.0 release notes
+  explicitly called out as "out of scope (post-v1)".
+- **Still deferred**: full `bdos.plm` (needs upstream macro expander),
+  function-pointer abstract declarators, variadic `...`, compound
+  literals, designated initializers, `_Generic`, bit-fields, multi-line
+  preprocessor macros, plox self-host bootstrap.
+
 ## 1.0.0 — 2026-05-02
 
 First stable release. All nine phases of the original plan land here.
@@ -89,7 +134,7 @@ grammar name so two grammars can link into the same binary.
 - Token filter ABI in the C/C++/Lua backends. The Python backend exposes
   the runtime callback directly; non-Python hosts that need typedef-name
   resolution have to filter their token stream upstream of the parser
-  for now.
+  for now. *(Lifted in the Unreleased section above.)*
 
 ### Test surface
 
