@@ -25,7 +25,12 @@ Layout
             "expr": 1,
             "term": 2,
             "factor": 5
-          }
+          },
+          "default_reduction": 12   // optional; production index to reduce
+                                    // when ACTION lookup misses (used by
+                                    // typedef-name and other lexer-feedback
+                                    // grammars). Omitted when the state has
+                                    // no default reduction.
         },
         ...
       ]
@@ -61,6 +66,7 @@ from ..parse.lr1 import (
     LRTable,
     ReduceAction,
     ShiftAction,
+    _compute_default_reductions,
 )
 
 
@@ -119,7 +125,10 @@ def table_to_json(table: LRTable) -> dict[str, Any]:
         for (state, sym), tgt in table.goto.items():
             if state == s:
                 gotos[sym] = tgt
-        states_json.append({"id": s, "actions": actions, "gotos": gotos})
+        entry: dict[str, Any] = {"id": s, "actions": actions, "gotos": gotos}
+        if s in table.default_reductions:
+            entry["default_reduction"] = table.default_reductions[s]
+        states_json.append(entry)
 
     return {
         "kind": "lr1",
@@ -186,4 +195,11 @@ def table_from_json(section: dict[str, Any]) -> LRTable:
             table.action[(s, sym)] = _code_to_action(code)
         for sym, tgt in entry["gotos"].items():
             table.goto[(s, sym)] = tgt
+        if "default_reduction" in entry:
+            table.default_reductions[s] = entry["default_reduction"]
+    # Older bundles (pre-default-reductions) don't carry the field, so we
+    # recompute it from the action table — the result is byte-identical to
+    # what the original build produced.
+    if not table.default_reductions:
+        _compute_default_reductions(table)
     return table

@@ -35,7 +35,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable
 
-from ..parse.runtime import HookRegistry, ParseContext
+from ..lex.scanner import Token
+from ..parse.runtime import HookRegistry, ParseContext, ParseNode
 
 __all__ = [
     "HookRegistry",
@@ -43,6 +44,7 @@ __all__ = [
     "ScopedNameTable",
     "TypeTable",
     "SyncSetRecovery",
+    "TypedefTracker",
     "scoped_table_hooks",
 ]
 
@@ -162,6 +164,151 @@ class TypeTable:
 
     def type_of(self, name: str) -> Any:
         return self.types.get(name)
+
+
+# ---- Typedef-name lexer feedback ---------------------------------------------
+
+
+@dataclass
+class TypedefTracker:
+    """Tracks identifiers that have been typedef'd, then rewrites IDENT tokens
+    bearing those names to a different terminal (default ``TYPEDEF_NAME``).
+
+    This is the canonical solution to the C "typedef-name" problem: in a real
+    C grammar, ``MyInt a;`` is a declaration when ``MyInt`` was typedef'd,
+    but a function call (``MyInt`` as expression) when it wasn't. The parser
+    needs to see two different terminals to pick the right action — but the
+    lexer alone can't tell them apart. The classical fix wires a feedback
+    edge: after the parser reduces a typedef declaration, a hook tells the
+    tracker to mark the new name; the tracker's :meth:`filter` then rewrites
+    subsequent IDENT lookahead tokens to ``TYPEDEF_NAME``.
+
+    Wiring is two parts:
+
+    * Pass :meth:`filter` as the ``token_filter=`` argument to ``parse()``.
+    * Register :meth:`record_declaration` in the :class:`HookRegistry` under
+      the hook name that the grammar's typedef-bearing production uses
+      (e.g. ``%hook=record_typedef``). The tracker fires only on
+      ``post_reduce`` and only when the reduced node carries a typedef
+      storage class.
+
+    The tracker is stateful and reentrant: each parse pass owns one. Its
+    state lives outside :class:`ParseContext.user` (so the filter doesn't
+    have to hunt for it) but it inspects ``ctx`` only to decide whether
+    a node looks like a typedef declaration.
+    """
+
+    rewrite_to: str = "TYPEDEF_NAME"
+    source_terminal: str = "IDENT"
+    storage_class_token: str = "KW_TYPEDEF"
+    declaration_kind: str = "declaration"
+    names: set[str] = field(default_factory=set)
+
+    def filter(self, ctx: ParseContext, tok: Token) -> Token:
+        if tok.name == self.source_terminal and tok.text in self.names:
+            return Token(
+                name=self.rewrite_to,
+                text=tok.text,
+                line=tok.line,
+                column=tok.column,
+                offset=tok.offset,
+            )
+        return tok
+
+    def record_declaration(self, ctx: ParseContext, payload: dict) -> None:
+        if payload.get("when") != "post_reduce":
+            return
+        node = payload.get("value")
+        if not isinstance(node, ParseNode) or node.kind != self.declaration_kind:
+            return
+        if not _has_token(node, self.storage_class_token):
+            return
+        for name in _declared_names(node):
+            self.names.add(name)
+
+
+def _has_token(node: ParseNode, target: str) -> bool:
+    """True iff a Token with the given terminal name appears anywhere in node."""
+    stack: list[Any] = [node]
+    while stack:
+        cur = stack.pop()
+        if isinstance(cur, Token):
+            if cur.name == target:
+                return True
+            continue
+        if isinstance(cur, ParseNode):
+            stack.extend(cur.children)
+    return False
+
+
+def _declared_names(node: ParseNode) -> Iterable[str]:
+    """Yield the IDENT name(s) declared by a C declaration ParseNode.
+
+    The shape relied on is the c_subset grammar:
+    ``declaration -> decl_specs init_declarator_list_opt SEMI`` and
+    ``init_declarator -> declarator [ASSIGN initializer]``. Each declarator
+    nests further wrappers (pointer, array, function-paren) around a single
+    direct-declarator IDENT — the leftmost IDENT in a depth-first walk of
+    the declarator subtree.
+    """
+    if not isinstance(node, ParseNode):
+        return
+    init_list = _find_first_kind(node, "init_declarator_list_opt")
+    if init_list is None:
+        return
+    for declarator in _walk_declarators(init_list):
+        name = _leftmost_ident(declarator)
+        if name is not None:
+            yield name
+
+
+def _find_first_kind(node: ParseNode, kind: str) -> ParseNode | None:
+    """Depth-first search for the first ParseNode child with matching kind."""
+    if isinstance(node, ParseNode) and node.kind == kind:
+        return node
+    if not isinstance(node, ParseNode):
+        return None
+    for child in node.children:
+        if isinstance(child, ParseNode):
+            result = _find_first_kind(child, kind)
+            if result is not None:
+                return result
+    return None
+
+
+def _walk_declarators(node: ParseNode) -> Iterable[ParseNode]:
+    """Yield each `declarator` ParseNode reachable from an
+    init_declarator_list_opt, NOT recursing into parameter declarators
+    (those name function arguments, not the typedef'd entity)."""
+    if not isinstance(node, ParseNode):
+        return
+    if node.kind == "declarator":
+        yield node
+        return
+    if node.kind == "parameter_list":
+        # Parameter names are not typedef'd by the outer declaration.
+        return
+    for child in node.children:
+        if isinstance(child, ParseNode):
+            yield from _walk_declarators(child)
+
+
+def _leftmost_ident(node: ParseNode) -> str | None:
+    """Return the textually-leftmost IDENT inside a declarator subtree.
+
+    Stops at parameter_list so that `MyType` in `MyType func(int x)` wins
+    over `x`."""
+    if isinstance(node, Token):
+        return node.text if node.name == "IDENT" else None
+    if not isinstance(node, ParseNode):
+        return None
+    if node.kind == "parameter_list":
+        return None
+    for child in node.children:
+        result = _leftmost_ident(child)
+        if result is not None:
+            return result
+    return None
 
 
 # ---- Error recovery: sync sets -----------------------------------------------

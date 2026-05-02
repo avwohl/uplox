@@ -90,6 +90,17 @@ class HookRegistry:
 SemanticAction = Callable[["ParseContext", list[StackValue]], StackValue]
 
 
+# A token filter is the plox equivalent of yacc/bison's "lexer feedback":
+# the host can rewrite a token's terminal name based on parser-driven state.
+# The classic use is the C typedef-name hack — after `typedef int Foo;` is
+# reduced, subsequent ``Foo`` IDENT tokens get rewritten to TYPEDEF_NAME so
+# the parser sees them as type-specs.  The runtime invokes the filter every
+# time the lookahead is fetched **and** after every reduction (so a hook
+# that just updated the host's name table sees its change applied to the
+# pending lookahead before the next action lookup).
+TokenFilter = Callable[["ParseContext", Token], Token]
+
+
 @dataclass
 class ParseContext:
     """All mutable state a parser run touches. Never use module globals.
@@ -136,12 +147,17 @@ def parse(
     *,
     hooks: HookRegistry | None = None,
     semantic_actions: dict[int, SemanticAction] | None = None,
+    token_filter: TokenFilter | None = None,
 ) -> StackValue:
     """Run the LR driver. Returns the value associated with the start symbol.
 
     ``tokens`` must end with no trailing data — the runtime appends an internal
     end-marker. If ``tokens`` is itself unterminated, the driver still terminates
     by encountering the synthetic ``$``.
+
+    ``token_filter`` is the lexer-feedback hook for grammars that need to
+    re-classify tokens based on parser-driven state — see
+    :data:`TokenFilter`.
     """
     ctx = ParseContext(
         table=table,
@@ -156,9 +172,12 @@ def parse(
 
     def fetch_next() -> Token:
         try:
-            return next(token_iter)
+            tok = next(token_iter)
         except StopIteration:
             return end
+        if token_filter is not None and tok is not end:
+            tok = token_filter(ctx, tok)
+        return tok
 
     lookahead = fetch_next()
     end_seen = lookahead is end
@@ -167,6 +186,17 @@ def parse(
         state = ctx.state_stack[-1]
         action = table.action.get((state, lookahead.name))
         if action is None:
+            # Default reduction fallback: a state whose only actions are all
+            # reduce-X (for the same X) reduces unconditionally. Required for
+            # token-filter feedback grammars (typedef-name hack) where the
+            # post_reduce hook needs to fire before the next token is
+            # classified — see TokenFilter docstring and TypedefTracker.
+            default_prod = table.default_reductions.get(state)
+            if default_prod is not None:
+                _do_reduce(ctx, default_prod)
+                if token_filter is not None and lookahead is not end:
+                    lookahead = token_filter(ctx, lookahead)
+                continue
             _on_error(ctx, lookahead)
 
         if isinstance(action, ShiftAction):
@@ -187,6 +217,12 @@ def parse(
 
         if isinstance(action, ReduceAction):
             _do_reduce(ctx, action.production)
+            # A post_reduce hook may have updated the host's name table
+            # (typedef-name tracking is the canonical case). Re-apply the
+            # filter so the pending lookahead reflects that new state before
+            # the next action lookup.
+            if token_filter is not None and lookahead is not end:
+                lookahead = token_filter(ctx, lookahead)
             continue
 
         if isinstance(action, AcceptAction):

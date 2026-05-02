@@ -107,6 +107,13 @@ class LRTable:
     """GOTO[state, non_terminal] -> next state."""
     conflicts: list[Conflict] = field(default_factory=list)
     start_state: int = 0
+    default_reductions: dict[int, int] = field(default_factory=dict)
+    """state -> production index for states whose only valid actions are
+    reduces by the same production. The runtime uses this as a fallback when
+    ACTION lookup misses, so a token-filter (typedef-name hack, etc.) can
+    update host state from the resulting reduce's hooks before the next
+    action lookup. Without this, canonical LR(1) errors before the reduce
+    can fire — see plox.hooks.TypedefTracker for the canonical use case."""
 
 
 # ---- Closure / goto ----------------------------------------------------------
@@ -215,7 +222,38 @@ def build_lr1(grammar: Grammar) -> LRTable:
             else:
                 _record_action(table, state_id, la, ReduceAction(prod_idx))
 
+    _compute_default_reductions(table)
     return table
+
+
+def _compute_default_reductions(table: LRTable) -> None:
+    """Mark each state whose only actions are reduces by a single production.
+
+    A state qualifies iff:
+
+    * Every entry in :attr:`LRTable.action` for the state is a
+      :class:`ReduceAction` for the same production index.
+    * The state has no conflicts (any conflict means the lookahead is needed
+      to disambiguate, so we cannot blindly default-reduce).
+
+    This is the standard "default reduction" optimization. Sound because at
+    a state with only reduce-X actions, applying the reduce eagerly produces
+    the same parse (or the same error one step later) as consulting the
+    lookahead — but it lets the runtime fire post_reduce hooks *before* the
+    parser has to classify the next token, which is what makes lexer
+    feedback (TypedefTracker etc.) work."""
+    by_state: dict[int, list[Action]] = {}
+    for (state, _term), action in table.action.items():
+        by_state.setdefault(state, []).append(action)
+    conflict_states = {c.state for c in table.conflicts}
+    for state, actions in by_state.items():
+        if state in conflict_states:
+            continue
+        if not actions or not all(isinstance(a, ReduceAction) for a in actions):
+            continue
+        prods = {a.production for a in actions}  # type: ignore[union-attr]
+        if len(prods) == 1:
+            table.default_reductions[state] = prods.pop()
 
 
 def _record_action(table: LRTable, state: int, terminal: str, action: Action) -> None:

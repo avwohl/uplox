@@ -116,3 +116,25 @@ def test_action_codes_compact_and_unique():
     # Expect at least shift and reduce; accept lives only in the final state.
     assert "s" in seen_codes
     assert "r" in seen_codes
+
+
+def test_round_trip_preserves_default_reductions():
+    """Default reductions are essential for lexer-feedback grammars (e.g.
+    the C typedef-name hack). They must survive the JSON round-trip; older
+    bundles without the field get them recomputed at load time."""
+    table = build_calc_table()
+    assert table.default_reductions, "calc grammar should have some default reductions"
+    section = table_to_json(table)
+    table2 = table_from_json(section)
+    assert table2.default_reductions == table.default_reductions
+
+
+def test_default_reductions_recomputed_when_field_missing():
+    """Backward compat: an older bundle without ``default_reduction`` keys
+    still ends up with the same default-reductions map after load."""
+    table = build_calc_table()
+    section = table_to_json(table)
+    for state in section["states"]:
+        state.pop("default_reduction", None)
+    table2 = table_from_json(section)
+    assert table2.default_reductions == table.default_reductions

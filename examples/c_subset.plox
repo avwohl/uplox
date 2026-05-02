@@ -18,13 +18,19 @@
 #
 #   * struct / union definitions and references (named, anonymous, forward)
 #   * enum definitions and references with optional explicit values
+#   * switch / case / default
+#   * typedef declarations and the typedef-name lexer hack — the host wires
+#     a token filter that rewrites IDENT to TYPEDEF_NAME based on a name
+#     table the parser maintains via a %hook on the declaration rule.
+#     See `plox.hooks.TypedefTracker` for the runtime piece.
 #
 # Out of scope for the v0 sketch:
 #
-#   * typedef declarations (the typedef-name lexer hack is the missing piece;
-#     without it `(T)x` is a shift/reduce against `(expr) ...`)
 #   * Preprocessor (#include, #define, #if) — must be expanded upstream
-#   * Casts `(type) expr` — same story as typedef
+#   * Casts `(type) expr` — needs the typedef-name machinery on the
+#     **expression** side too (cast_expr is a separate front for the
+#     `(type) unary_expr` form). Doable on top of TypedefTracker but not
+#     wired up here.
 #   * Variadic functions (...)
 #   * Compound literals, designated initializers, _Generic
 #   * Bit-fields
@@ -83,6 +89,12 @@ KW_CASE    = "case"
 KW_DEFAULT = "default"
 
 IDENT      = /[A-Za-z_][A-Za-z0-9_]*/
+
+# TYPEDEF_NAME is reachable only via the typedef-name lexer hack: the lexer
+# never produces it, because IDENT is declared first and wins on the same
+# pattern.  The c_subset host runs a token filter (see plox.hooks.TypedefTracker)
+# that rewrites IDENT to TYPEDEF_NAME for identifiers that have been typedef'd.
+TYPEDEF_NAME = /[A-Za-z_][A-Za-z0-9_]*/
 
 # Multi-char operators (each must precede its prefix).
 ARROW      = "->"
@@ -155,7 +167,7 @@ function_definition : decl_specs declarator compound_stmt ;
 
 # --- declarations ----------------------------------------------------------
 
-declaration : decl_specs init_declarator_list_opt SEMI ;
+declaration : decl_specs init_declarator_list_opt SEMI %hook=record_typedef ;
 
 decl_specs : decl_specs decl_spec
            | decl_spec
@@ -176,6 +188,7 @@ type_spec : KW_VOID | KW_CHAR | KW_SHORT | KW_INT | KW_LONG
           | KW_SIGNED | KW_UNSIGNED
           | struct_or_union_specifier
           | enum_specifier
+          | TYPEDEF_NAME
           ;
 
 # struct / union: a tag + body, just a body, or just a tag (reference or

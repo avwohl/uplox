@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from plox.hooks import TypedefTracker
 from plox.lex.build import lex_from_ir
 from plox.lex.scanner import Scanner
 from plox.parse.grammar import compile_grammar
@@ -42,6 +43,16 @@ def built():
 
 def parse_str(scanner, table, src: str) -> ParseNode:
     return parse(table, scanner.scan(src), hooks=HookRegistry(ignore_missing=True))
+
+
+def parse_with_typedef_tracking(scanner, table, src: str) -> tuple[ParseNode, TypedefTracker]:
+    """Parse C with the typedef-name lexer hack enabled. Returns (tree, tracker)
+    so tests can assert which names were registered."""
+    tracker = TypedefTracker()
+    hooks = HookRegistry(ignore_missing=True)
+    hooks.register("record_typedef", tracker.record_declaration)
+    tree = parse(table, scanner.scan(src), hooks=hooks, token_filter=tracker.filter)
+    return tree, tracker
 
 
 def test_c_subset_no_conflicts(built):
@@ -423,6 +434,130 @@ int test(int x, int y) {
 """
     tree = parse_str(scanner, table, src)
     assert isinstance(tree, ParseNode)
+
+
+# --- typedef-name lexer hack ----------------------------------------------
+# These tests demonstrate the host wiring needed for the C parser to handle
+# `typedef X Y;` followed by `Y z;` correctly. Without the filter, a typedef'd
+# name would be lexed as IDENT and the parser would reject `Y z;` because
+# IDENT can't start a declaration. With the TypedefTracker filter, a parser
+# hook on the declaration rule pushes the new name into the tracker; the
+# tracker's filter rewrites subsequent IDENTs of that name to TYPEDEF_NAME.
+
+
+def test_typedef_simple_int_alias_then_use(built):
+    scanner, table = built
+    src = """
+typedef int handle_t;
+handle_t a;
+"""
+    tree, tracker = parse_with_typedef_tracking(scanner, table, src)
+    assert isinstance(tree, ParseNode) and tree.kind == "translation_unit"
+    assert "handle_t" in tracker.names
+
+
+def test_typedef_pointer_alias(built):
+    scanner, table = built
+    src = """
+typedef int *IntPtr;
+IntPtr p;
+"""
+    tree, tracker = parse_with_typedef_tracking(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+    assert "IntPtr" in tracker.names
+
+
+def test_typedef_anonymous_struct(built):
+    scanner, table = built
+    src = """
+typedef struct {
+    int x;
+    int y;
+} Point;
+Point p;
+"""
+    tree, tracker = parse_with_typedef_tracking(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+    assert "Point" in tracker.names
+
+
+def test_typedef_in_function_parameter(built):
+    """A typedef'd name can appear as a parameter type just like any
+    built-in type-spec. This exercises the filter applying mid-parse,
+    well after the typedef declaration was reduced."""
+    scanner, table = built
+    src = """
+typedef int Byte;
+
+int sum(Byte a, Byte b) {
+    return a + b;
+}
+"""
+    tree, tracker = parse_with_typedef_tracking(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+    assert "Byte" in tracker.names
+
+
+def test_typedef_multiple_in_one_decl(built):
+    """`typedef int A, B, *C;` — three typedefs on one declaration."""
+    scanner, table = built
+    src = """
+typedef int A, B, *C;
+A x;
+B y;
+C z;
+"""
+    tree, tracker = parse_with_typedef_tracking(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+    assert tracker.names == {"A", "B", "C"}
+
+
+def test_typedef_inside_function_body(built):
+    """The tracker is flat (no scope tracking yet), so a typedef inside a
+    function leaks to the rest of the translation unit. That's a known
+    limitation; the test pins the current behavior so it's clear when we
+    add scoping."""
+    scanner, table = built
+    src = """
+void f(void) {
+    typedef int Local;
+    Local x;
+}
+"""
+    tree, tracker = parse_with_typedef_tracking(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+    assert "Local" in tracker.names
+
+
+def test_non_typedef_decl_does_not_register(built):
+    scanner, table = built
+    src = "int counter;\n"
+    _tree, tracker = parse_with_typedef_tracking(scanner, table, src)
+    assert tracker.names == set()
+
+
+def test_typedef_struct_with_tag(built):
+    """`typedef struct Node Node_t;` — separate tag and typedef name."""
+    scanner, table = built
+    src = """
+typedef struct Node Node_t;
+Node_t *head;
+"""
+    tree, tracker = parse_with_typedef_tracking(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+    assert tracker.names == {"Node_t"}
+
+
+def test_uc80_test_typedef_fixture(built):
+    """The uc80 test_typedef.c sample uses typedef of int, unsigned char,
+    pointer-to-int, and an anonymous struct. End-to-end smoke test."""
+    path = UC80_FIXTURES / "test_typedef.c"
+    if not path.exists():
+        pytest.skip("test_typedef.c fixture missing")
+    scanner, table = built
+    tree, tracker = parse_with_typedef_tracking(scanner, table, path.read_text())
+    assert isinstance(tree, ParseNode) and tree.kind == "translation_unit"
+    assert {"MyInt", "Byte", "IntPtr", "Point"} <= tracker.names
 
 
 def test_c_typedef_accepted_as_storage_class(built):
