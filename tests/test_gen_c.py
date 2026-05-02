@@ -234,6 +234,33 @@ def test_calc_syntax_error_returns_nonzero(tmp_path):
     assert "parse error" in err.lower() or "unexpected" in err.lower()
 
 
+def test_calc_syntax_error_lists_expected_tokens(tmp_path):
+    """Same shape as the Python runtime's error: the message includes
+    `expected one of: ...` listing the terminals the offending state has
+    actions for. After `1 +` the calc grammar expects a factor-starter
+    (NUMBER or LPAREN)."""
+    binary = build_calc_evaluator(tmp_path)
+    rc, _out, err = run_calc(binary, "1 +")
+    assert rc != 0
+    # Synthetic end-of-input is rendered as "end of input", not as a stray
+    # "$" token name leaked from the LR table.
+    assert "unexpected end of input" in err
+    assert "expected one of:" in err
+    assert "NUMBER" in err and "LPAREN" in err
+    assert "$" not in err
+
+
+def test_calc_syntax_error_unexpected_token_includes_position(tmp_path):
+    binary = build_calc_evaluator(tmp_path)
+    rc, _out, err = run_calc(binary, "1 2")
+    assert rc != 0
+    assert "unexpected token" in err
+    assert "line 1" in err and "column 3" in err
+    # Right after a complete expression, end-of-input is one of the legal
+    # continuations; render it as text rather than the raw "$".
+    assert "<end of input>" in err
+
+
 # ---- 3. Re-entrancy acceptance test -----------------------------------------
 
 

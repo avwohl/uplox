@@ -184,6 +184,7 @@ def _emit_parse_tables(ctx: _LuaCtx) -> list[str]:
     out.append(f"local kParseStateCount = {n_states}")
     out.append(f"local kProductionCount = {n_prods}")
     out.append(f"local kStartState      = {ctx.start_state}")
+    out.append(f"local kTokenCount      = {n_tokens}")
     out.append("local kActionAccept    = -32768")
     out.append("")
     out.append("-- ACTION[state+1][token_kind+1]: 0=error, +N=shift to N-1, -K=reduce by K-1, -32768=accept.")
@@ -355,8 +356,36 @@ def _emit_runtime(ctx: _LuaCtx) -> list[str]:
         "                -- pending lookahead. See LRTable.default_reductions.",
         "                act = -(dr + 1)",
         "            else",
-        "                self.error = string.format('unexpected token %s at line %d, column %d',",
-        "                                           M.token_name(la_kind), la_line, la_col)",
+        "                -- Build 'unexpected ... ; expected one of: ...' by walking the",
+        "                -- action row at runtime. End-of-input is rendered as",
+        "                -- '<end of input>' to match the Python runtime's wording.",
+        "                local head",
+        "                if la_kind == 0 then",
+        "                    head = 'unexpected end of input'",
+        "                else",
+        "                    head = string.format('unexpected token %s at line %d, column %d',",
+        "                                          M.token_name(la_kind), la_line, la_col)",
+        "                end",
+        "                local shown, total, parts = 0, 0, {}",
+        "                for t = 0, kTokenCount - 1 do",
+        "                    if action[s + 1][t + 1] ~= 0 then",
+        "                        total = total + 1",
+        "                        if shown < 12 then",
+        "                            local nm",
+        "                            if t == 0 then nm = '<end of input>' else nm = M.token_name(t) end",
+        "                            parts[#parts + 1] = nm",
+        "                            shown = shown + 1",
+        "                        end",
+        "                    end",
+        "                end",
+        "                local expect = ''",
+        "                if shown > 0 then",
+        "                    expect = '; expected one of: ' .. table.concat(parts, ', ')",
+        "                    if total > shown then",
+        "                        expect = expect .. string.format(', ... +%d more', total - shown)",
+        "                    end",
+        "                end",
+        "                self.error = head .. expect",
         "                return false",
         "            end",
         "        end",

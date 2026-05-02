@@ -346,6 +346,18 @@ def test_cpp_syntax_error_returns_nonzero(tmp_path):
     assert "parse error" in err.lower() or "unexpected" in err.lower()
 
 
+def test_cpp_syntax_error_lists_expected_tokens(tmp_path):
+    """Same shape as the Python runtime and C backend: error includes the
+    expected-token list, end-of-input is rendered as text not as '$'."""
+    binary = build_cpp_evaluator(tmp_path)
+    rc, _out, err = run_calc(binary, "1 +")
+    assert rc != 0
+    assert "unexpected end of input" in err
+    assert "expected one of:" in err
+    assert "NUMBER" in err and "LPAREN" in err
+    assert "$" not in err
+
+
 CPP_TWO_DRIVER = """
 #include <cstring>
 #include <cstdio>

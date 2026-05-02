@@ -155,6 +155,16 @@ def test_lua_syntax_error(tmp_path):
     assert "unexpected" in err.lower() or "lex" in err.lower()
 
 
+def test_lua_syntax_error_lists_expected_tokens(tmp_path):
+    """Same shape as the Python runtime, C, and C++ backends."""
+    rc, _out, err = run_calc(tmp_path, "1 +")
+    assert rc != 0
+    assert "unexpected end of input" in err
+    assert "expected one of:" in err
+    assert "NUMBER" in err and "LPAREN" in err
+    assert "$" not in err
+
+
 def test_lua_module_loads_without_globals(tmp_path):
     """Sanity check: requiring the module twice produces independent parser
     instances with no shared mutable state."""
