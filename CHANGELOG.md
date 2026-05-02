@@ -14,6 +14,20 @@ lexer-feedback grammars end-to-end in their target language.
 
 ### Added
 
+- **Self-host bootstrap.** `examples/plox_self.plox` describes the .plox
+  DSL in itself. plox builds it (52 states, conflict-free) and the
+  generated parser handles every committed example .plox, including
+  parsing its own definition. The bootstrap reader at
+  `plox/spec/reader.py` still ships because the self-host grammar
+  doesn't cover embedded action bodies (`{ ... }` needs balanced-brace
+  matching, a non-LR construct); hosts using the self-host grammar strip
+  actions in a pre-pass first.
+- **~30% faster LR(1) build.** Two stacked optimisations: pre-compute
+  FIRST(rhs[pos:]) per (production, position) at compile time, and
+  bucket items by next-symbol in `build_lr1`'s per-state loop instead of
+  re-iterating items per symbol via `_goto`. c_subset (1649 states)
+  drops from ~21s to ~14s on the reference machine; the full test suite
+  drops from ~57s to ~45s.
 - **C, C++, Lua: token-filter ABI.** Hosts can install a callback that
   receives the lookahead's terminal kind and source text and returns
   the (possibly rewritten) terminal kind. Fires on every freshly fetched
@@ -42,13 +56,15 @@ lexer-feedback grammars end-to-end in their target language.
 
 ### Status of post-1.0 follow-ups
 
-- **Done in this cycle**: token-filter ABI, post-reduce hook, GLR
-  default-reduction symmetry — the items the 1.0.0 release notes
-  explicitly called out as "out of scope (post-v1)".
+- **Done in this cycle**: token-filter ABI in C/C++/Lua, post-reduce
+  hook in C/C++/Lua, GLR default-reduction symmetry, ~30% faster LR(1)
+  build, self-host bootstrap. All but the last appeared on the 1.0.0
+  release notes' "out of scope (post-v1)" list; self-host was the
+  remaining plan item from `plox_plan.txt`.
 - **Still deferred**: full `bdos.plm` (needs upstream macro expander),
   function-pointer abstract declarators, variadic `...`, compound
   literals, designated initializers, `_Generic`, bit-fields, multi-line
-  preprocessor macros, plox self-host bootstrap.
+  preprocessor macros, embedded action bodies in the self-host grammar.
 
 ## 1.0.0 — 2026-05-02
 

@@ -76,6 +76,7 @@ plox emit   calc.json --target=py  --out=gen  # emit Python driver
 - `plm_subset` — the first real grammar (Phase 5). Calc-style PL/M with declarations, IF/THEN/ELSE, DO blocks.
 - `plm_full` — extends `plm_subset` to the constructs Digital Research's BDOS uses (LITERALLY, INITIAL, AT, BASED, iterative DO TO/BY, DO CASE, structures). Parses the first 162 lines of the real `bdos.plm` source end-to-end.
 - `c_subset` — a meaningful subset of C: function definitions, full statement repertoire (if/else/while/for/do-while/switch/break/continue/goto/return), expressions with C precedence, struct/union/enum, casts, the typedef-name lexer hack, and a preprocessor skip. Parses 21 of uc80's example C programs (vendored as fixtures).
+- `plox_self` — the .plox DSL described in itself. Parses every other example grammar in this list, including its own definition. Action bodies (`{ ... }`) are out of scope; hosts strip them in a pre-pass.
 
 ## License
 
