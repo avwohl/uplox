@@ -51,9 +51,9 @@ def test_c_subset_no_conflicts(built):
 
 def test_c_subset_state_count_in_range(built):
     _scanner, table = built
-    # 1299 once struct/union/enum landed. Allow generous slack so the test
-    # stays green through small grammar tweaks; flag if it explodes.
-    assert 700 <= len(table.states) <= 2200, len(table.states)
+    # 1447 with struct/union/enum + switch. Allow generous slack so the
+    # test stays green through small grammar tweaks; flag if it explodes.
+    assert 700 <= len(table.states) <= 2400, len(table.states)
 
 
 def test_c_simple_function_definition(built):
@@ -364,6 +364,67 @@ enum {
     assert isinstance(tree, ParseNode)
 
 
+def test_c_switch_with_break(built):
+    scanner, table = built
+    src = """
+int test(int x) {
+    switch (x) {
+        case 0:
+            return 10;
+        case 1:
+            return 20;
+        default:
+            return 30;
+    }
+    return 0;
+}
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_switch_fall_through_and_compound(built):
+    scanner, table = built
+    src = """
+int test(int x) {
+    int r = 0;
+    switch (x) {
+        case 0: {
+            r = 1;
+        }
+        case 1:
+            r = r + 2;
+            break;
+        case 2:
+        case 3:
+            r = 99;
+            break;
+    }
+    return r;
+}
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_switch_inside_if_does_not_break_dangling_else(built):
+    """Adding switch is the kind of change that often re-opens dangling-else
+    if matched/unmatched discipline isn't threaded through the new stmt
+    forms. This case probes that interaction."""
+    scanner, table = built
+    src = """
+int test(int x, int y) {
+    if (x) switch (y) {
+        case 0: return 1;
+        default: return 2;
+    } else return 3;
+    return 0;
+}
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
 def test_c_typedef_accepted_as_storage_class(built):
     """We don't implement the typedef-name lexer hack, but the syntactic
     form `typedef <type> <name>;` parses cleanly because typedef is a
@@ -437,6 +498,12 @@ UC80_SAMPLES = [
     "test_incdec.c",
     "test_global.c",
     "test_static.c",
+    "test_switch.c",
+    "test_ternary.c",
+    "test_string.c",
+    "test_string2.c",
+    "test_long_simple.c",
+    "test_unsigned.c",
 ]
 
 

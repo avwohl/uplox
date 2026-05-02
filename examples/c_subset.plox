@@ -78,6 +78,9 @@ KW_STRUCT  = "struct"
 KW_UNION   = "union"
 KW_ENUM    = "enum"
 KW_TYPEDEF = "typedef"
+KW_SWITCH  = "switch"
+KW_CASE    = "case"
+KW_DEFAULT = "default"
 
 IDENT      = /[A-Za-z_][A-Za-z0-9_]*/
 
@@ -288,12 +291,18 @@ matched_stmt : matched_if
              | expression_stmt
              | jump_stmt
              | matched_iteration_stmt
+             | matched_switch_stmt
              | IDENT COLON matched_stmt
+             | KW_CASE conditional_expr COLON matched_stmt
+             | KW_DEFAULT COLON matched_stmt
              ;
 
 unmatched_stmt : unmatched_if
                | unmatched_iteration_stmt
+               | unmatched_switch_stmt
                | IDENT COLON unmatched_stmt
+               | KW_CASE conditional_expr COLON unmatched_stmt
+               | KW_DEFAULT COLON unmatched_stmt
                ;
 
 matched_if : KW_IF LPAREN expr RPAREN matched_stmt KW_ELSE matched_stmt ;
@@ -309,6 +318,12 @@ matched_iteration_stmt : KW_WHILE LPAREN expr RPAREN matched_stmt
 unmatched_iteration_stmt : KW_WHILE LPAREN expr RPAREN unmatched_stmt
                          | KW_FOR LPAREN for_init for_cond_opt SEMI for_step_opt RPAREN unmatched_stmt
                          ;
+
+# switch is matched/unmatched on the body it wraps, just like iteration.
+# `case <const>:` and `default:` are statement labels; their inner stmt
+# follows the same matched/unmatched discipline as goto-style labels.
+matched_switch_stmt : KW_SWITCH LPAREN expr RPAREN matched_stmt ;
+unmatched_switch_stmt : KW_SWITCH LPAREN expr RPAREN unmatched_stmt ;
 
 compound_stmt : LBRACE block_items RBRACE ;
 
