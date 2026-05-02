@@ -1,0 +1,364 @@
+# PL/M-80 grammar — extended subset for Phase 9.
+#
+# Targets the constructs used by Digital Research's BDOS source
+# (sample_code/bdos1.4.plm in the uplm80 repo) on top of plm_subset.plox:
+#
+# * Module-level labeled DO blocks (`BDOS: DO; ... END BDOS;`)
+# * LITERALLY macro declarations (`NAME LITERALLY '0FAH'`)
+# * EQU macro declarations (alias of LITERALLY in some sources)
+# * AT(addr) and INITIAL(...) variable clauses
+# * BASED IDENT with optional array length
+# * Iterative DO (`DO i = 1 TO N`, optional BY step)
+# * DO CASE
+# * `DO FOREVER` (when LITERALLY-expanded to `WHILE 1`)
+# * Inline string literals in expressions (already supported)
+# * STRUCTURE types — partial (parse the syntax, don't validate semantics)
+#
+# Still not modelled:
+#
+# * The pre-lexer that expands LITERALLY macros (we keep their definitions
+#   in the grammar but don't expand: hosts handle this).
+# * $-conditional compilation directives ($COND, $IF, $INCLUDE).
+#   These have to be filtered upstream of the lexer; the grammar treats
+#   them as if they aren't there.
+# * Embedded assignment within parens `(x := y)` — uplm80 supports it,
+#   but it requires a non-trivial parser tweak that's noise for now.
+
+%grammar plm_full
+
+%options
+start = module
+
+%tokens
+WS         = /[ \t\r\n]+/                        %skip
+COMMENT    = /\/\*([^*]|\*+[^*\/])*\*+\//        %skip
+
+NUMBER     = /[0-9][0-9A-Fa-f$]*[BbDdHhOoQq]?/
+STRING     = /'([^'\n]|'')*'/
+
+PROCEDURE  = "PROCEDURE"
+EXTERNAL   = "EXTERNAL"
+REENTRANT  = "REENTRANT"
+INTERRUPT  = "INTERRUPT"
+PUBLIC     = "PUBLIC"
+DECLARE    = "DECLARE"
+INITIAL    = "INITIAL"
+DATA       = "DATA"
+LITERALLY  = "LITERALLY"
+LABEL      = "LABEL"
+BYTE       = "BYTE"
+ADDRESS    = "ADDRESS"
+BASED      = "BASED"
+AT         = "AT"
+KW_IF      = "IF"
+THEN       = "THEN"
+ELSE       = "ELSE"
+DO         = "DO"
+WHILE      = "WHILE"
+CASE       = "CASE"
+BY         = "BY"
+TO         = "TO"
+END        = "END"
+CALL       = "CALL"
+RETURN     = "RETURN"
+GOTO       = "GOTO"
+GO         = "GO"
+HALT       = "HALT"
+ENABLE     = "ENABLE"
+DISABLE    = "DISABLE"
+KW_AND     = "AND"
+KW_OR      = "OR"
+KW_XOR     = "XOR"
+KW_NOT     = "NOT"
+KW_MOD     = "MOD"
+KW_PLUS    = "PLUS"
+KW_MINUS   = "MINUS"
+EOF_KW     = "EOF"
+STRUCTURE  = "STRUCTURE"
+
+# Note: PL/M-80 sources sometimes declare `EQU LITERALLY 'LITERALLY'` and
+# then use `EQU` as a macro alias. That requires running a macro expander
+# *before* the lexer — we don't do that in v0, so EQU is just an identifier
+# here. Sources that rely on the EQU alias need a pre-pass; the LITERALLY
+# keyword still works directly.
+
+# Identifiers (last so the keyword literals win on a tie).
+IDENT      = /[A-Za-z_$][A-Za-z0-9_$]*/
+
+# Multi-char operators before single-char.
+LE         = "<="
+GE         = ">="
+NE         = "<>"
+
+EQ         = "="
+LT         = "<"
+GT         = ">"
+PLUS       = "+"
+MINUS      = "-"
+STAR       = "*"
+SLASH      = "/"
+LPAREN     = "("
+RPAREN     = ")"
+COMMA      = ","
+SEMI       = ";"
+COLON      = ":"
+DOT        = "."
+
+%rules
+
+# A module is items terminated by an optional trailing EOF keyword. A
+# module item is either a stand-alone declaration / statement / proc /
+# address-literal, OR a top-level labeled DO block.
+module      : items
+            | items EOF_KW
+            ;
+
+items       : items item
+            | item
+            ;
+
+item        : address_literal
+            | proc_decl
+            | declare_stmt
+            | stmt
+            ;
+
+address_literal : NUMBER COLON ;
+
+# --- procedures -----------------------------------------------------------
+
+proc_decl   : IDENT COLON PROCEDURE proc_signature proc_body
+            ;
+
+# proc_signature wraps everything between PROCEDURE and the SEMI that
+# starts the body. Variants: BYTE / ADDRESS return type + parens + attrs.
+proc_signature : proc_return proc_params proc_attrs SEMI ;
+
+proc_return : BYTE
+            | ADDRESS
+            |
+            ;
+
+proc_params : LPAREN ident_list RPAREN
+            | LPAREN RPAREN
+            |
+            ;
+
+proc_attrs  : proc_attrs proc_attr
+            |
+            ;
+
+proc_attr   : EXTERNAL
+            | PUBLIC
+            | REENTRANT
+            | INTERRUPT NUMBER
+            ;
+
+proc_body   : body_items END opt_end_label SEMI ;
+
+# A single sequence of declarations and/or statements. PL/M-80 conventionally
+# puts declarations first, but enforcing that at the grammar level means
+# either splitting into two empty-derivable lists (which collides on every
+# block-internal terminal) or threading a phase marker. Both add a lot of
+# states for no parser-level value, since downstream tools that care about
+# the convention can check it post-parse on the resulting body_items list.
+body_items  : body_items body_item
+            |
+            ;
+body_item   : declare_stmt
+            | stmt
+            ;
+
+opt_end_label : IDENT
+              |
+              ;
+
+ident_list  : IDENT
+            | ident_list COMMA IDENT
+            ;
+
+# --- declarations ---------------------------------------------------------
+
+declare_stmt : DECLARE decl_list SEMI ;
+
+decl_list   : decl_list COMMA decl_item
+            | decl_item
+            ;
+
+# A decl_item is one of:
+#   simple-typed:   NAME (or (a,b)) TYPE [attrs]
+#   data-init:      NAME DATA (...)
+#   literally:      NAME LITERALLY 'value' / NAME EQU 'value'
+#   structure:      NAME STRUCTURE ( ... ) [attrs]
+decl_item   : decl_names based_opt array_size_opt type_spec attrs_opt
+            | decl_names DATA LPAREN arg_list RPAREN
+            | IDENT LITERALLY STRING
+            | IDENT STRUCTURE LPAREN struct_member_list RPAREN attrs_opt
+            ;
+
+decl_names  : IDENT
+            | LPAREN ident_list RPAREN
+            ;
+
+# `BUFF BASED BUFFA (128) BYTE` — the BASED clause sits between the name(s)
+# and the array size, before the type proper.
+based_opt   : BASED IDENT
+            |
+            ;
+
+# `TRAN(32) BYTE` — array size goes between name and type. (PL/M-80 also
+# allows `TRAN BYTE(32)` and we keep that as a type_spec form below.)
+array_size_opt : LPAREN size_expr RPAREN
+               |
+               ;
+
+type_spec   : BYTE
+            | ADDRESS
+            | LABEL
+            | BYTE LPAREN size_expr RPAREN
+            | ADDRESS LPAREN size_expr RPAREN
+            ;
+
+# Sizes inside type specs are usually NUMBER but may be IDENT (a LITERALLY
+# macro that expands to a constant).
+size_expr   : NUMBER
+            | IDENT
+            ;
+
+attrs_opt   : attrs_opt attr_clause
+            |
+            ;
+
+attr_clause : EXTERNAL
+            | PUBLIC
+            | INITIAL LPAREN arg_list RPAREN
+            | AT      LPAREN expr     RPAREN
+            ;
+
+# --- structure types (parsed for shape; semantics deferred) ---------------
+
+struct_member_list : struct_member
+                   | struct_member_list COMMA struct_member
+                   ;
+
+struct_member : decl_names type_spec ;
+
+# --- statements -----------------------------------------------------------
+
+stmt        : matched_stmt
+            | unmatched_stmt
+            ;
+
+# Threading the matched/unmatched discipline through labels: an
+# `IDENT: stmt` is matched iff the inner stmt is matched. Without this,
+# `stmt -> matched_stmt` would cover a labelled-unmatched-if and ELSE
+# binding would conflict — broke when label_stmt was a flat
+# `IDENT COLON stmt`.
+matched_stmt   : matched_if | non_if_stmt | IDENT COLON matched_stmt ;
+unmatched_stmt : unmatched_if            | IDENT COLON unmatched_stmt ;
+
+matched_if     : KW_IF expr THEN matched_stmt ELSE matched_stmt ;
+unmatched_if   : KW_IF expr THEN stmt
+               | KW_IF expr THEN matched_stmt ELSE unmatched_stmt
+               ;
+
+non_if_stmt : assignment_stmt
+            | call_stmt
+            | return_stmt
+            | goto_stmt
+            | halt_stmt
+            | enable_stmt
+            | disable_stmt
+            | do_block
+            | null_stmt
+            ;
+
+null_stmt   : SEMI ;
+call_stmt   : CALL primary SEMI ;
+
+return_stmt : RETURN SEMI
+            | RETURN expr SEMI
+            ;
+
+goto_stmt   : GOTO IDENT SEMI
+            | GO TO IDENT SEMI
+            ;
+
+halt_stmt    : HALT SEMI ;
+enable_stmt  : ENABLE SEMI ;
+disable_stmt : DISABLE SEMI ;
+
+assignment_stmt : primary EQ expr SEMI ;
+
+# DO blocks come in five flavours:
+#   plain         DO; ... END;
+#   while         DO WHILE expr; ... END;
+#   iterative     DO i = expr TO expr [BY expr]; ... END;
+#   case          DO CASE expr; ... END;
+do_block    : DO SEMI body_items END opt_end_label SEMI
+            | DO WHILE expr SEMI body_items END opt_end_label SEMI
+            | DO IDENT EQ expr TO expr SEMI body_items END opt_end_label SEMI
+            | DO IDENT EQ expr TO expr BY expr SEMI body_items END opt_end_label SEMI
+            | DO CASE expr SEMI body_items END opt_end_label SEMI
+            ;
+
+# --- expressions ---------------------------------------------------------
+
+expr        : or_xor ;
+
+or_xor      : or_xor KW_OR  and_e
+            | or_xor KW_XOR and_e
+            | and_e
+            ;
+
+and_e       : and_e KW_AND not_e
+            | not_e
+            ;
+
+not_e       : KW_NOT not_e
+            | rel_e
+            ;
+
+rel_e       : add_e EQ add_e
+            | add_e LT add_e
+            | add_e GT add_e
+            | add_e LE add_e
+            | add_e GE add_e
+            | add_e NE add_e
+            | add_e
+            ;
+
+add_e       : add_e PLUS  mul_e
+            | add_e MINUS mul_e
+            | add_e KW_PLUS  mul_e
+            | add_e KW_MINUS mul_e
+            | mul_e
+            ;
+
+mul_e       : mul_e STAR  unary
+            | mul_e SLASH unary
+            | mul_e KW_MOD unary
+            | unary
+            ;
+
+unary       : MINUS unary
+            | primary
+            ;
+
+primary     : DOT LPAREN arg_list RPAREN
+            | DOT qualname
+            | qualname
+            | NUMBER
+            | STRING
+            | LPAREN expr RPAREN
+            ;
+
+qualname    : IDENT
+            | IDENT LPAREN arg_list RPAREN
+            | IDENT LPAREN RPAREN
+            | qualname DOT IDENT
+            ;
+
+arg_list    : arg_list COMMA expr
+            | expr
+            ;

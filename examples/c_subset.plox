@@ -1,0 +1,408 @@
+# C subset grammar — Phase 9 start of the uc_core port.
+#
+# This grammar covers a deliberate subset of C suitable for the small
+# uc_core / uc80 / uc386 source style:
+#
+#   * Function definitions (return type, name, parameter list, block body)
+#   * Variable declarations: char/int/void/long, pointers, arrays
+#   * Statements: if/else, while, for, return, break, continue,
+#     expression statements, blocks
+#   * Expressions with C operator precedence (assignment, ternary,
+#     logical, bitwise, comparison, shift, additive, multiplicative,
+#     unary, postfix, primary)
+#   * Function calls, array subscripts, member access, increment/decrement
+#   * Storage classes (static, extern, register, auto) and type
+#     qualifiers (const, volatile) — accepted but not validated
+#
+# Out of scope for the v0 sketch:
+#
+#   * typedef / struct / union / enum (parse-only stubs would help; we
+#     don't even sketch them yet, to keep the grammar small)
+#   * Preprocessor (#include, #define, #if) — must be expanded upstream
+#   * The "typedef name" lexer hack: in real C, an identifier that's been
+#     typedef'd parses differently. v0 treats any IDENT as a name; the
+#     host disambiguates after the parse.
+#   * Variadic functions (...)
+#   * Compound literals, designated initializers, _Generic
+#   * Bit-fields
+#
+# Even this subset is substantial — production count and state count
+# easily double calc and triple plm_subset. The point is to verify plox
+# scales to real-language grammars, and to give the uc_core port a head
+# start.
+
+%grammar c_subset
+
+%options
+start = translation_unit
+
+%tokens
+WS         = /[ \t\r\n]+/                        %skip
+LINE_COMMENT = /\/\/[^\n]*/                      %skip
+BLOCK_COMMENT = /\/\*([^*]|\*+[^*\/])*\*+\//     %skip
+
+# Numeric and string literals.
+INT_LIT    = /(0[xX][0-9A-Fa-f]+|0[0-7]*|[1-9][0-9]*)[uUlL]*/
+CHAR_LIT   = /'([^'\\\n]|\\.)+'/
+STRING_LIT = /"([^"\\\n]|\\.)*"/
+
+# Keywords. Must come before IDENT.
+KW_VOID    = "void"
+KW_CHAR    = "char"
+KW_SHORT   = "short"
+KW_INT     = "int"
+KW_LONG    = "long"
+KW_SIGNED  = "signed"
+KW_UNSIGNED = "unsigned"
+KW_CONST   = "const"
+KW_VOLATILE = "volatile"
+KW_STATIC  = "static"
+KW_EXTERN  = "extern"
+KW_REGISTER = "register"
+KW_AUTO    = "auto"
+KW_INLINE  = "inline"
+KW_RETURN  = "return"
+KW_IF      = "if"
+KW_ELSE    = "else"
+KW_WHILE   = "while"
+KW_DO      = "do"
+KW_FOR     = "for"
+KW_BREAK   = "break"
+KW_CONTINUE = "continue"
+KW_GOTO    = "goto"
+KW_SIZEOF  = "sizeof"
+
+IDENT      = /[A-Za-z_][A-Za-z0-9_]*/
+
+# Multi-char operators (each must precede its prefix).
+ARROW      = "->"
+INC        = "++"
+DEC        = "--"
+LSHIFT     = "<<"
+RSHIFT     = ">>"
+LE         = "<="
+GE         = ">="
+EQ         = "=="
+NE         = "!="
+LAND       = "&&"
+LOR        = "||"
+ELLIPSIS   = "..."
+PLUS_EQ    = "+="
+MINUS_EQ   = "-="
+STAR_EQ    = "*="
+SLASH_EQ   = "/="
+PERCENT_EQ = "%="
+AMP_EQ     = "&="
+PIPE_EQ    = "|="
+CARET_EQ   = "^="
+LSHIFT_EQ  = "<<="
+RSHIFT_EQ  = ">>="
+
+# Single-char operators / delimiters.
+ASSIGN     = "="
+LT         = "<"
+GT         = ">"
+PLUS       = "+"
+MINUS      = "-"
+STAR       = "*"
+SLASH      = "/"
+PERCENT    = "%"
+AMP        = "&"
+PIPE       = "|"
+CARET      = "^"
+TILDE      = "~"
+BANG       = "!"
+QUESTION   = "?"
+COLON      = ":"
+SEMI       = ";"
+COMMA      = ","
+DOT        = "."
+LBRACE     = "{"
+RBRACE     = "}"
+LBRACKET   = "["
+RBRACKET   = "]"
+LPAREN     = "("
+RPAREN     = ")"
+
+%rules
+
+# A C translation unit is a sequence of top-level declarations and
+# function definitions.
+translation_unit : top_items
+                 ;
+
+top_items : top_items top_item
+          | top_item
+          ;
+
+top_item : function_definition
+         | declaration
+         ;
+
+# --- function definitions --------------------------------------------------
+
+function_definition : decl_specs declarator compound_stmt ;
+
+# --- declarations ----------------------------------------------------------
+
+declaration : decl_specs init_declarator_list_opt SEMI ;
+
+decl_specs : decl_specs decl_spec
+           | decl_spec
+           ;
+
+decl_spec : storage_class
+          | type_qualifier
+          | type_spec
+          ;
+
+storage_class : KW_STATIC | KW_EXTERN | KW_REGISTER | KW_AUTO | KW_INLINE ;
+
+type_qualifier : KW_CONST | KW_VOLATILE ;
+
+type_spec : KW_VOID | KW_CHAR | KW_SHORT | KW_INT | KW_LONG
+          | KW_SIGNED | KW_UNSIGNED
+          ;
+
+init_declarator_list_opt : init_declarator_list
+                         |
+                         ;
+
+init_declarator_list : init_declarator_list COMMA init_declarator
+                     | init_declarator
+                     ;
+
+init_declarator : declarator
+                | declarator ASSIGN initializer
+                ;
+
+# Declarators allow pointer prefixes and either array brackets or a
+# function-parameter parenthesis suffix.
+declarator : pointer direct_declarator
+           | direct_declarator
+           ;
+
+pointer : pointer STAR type_qualifier_list_opt
+        | STAR type_qualifier_list_opt
+        ;
+
+type_qualifier_list_opt : type_qualifier_list
+                        |
+                        ;
+
+type_qualifier_list : type_qualifier_list type_qualifier
+                    | type_qualifier
+                    ;
+
+direct_declarator : IDENT
+                  | LPAREN declarator RPAREN
+                  | direct_declarator LBRACKET INT_LIT RBRACKET
+                  | direct_declarator LBRACKET RBRACKET
+                  | direct_declarator LPAREN parameter_list RPAREN
+                  | direct_declarator LPAREN RPAREN
+                  ;
+
+parameter_list : parameter_list COMMA parameter
+               | parameter
+               ;
+
+parameter : decl_specs declarator
+          | decl_specs                    # for `int (*)(int)`-style abstract decls (rough)
+          ;
+
+initializer : assignment_expr
+            | LBRACE initializer_list RBRACE
+            | LBRACE initializer_list COMMA RBRACE
+            ;
+
+initializer_list : initializer_list COMMA initializer
+                 | initializer
+                 ;
+
+# --- statements ------------------------------------------------------------
+
+stmt : matched_stmt
+     | unmatched_stmt
+     ;
+
+# Threading the matched/unmatched discipline through labels and loop
+# bodies. iteration_stmt's body is a stmt (which can be unmatched) — that
+# would re-introduce the dangling-else conflict if iteration_stmt itself
+# could appear in a position where ELSE follows. Same shape as the
+# plm_full grammar: split labels by matchedness; split iteration by the
+# matchedness of the loop body.
+matched_stmt : matched_if
+             | compound_stmt
+             | expression_stmt
+             | jump_stmt
+             | matched_iteration_stmt
+             | IDENT COLON matched_stmt
+             ;
+
+unmatched_stmt : unmatched_if
+               | unmatched_iteration_stmt
+               | IDENT COLON unmatched_stmt
+               ;
+
+matched_if : KW_IF LPAREN expr RPAREN matched_stmt KW_ELSE matched_stmt ;
+unmatched_if : KW_IF LPAREN expr RPAREN stmt
+             | KW_IF LPAREN expr RPAREN matched_stmt KW_ELSE unmatched_stmt
+             ;
+
+matched_iteration_stmt : KW_WHILE LPAREN expr RPAREN matched_stmt
+                       | KW_DO matched_stmt KW_WHILE LPAREN expr RPAREN SEMI
+                       | KW_FOR LPAREN for_init for_cond_opt SEMI for_step_opt RPAREN matched_stmt
+                       ;
+
+unmatched_iteration_stmt : KW_WHILE LPAREN expr RPAREN unmatched_stmt
+                         | KW_FOR LPAREN for_init for_cond_opt SEMI for_step_opt RPAREN unmatched_stmt
+                         ;
+
+compound_stmt : LBRACE block_items RBRACE ;
+
+block_items : block_items block_item
+            |
+            ;
+
+block_item : declaration
+           | stmt
+           ;
+
+expression_stmt : SEMI
+                | expr SEMI
+                ;
+
+# `for (e; e; e)` and `for (decl e; e)` — covers both classical and C99 forms.
+# expression_stmt already covers the empty-init form (just SEMI), so we don't
+# repeat it here.
+for_init : declaration
+         | expression_stmt
+         ;
+
+for_cond_opt : expr
+             |
+             ;
+
+for_step_opt : expr
+             |
+             ;
+
+jump_stmt : KW_GOTO IDENT SEMI
+          | KW_CONTINUE SEMI
+          | KW_BREAK SEMI
+          | KW_RETURN SEMI
+          | KW_RETURN expr SEMI
+          ;
+
+# --- expressions -----------------------------------------------------------
+# Standard C precedence ladder. We stop at assignment_expr for places where
+# comma-expressions are forbidden (function arguments, initializers,
+# declaration sizes); use `expr` (which folds in comma) at the top level.
+
+expr : assignment_expr
+     | expr COMMA assignment_expr
+     ;
+
+assignment_expr : conditional_expr
+                | unary_expr ASSIGN     assignment_expr
+                | unary_expr PLUS_EQ    assignment_expr
+                | unary_expr MINUS_EQ   assignment_expr
+                | unary_expr STAR_EQ    assignment_expr
+                | unary_expr SLASH_EQ   assignment_expr
+                | unary_expr PERCENT_EQ assignment_expr
+                | unary_expr AMP_EQ     assignment_expr
+                | unary_expr PIPE_EQ    assignment_expr
+                | unary_expr CARET_EQ   assignment_expr
+                | unary_expr LSHIFT_EQ  assignment_expr
+                | unary_expr RSHIFT_EQ  assignment_expr
+                ;
+
+conditional_expr : logical_or_expr
+                 | logical_or_expr QUESTION expr COLON conditional_expr
+                 ;
+
+logical_or_expr : logical_or_expr LOR logical_and_expr
+                | logical_and_expr
+                ;
+
+logical_and_expr : logical_and_expr LAND inclusive_or_expr
+                 | inclusive_or_expr
+                 ;
+
+inclusive_or_expr : inclusive_or_expr PIPE exclusive_or_expr
+                  | exclusive_or_expr
+                  ;
+
+exclusive_or_expr : exclusive_or_expr CARET and_expr
+                  | and_expr
+                  ;
+
+and_expr : and_expr AMP equality_expr
+         | equality_expr
+         ;
+
+equality_expr : equality_expr EQ relational_expr
+              | equality_expr NE relational_expr
+              | relational_expr
+              ;
+
+relational_expr : relational_expr LT shift_expr
+                | relational_expr GT shift_expr
+                | relational_expr LE shift_expr
+                | relational_expr GE shift_expr
+                | shift_expr
+                ;
+
+shift_expr : shift_expr LSHIFT additive_expr
+           | shift_expr RSHIFT additive_expr
+           | additive_expr
+           ;
+
+additive_expr : additive_expr PLUS  multiplicative_expr
+              | additive_expr MINUS multiplicative_expr
+              | multiplicative_expr
+              ;
+
+multiplicative_expr : multiplicative_expr STAR    cast_expr
+                    | multiplicative_expr SLASH   cast_expr
+                    | multiplicative_expr PERCENT cast_expr
+                    | cast_expr
+                    ;
+
+# We deliberately *don't* include casts in v0 — `(type) expr` is ambiguous
+# with `(expr) op expr` without the typedef-name lexer hack. Real uc_core
+# code uses casts heavily; that's a Phase-9 follow-up.
+cast_expr : unary_expr ;
+
+unary_expr : postfix_expr
+           | INC unary_expr
+           | DEC unary_expr
+           | AMP   cast_expr
+           | STAR  cast_expr
+           | PLUS  cast_expr
+           | MINUS cast_expr
+           | TILDE cast_expr
+           | BANG  cast_expr
+           | KW_SIZEOF unary_expr
+           ;
+
+postfix_expr : primary_expr
+             | postfix_expr LBRACKET expr RBRACKET
+             | postfix_expr LPAREN argument_list RPAREN
+             | postfix_expr LPAREN RPAREN
+             | postfix_expr DOT IDENT
+             | postfix_expr ARROW IDENT
+             | postfix_expr INC
+             | postfix_expr DEC
+             ;
+
+primary_expr : IDENT
+             | INT_LIT
+             | CHAR_LIT
+             | STRING_LIT
+             | LPAREN expr RPAREN
+             ;
+
+argument_list : argument_list COMMA assignment_expr
+              | assignment_expr
+              ;
