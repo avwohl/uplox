@@ -16,11 +16,13 @@
 #
 # What's deferred (out of scope for this self-host pass):
 #
-#   * Embedded action bodies `{ ... }` — they require balanced-brace
-#     matching, which is a non-LR construct. The bootstrap reader handles
-#     them directly; a host using this grammar must strip actions in a
-#     pre-pass (or use the bootstrap reader for full fidelity).
 #   * `%prec <terminal>` annotations — not yet used by any plox grammar.
+#
+# Embedded action bodies `{ ... }` are handled via the lexer's
+# `%balanced=...` extension: the ACTION_BODY token's DFA matches just
+# the opening `{`, then the runtime extends the match by counting
+# nested `{`/`}` until depth returns to zero. The whole body — newlines,
+# nested braces and all — comes through as one token's text.
 #
 # Symmetry note: this grammar uses lower-case rule names and UPPER_CASE
 # terminal names, exactly like the rest of the plox examples.
@@ -44,6 +46,7 @@ PCT_RULES   = "%rules"
 PCT_SKIP    = "%skip"
 PCT_HOOK    = "%hook"
 PCT_PREC    = "%prec"
+PCT_BALANCED = "%balanced"
 
 EQ         = "="
 COLON      = ":"
@@ -59,6 +62,12 @@ STRING     = /"([^"\\]|\\.)*"/
 
 # Identifiers (rule names, terminal names, hook names, option keys/values).
 IDENT      = /[A-Za-z_][A-Za-z0-9_]*/
+
+# Action body: opaque target-language source. The DFA only recognises the
+# opening `{`; the runtime's %balanced extension extends the match by
+# counting nested `{`/`}` until depth returns to zero. The closing `}` is
+# included in the matched text.
+ACTION_BODY = "{" %balanced="}"
 
 %rules
 
@@ -101,8 +110,18 @@ token_lines : token_lines token_line
             |
             ;
 
-token_line : IDENT EQ token_pattern
-           | IDENT EQ token_pattern PCT_SKIP
+token_line : IDENT EQ token_pattern token_attrs ;
+
+# Optional per-token attributes. `%balanced="<close>"` marks the token as
+# balanced-bracket (the lexer-feedback runtime extends the match by counting
+# nested open/close pairs); `%skip` drops matches silently. Both can appear,
+# in any order.
+token_attrs : token_attrs token_attr
+            |
+            ;
+
+token_attr : PCT_SKIP
+           | PCT_BALANCED EQ STRING
            ;
 
 token_pattern : REGEX
@@ -136,7 +155,14 @@ alts : alts PIPE alt
      | alt
      ;
 
-alt : symbols opt_hook ;
+alt : symbols opt_hook opt_action ;
+
+# Action body sits at the end of an alternative, after any %hook annotation.
+# It's parsed as a single ACTION_BODY token; the inner content is opaque to
+# the LR(1) parser.
+opt_action : ACTION_BODY
+           |
+           ;
 
 symbols : symbols symbol
         |

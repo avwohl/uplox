@@ -24,7 +24,7 @@ scanner does not skip ahead.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterator
 
 from .dfa import DEAD, DFA
@@ -57,10 +57,18 @@ class Scanner:
     Both parts are immutable. Each :func:`scan` call drives a fresh state machine
     over its input — the scanner itself holds no per-input state, so multiple
     threads or tasks can share one Scanner instance.
+
+    ``balanced`` maps token names to their closing-delimiter characters. When
+    the DFA matches a balanced token, the scanner extends the match by counting
+    nested instances of (open, close) until depth returns to zero. The open
+    delimiter is whatever the DFA matched (typically a single literal char like
+    ``"{"``). This lets a token cover content that is not itself a regular
+    language — target-language action bodies, for example.
     """
     dfa: DFA
     skip_tokens: frozenset[str] = frozenset()
     filename: str = "<input>"
+    balanced: dict[str, str] = field(default_factory=dict)
 
     def scan(self, source: str | bytes) -> Iterator[Token]:
         """Yield tokens for ``source``. ``source`` may be ``str`` (treated as UTF-8) or bytes."""
@@ -77,6 +85,7 @@ class Scanner:
         col = 1
         dfa = self.dfa
         skip = self.skip_tokens
+        balanced = self.balanced
 
         while pos < n:
             # One maximal-munch pass starting at ``pos``.
@@ -106,6 +115,31 @@ class Scanner:
                     f"{self.filename}:{line}:{col}: lexical error at byte {data[pos]:#04x}",
                     line, col, data[pos],
                 )
+
+            # Extend the match to cover a balanced bracket body. The DFA only
+            # recognised the opening delimiter (e.g. "{"); we count nested
+            # instances of (open, close) by raw byte until depth returns to
+            # zero. Open is whatever the DFA already consumed; close comes
+            # from the per-token map.
+            if last_accept_name in balanced:
+                close_b = balanced[last_accept_name].encode("utf-8")[0]
+                open_b = data[pos]
+                depth = 1
+                j = last_accept_end
+                while j < n and depth > 0:
+                    b = data[j]
+                    if b == open_b:
+                        depth += 1
+                    elif b == close_b:
+                        depth -= 1
+                    j += 1
+                if depth != 0:
+                    raise ScanError(
+                        f"{self.filename}:{line}:{col}: unterminated {last_accept_name} "
+                        f"(missing {balanced[last_accept_name]!r})",
+                        line, col, open_b,
+                    )
+                last_accept_end = j
 
             text_bytes = data[pos:last_accept_end]
             if last_accept_name not in skip:

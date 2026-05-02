@@ -32,6 +32,11 @@ def lex_from_ir(ir: GrammarIR) -> tuple[DFA, list[str], list[str]]:
     Returns ``(minimised_dfa, token_names_in_decl_order, skip_token_names)``.
     Token order is exactly :attr:`GrammarIR.tokens` order — that is also the
     priority used by the DFA's tie-break (earlier declaration wins).
+
+    Balanced-bracket tokens (those with ``balanced_close``) are baked into the
+    DFA only via their opening pattern; the runtime extension that consumes
+    the matching close lives in :class:`plox.lex.scanner.Scanner`. Use
+    :func:`balanced_tokens` to recover the open/close map from the IR.
     """
     if not ir.tokens:
         raise ValueError(f"grammar {ir.name!r} declares no tokens")
@@ -55,3 +60,13 @@ def lex_from_ir(ir: GrammarIR) -> tuple[DFA, list[str], list[str]]:
     tokens = [t.name for t in ir.tokens]
     skip = [t.name for t in ir.tokens if t.skip]
     return dfa, tokens, skip
+
+
+def balanced_tokens(ir: GrammarIR) -> dict[str, str]:
+    """Map balanced-token name to its closing-delimiter character.
+
+    The opening delimiter is the first byte of whatever the DFA matches for
+    that token; the scanner reads it back from the matched text rather than
+    storing it separately.
+    """
+    return {t.name: t.balanced_close for t in ir.tokens if t.balanced_close is not None}

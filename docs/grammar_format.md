@@ -62,6 +62,13 @@ MINUS   = "-"
 * `/…/` is a regex pattern (see "Regex syntax" below).
 * `"…"` is a literal token; it matches the exact string.
 * `%skip` after a token causes the lexer to drop matches (whitespace, comments).
+* `%balanced="<close>"` after a token marks it as a balanced-bracket
+  token: the DFA matches only the opening pattern, and the runtime
+  extends the match by counting nested instances of (open, close) until
+  depth returns to zero. The opening byte is whatever the DFA already
+  consumed (typically a single literal like `"{"`). Used for content
+  that is not a regular language — target-language action bodies
+  inside the .plox DSL itself are the canonical example.
 
 Token names must be `[A-Z][A-Z0-9_]*`. Lower-case names are non-terminals.
 

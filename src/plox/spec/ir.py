@@ -30,12 +30,20 @@ class TokenDecl:
     ``pattern`` is a regex source string; the lexer pipeline lowers it to NFA/DFA.
     ``literal`` is set when the token was declared by a quoted literal in a rule;
     such tokens are matched as exact strings, not regexes.
+
+    ``balanced_close`` marks the token as a balanced-bracket token: after the
+    DFA matches the opening pattern, the scanner extends the match by counting
+    nested instances of the open/close pair until depth returns to zero. The
+    open delimiter is the first character of the matched text. Used for
+    target-language action bodies like ``{ ... { ... } ... }`` whose body is
+    not a regular language.
     """
 
     name: str
     pattern: Optional[str] = None
     literal: Optional[str] = None
     skip: bool = False
+    balanced_close: Optional[str] = None
     position: Optional[Position] = None
 
 

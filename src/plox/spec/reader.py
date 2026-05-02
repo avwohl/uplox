@@ -178,6 +178,9 @@ _TOKEN_LINE = re.compile(
           |
           "(?P<lit>(?:\\.|[^"\\])*)"       # "literal"
         )
+        (?:\s+%balanced=
+          "(?P<bal>(?:\\.|[^"\\])*)"       # %balanced="<close>"
+        )?
         (?:\s+(?P<skip>%skip))?
         \s*$""",
     re.VERBOSE,
@@ -193,11 +196,18 @@ def _parse_tokens(ir: GrammarIR, lines: list[tuple[int, str]], filename: str) ->
                 f"Expected NAME = /regex/ or NAME = \"literal\" optionally followed by %skip"
             )
         name = m.group("name")
+        balanced = _unquote_literal(m.group("bal")) if m.group("bal") is not None else None
+        if balanced is not None and len(balanced) != 1:
+            raise ReaderError(
+                f"{filename}:{lineno}: %balanced= takes a single-character close "
+                f"delimiter, got {balanced!r}"
+            )
         decl = TokenDecl(
             name=name,
             pattern=m.group("re"),
             literal=_unquote_literal(m.group("lit")) if m.group("lit") is not None else None,
             skip=m.group("skip") is not None,
+            balanced_close=balanced,
             position=Position(filename, lineno, 1),
         )
         ir.tokens.append(decl)

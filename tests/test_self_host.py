@@ -4,13 +4,17 @@ The plan called for self-host once the generator was stable: the .plox
 DSL described as a .plox grammar, fed back through plox to produce a
 parser that reads .plox files. This file is the bootstrap of that
 bootstrap — it builds plox_self.plox and parses every example .plox in
-the repo (action bodies stripped, since they need balanced-brace
-matching that LR can't do).
+the repo, action bodies and all.
+
+Action bodies are not a regular language, so the lexer DFA can't match
+them on its own. plox_self.plox uses the lexer's ``%balanced=...``
+extension: the ACTION_BODY token's DFA matches just the opening ``{``,
+and the runtime extends the match by counting nested ``{``/``}`` until
+depth returns to zero.
 
 What this proves:
 
-* The plox DSL is itself LR(1) once you carve out the action-body
-  exception.
+* The plox DSL is itself LR(1).
 * The generator handles the same DSL it was hand-bootstrapped against —
   no irreproducible bootstrap-only quirks.
 * Every committed example grammar parses cleanly through the self-host
@@ -19,12 +23,11 @@ What this proves:
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import pytest
 
-from plox.lex.build import lex_from_ir
+from plox.lex.build import balanced_tokens, lex_from_ir
 from plox.lex.scanner import Scanner
 from plox.parse.grammar import compile_grammar
 from plox.parse.lr1 import build_lr1
@@ -41,7 +44,9 @@ def self_host():
     """Build plox_self.plox once; reuse across tests."""
     ir = read_file(str(PLOX_SELF))
     dfa, _toks, skip = lex_from_ir(ir)
-    scanner = Scanner(dfa=dfa, skip_tokens=frozenset(skip))
+    scanner = Scanner(
+        dfa=dfa, skip_tokens=frozenset(skip), balanced=balanced_tokens(ir)
+    )
     table = build_lr1(compile_grammar(ir))
     return scanner, table
 
@@ -50,77 +55,15 @@ def parse_str(scanner, table, src: str) -> ParseNode:
     return parse(table, scanner.scan(src), hooks=HookRegistry(ignore_missing=True))
 
 
-def strip_actions(text: str) -> str:
-    """Remove `{ ... }` action bodies from a .plox file. The self-host
-    grammar doesn't model action bodies (they need balanced-brace
-    matching, a non-LR construct); a real host using the self-host
-    grammar runs this kind of pre-pass first."""
-    out = []
-    i = 0
-    while i < len(text):
-        c = text[i]
-        # Skip comments verbatim.
-        if c == "#":
-            while i < len(text) and text[i] != "\n":
-                out.append(text[i])
-                i += 1
-            continue
-        # Skip string literals verbatim.
-        if c == '"':
-            out.append(c)
-            i += 1
-            while i < len(text) and text[i] != '"':
-                if text[i] == "\\" and i + 1 < len(text):
-                    out.append(text[i])
-                    out.append(text[i + 1])
-                    i += 2
-                    continue
-                out.append(text[i])
-                i += 1
-            if i < len(text):
-                out.append(text[i])
-                i += 1
-            continue
-        # Skip regex literals verbatim.
-        if c == "/" and i + 1 < len(text) and text[i + 1] != "/" and text[i + 1] != "*":
-            out.append(c)
-            i += 1
-            while i < len(text) and text[i] != "/":
-                if text[i] == "\\" and i + 1 < len(text):
-                    out.append(text[i])
-                    out.append(text[i + 1])
-                    i += 2
-                    continue
-                out.append(text[i])
-                i += 1
-            if i < len(text):
-                out.append(text[i])
-                i += 1
-            continue
-        # Strip an action body: scan forward consuming balanced braces.
-        if c == "{":
-            depth = 1
-            i += 1
-            while i < len(text) and depth > 0:
-                if text[i] == "{":
-                    depth += 1
-                elif text[i] == "}":
-                    depth -= 1
-                i += 1
-            continue
-        out.append(c)
-        i += 1
-    return "".join(out)
-
-
 def test_plox_self_no_conflicts(self_host):
     _scanner, table = self_host
     assert table.conflicts == []
 
 
 def test_plox_self_state_count_in_range(self_host):
-    """52 states as written. The DSL is small; if this explodes we
-    accidentally broke conflict-freeness or pulled in a costly construct."""
+    """54 states as written (52 before ACTION_BODY landed). The DSL is
+    small; if this explodes we accidentally broke conflict-freeness or
+    pulled in a costly construct."""
     _scanner, table = self_host
     assert 30 <= len(table.states) <= 200, len(table.states)
 
@@ -230,26 +173,75 @@ EXAMPLES_TO_TEST = [
 
 @pytest.mark.parametrize("name", EXAMPLES_TO_TEST)
 def test_real_example_parses_under_self_host(self_host, name):
-    """Parse every committed example .plox through the self-host parser.
-
-    Action bodies are stripped first (the bootstrap reader handles them
-    natively; this grammar doesn't, by design). If a future DSL extension
-    adds new syntax, this test set will surface it as a parse failure
-    until plox_self.plox is updated to match."""
+    """Parse every committed example .plox through the self-host parser,
+    verbatim — action bodies and all. If a future DSL extension adds new
+    syntax, this test set will surface it as a parse failure until
+    plox_self.plox is updated to match."""
     path = PLOX_REPO / "examples" / name
     if not path.exists():
         pytest.skip(f"example {name} missing")
     scanner, table = self_host
-    src = strip_actions(path.read_text())
-    tree = parse_str(scanner, table, src)
+    tree = parse_str(scanner, table, path.read_text())
     assert isinstance(tree, ParseNode) and tree.kind == "file"
 
 
 def test_self_host_grammar_parses_its_own_definition(self_host):
     """The most direct self-host check: does plox_self.plox parse
     plox_self.plox? If yes, the DSL is genuinely closed under its own
-    description (modulo the action-body carve-out)."""
+    description, action bodies included."""
     scanner, table = self_host
-    src = strip_actions(PLOX_SELF.read_text())
-    tree = parse_str(scanner, table, src)
+    tree = parse_str(scanner, table, PLOX_SELF.read_text())
     assert isinstance(tree, ParseNode) and tree.kind == "file"
+
+
+def test_action_body_with_nested_braces(self_host):
+    """ACTION_BODY consumes balanced `{` / `}` runs. A nested `{}` inside
+    the body must not terminate the outer match early."""
+    scanner, table = self_host
+    src = """
+%grammar t
+%tokens
+A = "a"
+%rules
+xs : A { if (cond) { do_thing(); } }
+   ;
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_action_body_with_multi_line_content(self_host):
+    """Action bodies can span lines; the DFA's `%balanced` extension
+    consumes raw bytes, newlines included."""
+    scanner, table = self_host
+    src = """
+%grammar t
+%tokens
+A = "a"
+%rules
+xs : A {
+        $$ = $1;
+        log("got it");
+     }
+   ;
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_unterminated_action_body_is_lex_error(self_host):
+    """If a `{` opens an action body and the closing `}` never appears,
+    the scanner reports a lexical error (not a parse error)."""
+    from plox.lex.scanner import ScanError
+
+    scanner, table = self_host
+    src = """
+%grammar t
+%tokens
+A = "a"
+%rules
+xs : A { unterminated
+   ;
+"""
+    with pytest.raises(ScanError):
+        parse_str(scanner, table, src)
