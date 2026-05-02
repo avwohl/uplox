@@ -245,6 +245,86 @@ print(M.token_name(first.kind))
     assert out.stdout.strip() == "IDENT"
 
 
+def test_lua_typedef_name_hack_end_to_end(tmp_path):
+    """Same shape as the C and C++ typedef-name hacks, expressed in Lua via
+    closures over a shared table that holds the typedef set."""
+    SRC = """
+%grammar tnh
+
+%tokens
+WS         = /[ \\t\\n]+/  %skip
+KW_TYPEDEF = "typedef"
+SEMI       = ";"
+IDENT      = /[A-Za-z_][A-Za-z0-9_]*/
+TNAME      = /[A-Za-z_][A-Za-z0-9_]*/
+
+%rules
+prog : decls ;
+decls : decls decl | decl ;
+decl : KW_TYPEDEF IDENT SEMI
+     | TNAME SEMI
+     ;
+"""
+    ir = read_source(SRC)
+    dfa, tokens, skip = lex_from_ir(ir)
+    table = build_lr1(compile_grammar(ir))
+    bundle = empty_bundle(ir.name)
+    bundle["lex"] = dfa_to_json(dfa, tokens=tokens, skip=skip)
+    bundle["parse"] = table_to_json(table)
+    text = emit_lua(bundle)
+    assert "set_post_reduce" in text
+    module_path = tmp_path / "plox_tnh.lua"
+    module_path.write_text(text)
+
+    driver = tmp_path / "driver.lua"
+    driver.write_text(rf"""
+package.path = '{tmp_path}/?.lua;' .. package.path
+local M = require('plox_tnh')
+
+local p = M.new(arg[1] or "typedef Foo; Foo;")
+local typedefs = {{}}
+
+p:set_token_filter(function(parser, kind, text, len)
+    if kind == M.TOK.IDENT and typedefs[text] then
+        return M.TOK.TNAME
+    end
+    return kind
+end)
+p:set_post_reduce(function(parser, prod, node)
+    -- Production 4: `decl : KW_TYPEDEF IDENT SEMI`. Lua tables are 1-indexed,
+    -- so children[2] is the IDENT.
+    if prod == 4 and node.children[2] then
+        typedefs[node.children[2].text] = true
+    end
+end)
+if not p:parse() then
+    io.stderr:write('parse error: ' .. (p.error or '?') .. '\n')
+    os.exit(1)
+end
+
+-- Linearise left-recursive `decls : decls decl | decl`.
+local items = {{}}
+local cur = p.root.children[1]
+while cur and not cur.is_terminal do
+    if #cur.children == 2 then
+        items[#items + 1] = cur.children[2]
+        cur = cur.children[1]
+    else
+        items[#items + 1] = cur.children[1]
+        break
+    end
+end
+for i = #items, 1, -1 do
+    print(string.format("decl%d: prod=%d", #items - i, items[i].production))
+end
+""")
+    out = subprocess.run([LUA, str(driver), "typedef Foo; Foo;"],
+                         capture_output=True, text=True, check=True)
+    lines = out.stdout.strip().split("\n")
+    assert lines[0].endswith("prod=4"), lines
+    assert lines[1].endswith("prod=5"), lines
+
+
 def test_lua_invalid_prefix_rejected():
     bundle = build_bundle()
     with pytest.raises(ValueError):

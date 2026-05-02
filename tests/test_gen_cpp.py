@@ -166,6 +166,92 @@ int main(int argc, char** argv) {
     assert out.stdout.strip() == "IDENT"
 
 
+def test_cpp_typedef_name_hack_end_to_end(tmp_path):
+    """Same shape as the C-side typedef hack, expressed with std::function
+    closures that capture the typedef set."""
+    SRC = """
+%grammar tnh
+
+%tokens
+WS         = /[ \\t\\n]+/  %skip
+KW_TYPEDEF = "typedef"
+SEMI       = ";"
+IDENT      = /[A-Za-z_][A-Za-z0-9_]*/
+TNAME      = /[A-Za-z_][A-Za-z0-9_]*/
+
+%rules
+prog : decls ;
+decls : decls decl | decl ;
+decl : KW_TYPEDEF IDENT SEMI
+     | TNAME SEMI
+     ;
+"""
+    _h, cpp = emit_to_cpp(tmp_path, build_bundle(SRC))
+    text = cpp.read_text()
+    assert "post_reduce_" in text
+
+    driver = tmp_path / "driver.cpp"
+    driver.write_text(r"""
+#include "plox_tnh.hpp"
+#include <cstdio>
+#include <set>
+#include <string>
+
+int main(int argc, char** argv) {
+    std::string src = (argc > 1) ? argv[1] : "typedef Foo; Foo;";
+    plox::tnh::Parser p(src);
+    auto typedefs = std::make_shared<std::set<std::string>>();
+
+    p.set_token_filter([typedefs](plox::tnh::Parser&, int kind, std::string_view text) {
+        // PLOX_TNH_TOK_IDENT and TNAME aren't exposed as constants, but the
+        // alphabetical / declaration order makes their indices known: $=0, WS=1,
+        // KW_TYPEDEF=2, SEMI=3, IDENT=4, TNAME=5.
+        if (kind == 4 /* IDENT */ && typedefs->count(std::string(text))) {
+            return 5; /* TNAME */
+        }
+        return kind;
+    });
+    p.set_post_reduce([typedefs](plox::tnh::Parser&, int prod, plox::tnh::Node* node) {
+        // Production 4: `decl : KW_TYPEDEF IDENT SEMI`.
+        if (prod == 4 && node->children.size() >= 2) {
+            typedefs->insert(std::string(node->children[1]->text));
+        }
+    });
+
+    if (!p.parse()) {
+        fprintf(stderr, "parse error: %s\n", p.error().c_str());
+        return 1;
+    }
+    auto* root = p.root();
+    auto* decls = root->children[0];
+    // Linearise left-recursive `decls : decls decl | decl`.
+    std::vector<plox::tnh::Node*> items;
+    plox::tnh::Node* cur = decls;
+    while (cur && !cur->is_terminal) {
+        if (cur->children.size() == 2) {
+            items.push_back(cur->children[1]);
+            cur = cur->children[0];
+        } else {
+            items.push_back(cur->children[0]);
+            break;
+        }
+    }
+    for (int i = (int)items.size() - 1; i >= 0; --i) {
+        printf("decl%d: prod=%d\n", (int)items.size() - 1 - i, items[i]->production);
+    }
+    return 0;
+}
+""")
+    binary = tmp_path / "tnh"
+    cxx_compile(cpp, driver, out=binary, include=tmp_path)
+
+    out = subprocess.run([str(binary), "typedef Foo; Foo;"],
+                         capture_output=True, text=True, check=True)
+    lines = out.stdout.strip().split("\n")
+    assert lines[0].endswith("prod=4"), lines
+    assert lines[1].endswith("prod=5"), lines
+
+
 def test_cpp_carries_default_reduction_table(tmp_path):
     _h, c = emit_to_cpp(tmp_path, build_bundle(CALC))
     text = c.read_text()

@@ -137,12 +137,19 @@ def _emit_header(ctx: _CppCtx) -> str:
     out.append("    using TokenFilter = std::function<int(Parser& parser, int la_kind, std::string_view la_text)>;")
     out.append("    void set_token_filter(TokenFilter f) { token_filter_ = std::move(f); }")
     out.append("")
+    out.append("    /* Post-reduce hook. Fires after every successful reduction, before")
+    out.append("       the runtime re-applies the token filter — pair them to track")
+    out.append("       host state across the parse. */")
+    out.append("    using PostReduce = std::function<void(Parser& parser, int prod_index, Node* node)>;")
+    out.append("    void set_post_reduce(PostReduce f) { post_reduce_ = std::move(f); }")
+    out.append("")
     out.append("private:")
     out.append("    struct Impl;")
     out.append("    std::unique_ptr<Impl> impl_;")
     out.append("    Node*       root_ = nullptr;")
     out.append("    std::string error_;")
     out.append("    TokenFilter token_filter_;")
+    out.append("    PostReduce  post_reduce_;")
     out.append("};")
     out.append("")
     out.append(f"}}  // namespace plox::{g}")
@@ -444,6 +451,10 @@ def _emit_parser(ctx: _CppCtx) -> list[str]:
         "        }",
         "        im.state_stack.push_back(target);",
         "        im.value_stack.push_back(raw);",
+        "        /* Fire the post-reduce hook (if any) BEFORE re-running the",
+        "           token filter, so a hook that updates host state is visible",
+        "           to the filter on its next call. */",
+        "        if (post_reduce_) post_reduce_(*this, prod, raw);",
         "        /* Re-apply the filter so the just-fired post_reduce-equivalent",
         "           (semantic action / hook) has a chance to update host state",
         "           before the next ACTION lookup classifies the lookahead. */",

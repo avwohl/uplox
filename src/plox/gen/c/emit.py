@@ -180,6 +180,21 @@ def _emit_header(ctx: _EmitContext) -> str:
     out.append(f"typedef int (*plox_{g}_token_filter_fn)(plox_{g}_ctx *ctx, int la_kind, const char *la_text, int la_len, void *user_data);")
     out.append(f"void plox_{g}_set_token_filter(plox_{g}_ctx *ctx, plox_{g}_token_filter_fn fn, void *user_data);")
     out.append("")
+    out.append("/* --- post-reduce hook --- */")
+    out.append("/*")
+    out.append(" * Post-reduce callback: fires after every successful reduction with the")
+    out.append(" * production's index and the just-built parse node. Hosts use it to")
+    out.append(" * accumulate state across the parse — typically a typedef-name set,")
+    out.append(" * but the mechanism is general. Pair with set_token_filter to close")
+    out.append(" * the loop: the hook records names, the filter consults them.")
+    out.append(" *")
+    out.append(" * The callback fires *before* the runtime re-applies the token filter")
+    out.append(" * to the pending lookahead, so any state change is visible by the next")
+    out.append(" * action lookup.")
+    out.append(" */")
+    out.append(f"typedef void (*plox_{g}_post_reduce_fn)(plox_{g}_ctx *ctx, int prod_index, plox_{g}_node *node, void *user_data);")
+    out.append(f"void plox_{g}_set_post_reduce(plox_{g}_ctx *ctx, plox_{g}_post_reduce_fn fn, void *user_data);")
+    out.append("")
 
     out.append('#ifdef __cplusplus')
     out.append('}')
@@ -412,6 +427,10 @@ def _emit_ctx_struct(ctx: _EmitContext) -> list[str]:
         "    /* Optional token filter (set via plox_<g>_set_token_filter). */",
         f"    int  (*token_filter)(plox_{g}_ctx *ctx, int la_kind, const char *la_text, int la_len, void *user_data);",
         "    void  *token_filter_data;",
+        "",
+        "    /* Optional post-reduce callback (set via plox_<g>_set_post_reduce). */",
+        f"    void (*post_reduce)(plox_{g}_ctx *ctx, int prod_index, plox_{g}_node *node, void *user_data);",
+        "    void  *post_reduce_data;",
         "};",
     ]
 
@@ -489,6 +508,12 @@ def _emit_lifecycle(ctx: _EmitContext) -> list[str]:
         "    if (!c) return;",
         "    c->token_filter = fn;",
         "    c->token_filter_data = user_data;",
+        "}",
+        "",
+        f"void plox_{g}_set_post_reduce(plox_{g}_ctx *c, plox_{g}_post_reduce_fn fn, void *user_data) {{",
+        "    if (!c) return;",
+        "    c->post_reduce = fn;",
+        "    c->post_reduce_data = user_data;",
         "}",
     ]
 
@@ -637,6 +662,10 @@ def _emit_parser(ctx: _EmitContext) -> list[str]:
         "        c->state_stack[c->stack_top] = target;",
         "        c->value_stack[c->stack_top] = node;",
         "        c->stack_top++;",
+        "        /* Fire the post-reduce hook (if any) BEFORE re-running the",
+        "           token filter, so a hook that updates host state (e.g. a",
+        "           typedef-name set) is visible to the filter on its next call. */",
+        "        if (c->post_reduce) c->post_reduce(c, prod, node, c->post_reduce_data);",
         "        /* Re-apply the filter so a host hook on the just-reduced",
         "           production has a chance to update its tables before the",
         "           next ACTION lookup classifies the still-pending lookahead. */",

@@ -414,6 +414,139 @@ int main(int argc, char **argv) {
     assert out.stdout.strip() == "IDENT"
 
 
+def test_emitted_c_typedef_name_hack_end_to_end(tmp_path):
+    """The full classical typedef-name hack expressed in C: a tiny grammar
+    where `typedef Foo;` registers Foo as a type-name, and a subsequent
+    `Foo;` parses as a different production. Without coordinated
+    post_reduce + token_filter, the second `Foo;` would lex as IDENT and
+    the parser would fail. This pins the v1.x ABI end-to-end."""
+    SRC = """
+%grammar tnh
+
+%tokens
+WS         = /[ \\t\\n]+/  %skip
+KW_TYPEDEF = "typedef"
+SEMI       = ";"
+IDENT      = /[A-Za-z_][A-Za-z0-9_]*/
+TNAME      = /[A-Za-z_][A-Za-z0-9_]*/
+
+%rules
+prog : decls ;
+decls : decls decl | decl ;
+decl : KW_TYPEDEF IDENT SEMI
+     | TNAME SEMI
+     ;
+"""
+    ir = read_source(SRC)
+    dfa, tokens, skip = lex_from_ir(ir)
+    table = build_lr1(compile_grammar(ir))
+    bundle = empty_bundle(ir.name)
+    bundle["lex"] = dfa_to_json(dfa, tokens=tokens, skip=skip)
+    bundle["parse"] = table_to_json(table)
+    _h, c = emit_to(tmp_path, bundle)
+    text = c.read_text()
+    assert "plox_tnh_set_post_reduce" in text
+
+    driver = tmp_path / "driver.c"
+    driver.write_text(r"""
+#include "plox_tnh.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define MAX_NAMES 32
+
+typedef struct {
+    char *names[MAX_NAMES];
+    int   count;
+} typedef_set_t;
+
+static int set_contains(typedef_set_t *s, const char *text, int len) {
+    for (int i = 0; i < s->count; ++i) {
+        if ((int)strlen(s->names[i]) == len && memcmp(s->names[i], text, len) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void set_add(typedef_set_t *s, const char *text, int len) {
+    if (s->count >= MAX_NAMES) return;
+    char *copy = (char *)malloc(len + 1);
+    memcpy(copy, text, len);
+    copy[len] = '\0';
+    s->names[s->count++] = copy;
+}
+
+static int filter(plox_tnh_ctx *ctx, int la_kind, const char *la_text, int la_len, void *user_data) {
+    (void)ctx;
+    typedef_set_t *s = (typedef_set_t *)user_data;
+    if (la_kind == PLOX_TNH_TOK_IDENT && set_contains(s, la_text, la_len)) {
+        return PLOX_TNH_TOK_TNAME;
+    }
+    return la_kind;
+}
+
+static void on_reduce(plox_tnh_ctx *ctx, int prod, plox_tnh_node *node, void *user_data) {
+    (void)ctx;
+    typedef_set_t *s = (typedef_set_t *)user_data;
+    /* Production 4 is `decl : KW_TYPEDEF IDENT SEMI` — the only path that
+       declares a new type-name. children[1] is the IDENT terminal. */
+    if (prod == 4 && node->num_children >= 2) {
+        plox_tnh_node *id = node->children[1];
+        set_add(s, id->text, id->text_len);
+    }
+}
+
+int main(int argc, char **argv) {
+    const char *src = (argc > 1) ? argv[1] : "typedef Foo; Foo;";
+    int n = (int)strlen(src);
+    plox_tnh_ctx *ctx = plox_tnh_create(src, n);
+    typedef_set_t set = {0};
+    plox_tnh_set_token_filter(ctx, filter, &set);
+    plox_tnh_set_post_reduce(ctx, on_reduce, &set);
+    plox_tnh_node *root = NULL;
+    int rc = plox_tnh_parse(ctx, &root);
+    if (rc != 0) {
+        fprintf(stderr, "parse error: %s\n", plox_tnh_error(ctx));
+        plox_tnh_destroy(ctx);
+        return 1;
+    }
+    /* Walk top-level decls and report which production each one used. */
+    plox_tnh_node *decls = root->children[0];
+    /* `decls : decls decl | decl` — left-recursive list. Linearise. */
+    plox_tnh_node *items[32];
+    int n_items = 0;
+    plox_tnh_node *cur = decls;
+    while (cur && !cur->is_terminal) {
+        if (cur->num_children == 2) {
+            items[n_items++] = cur->children[1];
+            cur = cur->children[0];
+        } else {
+            items[n_items++] = cur->children[0];
+            break;
+        }
+    }
+    for (int i = n_items - 1; i >= 0; --i) {
+        plox_tnh_node *d = items[i];
+        printf("decl%d: prod=%d\n", n_items - 1 - i, d->production);
+    }
+    plox_tnh_destroy(ctx);
+    return 0;
+}
+""")
+    binary = tmp_path / "tnh"
+    cc_compile(c, driver, out=binary, include=tmp_path)
+
+    out = subprocess.run([str(binary), "typedef Foo; Foo;"],
+                         capture_output=True, text=True, check=True)
+    lines = out.stdout.strip().split("\n")
+    # Production 4 is `decl : KW_TYPEDEF IDENT SEMI`.
+    # Production 5 is `decl : TNAME SEMI`.
+    assert lines[0].endswith("prod=4"), lines
+    assert lines[1].endswith("prod=5"), lines
+
+
 def test_emitted_c_carries_default_reduction_table(tmp_path):
     """The C emitter writes a per-state default_reduction array. Even calc
     has populated default reductions; this test pins the wiring without
