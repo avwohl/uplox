@@ -18,11 +18,11 @@ def write_calc_grammar(tmp_path: Path) -> Path:
         "start = expr\n"
         "%tokens\n"
         "NUMBER = /[0-9]+/\n"
-        'PLUS   = "+"\n'
-        'MINUS  = "-"\n'
+        "PLUS   = '+'\n"
+        "MINUS  = '-'\n"
         "WS     = /[ \\t\\n]+/    %skip\n"
         "%rules\n"
-        "expr : expr PLUS NUMBER | NUMBER ;\n"
+        "<expr> : <expr> PLUS NUMBER | NUMBER ;\n"
     )
     return src
 
@@ -145,16 +145,16 @@ def test_build_refuses_conflicts(tmp_path, capsys):
     src.write_text(
         "%grammar amb\n"
         "%tokens\n"
-        'IF   = "if"\n'
-        'THEN = "then"\n'
-        'ELSE = "else"\n'
-        'S    = "s"\n'
+        "IF   = 'if'\n"
+        "THEN = 'then'\n"
+        "ELSE = 'else'\n"
+        "S    = 's'\n"
         "%rules\n"
-        "stmt : IF cond THEN stmt\n"
-        "     | IF cond THEN stmt ELSE stmt\n"
-        "     | S\n"
-        "     ;\n"
-        "cond : S ;\n"
+        "<stmt> : IF <cond> THEN <stmt>\n"
+        "       | IF <cond> THEN <stmt> ELSE <stmt>\n"
+        "       | S\n"
+        "       ;\n"
+        "<cond> : S ;\n"
     )
     out = tmp_path / "amb.json"
     rc = main(["build", str(src), "-o", str(out)])
@@ -209,16 +209,16 @@ def test_check_reports_conflicts(tmp_path, capsys):
     src.write_text(
         "%grammar amb\n"
         "%tokens\n"
-        'IF   = "if"\n'
-        'THEN = "then"\n'
-        'ELSE = "else"\n'
-        'S    = "s"\n'
+        "IF   = 'if'\n"
+        "THEN = 'then'\n"
+        "ELSE = 'else'\n"
+        "S    = 's'\n"
         "%rules\n"
-        "stmt : IF cond THEN stmt\n"
-        "     | IF cond THEN stmt ELSE stmt\n"
-        "     | S\n"
-        "     ;\n"
-        "cond : S ;\n"
+        "<stmt> : IF <cond> THEN <stmt>\n"
+        "       | IF <cond> THEN <stmt> ELSE <stmt>\n"
+        "       | S\n"
+        "       ;\n"
+        "<cond> : S ;\n"
     )
     rc = main(["check", str(src)])
     assert rc == 1

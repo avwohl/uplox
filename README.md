@@ -9,7 +9,13 @@ The JSON bundle is the contract. Backends are independent and replaceable. plox 
 
 ## Status
 
-**v1.4.0** — all nine phases of the original plan landed in [v1.0.0](CHANGELOG.md#100--2026-05-02); v1.1.0 closed feature parity between the Python runtime and the C / C++ / Lua backends, shipped the self-host bootstrap, and sped up the LR(1) builder by ~30%; v1.2.0 closed the post-1.0 deferred-grammar list and lifted the action-body carve-out from the self-host grammar via a new `%balanced=` lexer feature; v1.3.0 closed cross-language parity for `%balanced=`; v1.4.0 brings the same shape of parse-error diagnostic to every backend (expected-token list, end-of-input rendered as text, capped at 12 entries). See [CHANGELOG.md](CHANGELOG.md) for the full release notes. The grammar DSL, the JSON bundle schema, and the hook firing points are stable; future minor releases will be backwards-compatible at all three layers.
+**v1.4.0** — all nine phases of the original plan landed in [v1.0.0](CHANGELOG.md#100--2026-05-02); v1.1.0 closed feature parity between the Python runtime and the C / C++ / Lua backends, shipped the self-host bootstrap, and sped up the LR(1) builder by ~30%; v1.2.0 closed the post-1.0 deferred-grammar list and lifted the action-body carve-out from the self-host grammar via a new `%balanced=` lexer feature; v1.3.0 closed cross-language parity for `%balanced=`; v1.4.0 brings the same shape of parse-error diagnostic to every backend (expected-token list, end-of-input rendered as text, capped at 12 entries). See [CHANGELOG.md](CHANGELOG.md) for the full release notes.
+
+The DSL surface has since been reworked (single-quote literals, `<name>`
+non-terminals everywhere, `%keyword_prefix` + `%keywords` to elide the
+`KW = "KW"` boilerplate). v1 grammars do not parse under the new reader;
+all bundled examples and the `plox_self` self-host grammar were ported.
+See [`docs/grammar_format.md`](docs/grammar_format.md) for the current syntax.
 
 ## Goals
 

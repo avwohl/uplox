@@ -71,17 +71,17 @@ SCOPED_GRAMMAR = """
 %grammar scoped
 
 %tokens
-LBRACE = "{"
-RBRACE = "}"
+LBRACE = '{'
+RBRACE = '}'
 ID     = /[a-z]+/
-SEMI   = ";"
+SEMI   = ';'
 WS     = /[ \\t\\n]+/   %skip
 
 %rules
-prog  : block ;
-block : LBRACE stmts RBRACE  %hook=block_scope ;
-stmts : stmts stmt | ;
-stmt  : ID SEMI | block ;
+<prog>  : <block> ;
+<block> : LBRACE <stmts> RBRACE  %hook=block_scope ;
+<stmts> : <stmts> <stmt> | ;
+<stmt>  : ID SEMI | <block> ;
 """
 
 

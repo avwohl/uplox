@@ -18,15 +18,15 @@ CALC = """
 
 %tokens
 NUMBER = /[0-9]+/
-PLUS   = "+"
-STAR   = "*"
-LPAREN = "("
-RPAREN = ")"
+PLUS   = '+'
+STAR   = '*'
+LPAREN = '('
+RPAREN = ')'
 
 %rules
-expr  : expr PLUS term | term ;
-term  : term STAR factor | factor ;
-factor : NUMBER | LPAREN expr RPAREN ;
+<expr>  : <expr> PLUS <term> | <term> ;
+<term>  : <term> STAR <factor> | <factor> ;
+<factor> : NUMBER | LPAREN <expr> RPAREN ;
 """
 
 
@@ -65,17 +65,17 @@ def test_dangling_else_creates_shift_reduce_conflict():
     src = """
 %grammar amb
 %tokens
-IF    = "if"
-THEN  = "then"
-ELSE  = "else"
-S     = "s"
+IF    = 'if'
+THEN  = 'then'
+ELSE  = 'else'
+S     = 's'
 
 %rules
-stmt : IF cond THEN stmt
-     | IF cond THEN stmt ELSE stmt
+<stmt> : IF <cond> THEN <stmt>
+     | IF <cond> THEN <stmt> ELSE <stmt>
      | S
      ;
-cond : S ;
+<cond> : S ;
 """
     table = build(src)
     sr = [c for c in table.conflicts if c.kind() == "shift/reduce"]
@@ -91,13 +91,13 @@ def test_reduce_reduce_conflict_in_simple_grammar():
     src = """
 %grammar rr
 %tokens
-A = "a"
-B = "b"
+A = 'a'
+B = 'b'
 
 %rules
-s : x B | y B ;
-x : A ;
-y : A ;
+<s> : <x> B | <y> B ;
+<x> : A ;
+<y> : A ;
 """
     table = build(src)
     rr = [c for c in table.conflicts if c.kind() == "reduce/reduce"]
@@ -123,17 +123,17 @@ def test_describe_conflict_is_readable():
     src = """
 %grammar amb
 %tokens
-IF    = "if"
-THEN  = "then"
-ELSE  = "else"
-S     = "s"
+IF    = 'if'
+THEN  = 'then'
+ELSE  = 'else'
+S     = 's'
 
 %rules
-stmt : IF cond THEN stmt
-     | IF cond THEN stmt ELSE stmt
+<stmt> : IF <cond> THEN <stmt>
+     | IF <cond> THEN <stmt> ELSE <stmt>
      | S
      ;
-cond : S ;
+<cond> : S ;
 """
     table = build(src)
     conflict = next(c for c in table.conflicts if c.terminal == "ELSE")
@@ -146,7 +146,7 @@ cond : S ;
 def test_simple_unambiguous_grammar_has_few_states():
     # Just a sanity check on canonical LR(1) state explosion: the very simple
     # `s : A` grammar should compile to a small table.
-    src = "%grammar tiny\n%tokens\nA = \"a\"\n%rules\ns : A ;\n"
+    src = "%grammar tiny\n%tokens\nA = 'a'\n%rules\n<s> : A ;\n"
     table = build(src)
     # Augmented start + initial closure + after-shift + accept reduction... 4 states tops.
     assert len(table.states) <= 4

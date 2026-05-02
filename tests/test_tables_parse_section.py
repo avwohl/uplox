@@ -26,14 +26,14 @@ CALC = """
 %grammar calc
 %tokens
 NUMBER = /[0-9]+/
-PLUS   = "+"
-STAR   = "*"
-LPAREN = "("
-RPAREN = ")"
+PLUS   = '+'
+STAR   = '*'
+LPAREN = '('
+RPAREN = ')'
 %rules
-expr  : expr PLUS term | term ;
-term  : term STAR factor | factor ;
-factor : NUMBER | LPAREN expr RPAREN ;
+<expr>  : <expr> PLUS <term> | <term> ;
+<term>  : <term> STAR <factor> | <factor> ;
+<factor> : NUMBER | LPAREN <expr> RPAREN ;
 """
 
 
@@ -88,16 +88,16 @@ def test_refuses_to_serialise_with_conflicts():
     src = """
 %grammar amb
 %tokens
-IF = "if"
-THEN = "then"
-ELSE = "else"
-S = "s"
+IF = 'if'
+THEN = 'then'
+ELSE = 'else'
+S = 's'
 %rules
-stmt : IF cond THEN stmt
-     | IF cond THEN stmt ELSE stmt
+<stmt> : IF <cond> THEN <stmt>
+     | IF <cond> THEN <stmt> ELSE <stmt>
      | S
      ;
-cond : S ;
+<cond> : S ;
 """
     table = build_lr1(compile_grammar(read_source(src)))
     assert table.conflicts

@@ -31,29 +31,29 @@ CALC = """
 
 %tokens
 NUMBER = /[0-9]+/
-PLUS   = "+"
-MINUS  = "-"
-STAR   = "*"
-SLASH  = "/"
-LPAREN = "("
-RPAREN = ")"
+PLUS   = '+'
+MINUS  = '-'
+STAR   = '*'
+SLASH  = '/'
+LPAREN = '('
+RPAREN = ')'
 WS     = /[ \\t\\n]+/    %skip
 
 %rules
-expr  : expr PLUS term | expr MINUS term | term ;
-term  : term STAR factor | term SLASH factor | factor ;
-factor : NUMBER | LPAREN expr RPAREN ;
+<expr>  : <expr> PLUS <term> | <expr> MINUS <term> | <term> ;
+<term>  : <term> STAR <factor> | <term> SLASH <factor> | <factor> ;
+<factor> : NUMBER | LPAREN <expr> RPAREN ;
 """
 
 
 TINY = """
 %grammar tiny
 %tokens
-A = "a"
-B = "b"
+A = 'a'
+B = 'b'
 %rules
-s : A B
-  | A s B
+<s> : A B
+  | A <s> B
   ;
 """
 
@@ -113,13 +113,13 @@ def test_cpp_supports_token_filter_end_to_end(tmp_path):
 
 %tokens
 WS    = /[ \\t\\n]+/  %skip
-SEMI  = ";"
+SEMI  = ';'
 IDENT = /[A-Za-z_][A-Za-z0-9_]*/
 NAME  = /[A-Za-z_][A-Za-z0-9_]*/
 
 %rules
-prog : item ;
-item : IDENT SEMI
+<prog> : <item> ;
+<item> : IDENT SEMI
      | NAME  SEMI
      ;
 """
@@ -174,15 +174,15 @@ def test_cpp_typedef_name_hack_end_to_end(tmp_path):
 
 %tokens
 WS         = /[ \\t\\n]+/  %skip
-KW_TYPEDEF = "typedef"
-SEMI       = ";"
+KW_TYPEDEF = 'typedef'
+SEMI       = ';'
 IDENT      = /[A-Za-z_][A-Za-z0-9_]*/
 TNAME      = /[A-Za-z_][A-Za-z0-9_]*/
 
 %rules
-prog : decls ;
-decls : decls decl | decl ;
-decl : KW_TYPEDEF IDENT SEMI
+<prog> : <decls> ;
+<decls> : <decls> <decl> | <decl> ;
+<decl> : KW_TYPEDEF IDENT SEMI
      | TNAME SEMI
      ;
 """
@@ -420,11 +420,11 @@ BAL_GRAMMAR_CPP = """
 %tokens
 WS     = /[ \\t\\n]+/    %skip
 IDENT  = /[A-Za-z_][A-Za-z0-9_]*/
-ACTION = "{" %balanced="}"
+ACTION = '{' %balanced='}'
 
 %rules
-top  : top item | item ;
-item : IDENT ACTION ;
+<top>  : <top> <item> | <item> ;
+<item> : IDENT ACTION ;
 """
 
 

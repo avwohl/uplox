@@ -5,19 +5,19 @@
 %grammar scoped
 
 %tokens
-LBRACE = "{"
-RBRACE = "}"
+LBRACE = '{'
+RBRACE = '}'
 ID     = /[a-z_][a-z0-9_]*/
-SEMI   = ";"
+SEMI   = ';'
 WS     = /[ \t\n]+/   %skip
 
 %rules
-prog  : block ;
+<prog>  : <block> ;
 
-block : LBRACE stmts RBRACE  %hook=block_scope ;
+<block> : '{' <stmts> '}'  %hook=block_scope ;
 
-stmts : stmts stmt
-      | ;
+<stmts> : <stmts> <stmt>
+        | ;
 
-stmt  : ID SEMI
-      | block ;
+<stmt>  : ID ';'
+        | <block> ;

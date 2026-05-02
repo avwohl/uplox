@@ -5,13 +5,21 @@ already having a working plox-generated parser. Once the LR core is stable,
 plox's own grammar will be re-expressed as a ``.plox`` file and parsed by a
 plox-generated front-end (the self-hosting milestone).
 
-Implementation status
----------------------
+Syntax summary
+--------------
 
-All v0 sections are implemented: ``%grammar``, ``%options``, ``%tokens``,
-``%hooks``, ``%rules``. The raw rules text remains accessible via the
-``__rules_text__`` key in :attr:`GrammarIR.options` for diagnostics that want to
-quote the source verbatim.
+* Token literals use single quotes: ``LPAREN = '('``.
+* Non-terminals are written ``<name>`` everywhere — both LHS and RHS.
+* Bare identifiers on rule RHS are terminal names (declared tokens or
+  synthesised keywords).
+* ``%keyword_prefix <prefix>`` sets the prefix for synthesised keyword
+  tokens (default empty).
+* ``%keywords`` lists keyword spellings, whitespace-separated. Each entry
+  ``KW`` is synthesised as a token ``<prefix>KW`` whose literal is ``KW``;
+  bare ``KW`` on rule RHS resolves to that token.
+* Identifier names (rules, terminals, keywords) are not subject to a case
+  rule. Case is no longer the terminal/non-terminal signal — the angle
+  brackets are.
 
 Diagnostics
 -----------
@@ -40,7 +48,7 @@ class ReaderError(Exception):
 def _strip_comment(line: str) -> str:
     """Strip a ``#``-introduced comment from ``line``, respecting quoted strings.
 
-    Comments inside ``"…"`` or ``/…/`` (regex) are preserved. The DSL has no
+    Comments inside ``'…'`` or ``/…/`` (regex) are preserved. The DSL has no
     multi-character escape that would interact with this, so a simple flag
     suffices.
     """
@@ -55,7 +63,7 @@ def _strip_comment(line: str) -> str:
             out.append(line[i + 1])
             i += 2
             continue
-        if not in_re and c == '"':
+        if not in_re and c == "'":
             in_str = not in_str
         elif not in_str and c == "/":
             in_re = not in_re
@@ -67,6 +75,11 @@ def _strip_comment(line: str) -> str:
 
 
 # ---- Top-level reader --------------------------------------------------------
+
+
+_SECTIONS = ("grammar", "options", "tokens", "hooks", "rules", "keywords")
+_SECTION_RE = re.compile(r"\s*%(" + "|".join(_SECTIONS) + r")\b\s*(.*)$")
+_KEYWORD_PREFIX_RE = re.compile(r"\s*%keyword_prefix\s+(\S+)\s*$")
 
 
 def read_source(text: str, filename: str = "<source>") -> GrammarIR:
@@ -104,6 +117,8 @@ def read_source(text: str, filename: str = "<source>") -> GrammarIR:
             _parse_tokens(ir, section_buf, filename)
         elif section == "hooks":
             _parse_hooks(ir, section_buf, filename)
+        elif section == "keywords":
+            _parse_keywords(ir, section_buf, filename)
         elif section == "rules":
             text = "\n".join(t for _l, t in section_buf)
             ir.options["__rules_text__"] = text
@@ -113,7 +128,18 @@ def read_source(text: str, filename: str = "<source>") -> GrammarIR:
         section_buf = []
 
     for lineno, line in lines[1:]:
-        sm = re.match(r"\s*%(grammar|options|tokens|hooks|rules)\b\s*(.*)$", line)
+        # %keyword_prefix is a one-shot directive, not a section.
+        kp = _KEYWORD_PREFIX_RE.match(line)
+        if kp:
+            flush()
+            if ir.keyword_prefix:
+                raise ReaderError(
+                    f"{filename}:{lineno}: duplicate `%keyword_prefix` directive"
+                )
+            ir.keyword_prefix = kp.group(1)
+            continue
+
+        sm = _SECTION_RE.match(line)
         if sm:
             directive = sm.group(1)
             rest = sm.group(2).strip()
@@ -172,14 +198,14 @@ def _parse_options(ir: GrammarIR, lines: list[tuple[int, str]], filename: str) -
 
 _TOKEN_LINE = re.compile(
     r"""^\s*
-        (?P<name>[A-Z][A-Z0-9_]*)\s*=\s*
+        (?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*
         (?:
           /(?P<re>(?:\\.|[^/\\])*)/        # /regex/
           |
-          "(?P<lit>(?:\\.|[^"\\])*)"       # "literal"
+          '(?P<lit>(?:\\.|[^'\\])*)'       # 'literal'
         )
         (?:\s+%balanced=
-          "(?P<bal>(?:\\.|[^"\\])*)"       # %balanced="<close>"
+          '(?P<bal>(?:\\.|[^'\\])*)'       # %balanced='<close>'
         )?
         (?:\s+(?P<skip>%skip))?
         \s*$""",
@@ -193,7 +219,7 @@ def _parse_tokens(ir: GrammarIR, lines: list[tuple[int, str]], filename: str) ->
         if not m:
             raise ReaderError(
                 f"{filename}:{lineno}: malformed token declaration. "
-                f"Expected NAME = /regex/ or NAME = \"literal\" optionally followed by %skip"
+                f"Expected NAME = /regex/ or NAME = 'literal' optionally followed by %skip"
             )
         name = m.group("name")
         balanced = _unquote_literal(m.group("bal")) if m.group("bal") is not None else None
@@ -214,14 +240,14 @@ def _parse_tokens(ir: GrammarIR, lines: list[tuple[int, str]], filename: str) ->
 
 
 def _unquote_literal(raw: str) -> str:
-    """Process a quoted literal's escape sequences. Mirrors regex.py escapes."""
+    """Process a quoted literal's escape sequences."""
     out = []
     i = 0
     while i < len(raw):
         c = raw[i]
         if c == "\\" and i + 1 < len(raw):
             esc = raw[i + 1]
-            mapping = {"n": "\n", "t": "\t", "r": "\r", "\\": "\\", '"': '"', "'": "'"}
+            mapping = {"n": "\n", "t": "\t", "r": "\r", "\\": "\\", "'": "'", '"': '"'}
             if esc in mapping:
                 out.append(mapping[esc])
                 i += 2
@@ -246,30 +272,60 @@ def _parse_hooks(ir: GrammarIR, lines: list[tuple[int, str]], filename: str) -> 
         ir.hooks.append(HookDecl(name=name, when=when, position=Position(filename, lineno, 1)))
 
 
+_KEYWORD_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _parse_keywords(ir: GrammarIR, lines: list[tuple[int, str]], filename: str) -> None:
+    """Parse a ``%keywords`` section: whitespace-separated bare identifiers,
+    possibly across multiple lines. Synthesises one ``TokenDecl`` per name and
+    records the bare->prefixed alias on the IR."""
+    seen: dict[str, int] = {}
+    for lineno, line in lines:
+        for word in line.split():
+            if not _KEYWORD_NAME_RE.fullmatch(word):
+                raise ReaderError(
+                    f"{filename}:{lineno}: keyword {word!r} is not a valid identifier"
+                )
+            if word in seen:
+                raise ReaderError(
+                    f"{filename}:{lineno}: keyword {word!r} already listed at line {seen[word]}"
+                )
+            seen[word] = lineno
+            token_name = ir.keyword_prefix + word
+            if any(t.name == token_name for t in ir.tokens):
+                raise ReaderError(
+                    f"{filename}:{lineno}: keyword {word!r} synthesises token "
+                    f"{token_name!r} which collides with an existing %tokens declaration"
+                )
+            ir.tokens.append(
+                TokenDecl(
+                    name=token_name,
+                    literal=word,
+                    position=Position(filename, lineno, 1),
+                )
+            )
+            ir.keyword_aliases[word] = token_name
+
+
 # ---- Rules parser ------------------------------------------------------------
 #
 # Grammar of the rules section (informal):
 #
 #   rules       := rule+
-#   rule        := IDENT ':' production ('|' production)* ';'
+#   rule        := NONTERM ':' production ('|' production)* ';'
 #   production  := symbol* opt_hook opt_action
-#   symbol      := IDENT | UPPER | STRING_LITERAL
+#   symbol      := IDENT | NONTERM | LITERAL
+#   NONTERM     := '<' [A-Za-z_][A-Za-z0-9_]* '>'
+#   IDENT       := [A-Za-z_][A-Za-z0-9_]*           (terminal name)
+#   LITERAL     := '\'' (\\. | [^'\\])* '\''        (inline string literal)
 #   opt_hook    := '%hook' '=' IDENT  | empty
 #   opt_action  := '{' balanced '}'   | empty
-#   STRING_LITERAL := '"' (\\. | [^"\\])* '"'
 #
-# String literals are anonymous tokens; the IR records them as Symbols whose
-# name is the same as the literal (resolution against `%tokens` happens later).
 # Action bodies are copied verbatim including embedded braces.
 
 
 class _RulesLexer:
-    """Single-pass tokeniser over the rules section.
-
-    Tracks line/column so error messages can point inside the rules block.
-    ``base_line`` is the source-file line of the first character — set by the
-    section-flush logic so positions are absolute, not section-local.
-    """
+    """Single-pass tokeniser over the rules section."""
 
     def __init__(self, text: str, base_line: int, filename: str):
         self.src = text
@@ -312,8 +368,9 @@ class _RulesLexer:
         return self._advance_one()
 
     def take_string(self) -> tuple[str, Position]:
+        """Take a single-quoted literal ``'…'``; returns the unescaped content."""
         pos = self.position()
-        assert self.take() == '"'
+        assert self.take() == "'"
         out = []
         while True:
             if self.at_eof():
@@ -321,14 +378,14 @@ class _RulesLexer:
                     f"{self.filename}:{pos.line}:{pos.column}: unterminated string literal"
                 )
             c = self.take()
-            if c == '"':
+            if c == "'":
                 break
             if c == "\\" and not self.at_eof():
                 out.append(c)
                 out.append(self.take())
                 continue
             out.append(c)
-        return "".join(out), pos
+        return _unquote_literal("".join(out)), pos
 
     def take_ident(self) -> tuple[str, Position]:
         pos = self.position()
@@ -345,6 +402,19 @@ class _RulesLexer:
             else:
                 break
         return "".join(out), pos
+
+    def take_nonterm(self) -> tuple[str, Position]:
+        """Take ``<ident>`` and return the bare ident."""
+        pos = self.position()
+        assert self.take() == "<"
+        name, _ = self.take_ident()
+        if self.peek() != ">":
+            raise ReaderError(
+                f"{self.filename}:{self.line}:{self.col}: expected '>' to close non-terminal "
+                f"<{name}, got {self.peek()!r}"
+            )
+        self.take()
+        return name, pos
 
     def take_balanced_braces(self) -> tuple[str, Position]:
         """Take ``{ ... }`` allowing nested braces. Strips the outer pair."""
@@ -384,11 +454,17 @@ def _parse_rules(ir: GrammarIR, text: str, base_line: int, filename: str) -> Non
 
 
 def _parse_one_rule(lex: _RulesLexer) -> Rule:
-    name, pos = lex.take_ident()
+    lex.skip_ws_and_comments()
+    if lex.peek() != "<":
+        raise ReaderError(
+            f"{lex.filename}:{lex.line}:{lex.col}: "
+            f"expected `<name>` to start a rule, got {lex.peek()!r}"
+        )
+    name, pos = lex.take_nonterm()
     lex.skip_ws_and_comments()
     if lex.peek() != ":":
         raise ReaderError(
-            f"{lex.filename}:{lex.line}:{lex.col}: expected ':' after rule name {name!r}"
+            f"{lex.filename}:{lex.line}:{lex.col}: expected ':' after rule name <{name}>"
         )
     lex.take()
     productions = [_parse_production(lex)]
@@ -404,7 +480,7 @@ def _parse_one_rule(lex: _RulesLexer) -> Rule:
         else:
             raise ReaderError(
                 f"{lex.filename}:{lex.line}:{lex.col}: "
-                f"expected '|' or ';' inside rule {name!r}, got {c!r}"
+                f"expected '|' or ';' inside rule <{name}>, got {c!r}"
             )
 
 
@@ -419,14 +495,13 @@ def _parse_production(lex: _RulesLexer) -> Production:
         if not c or c in "|;":
             break
         if c == "%":
-            # Either %hook or %prec. Only %hook in v0.
             keyword_pos = lex.position()
             lex.take()
             kw, _kw_pos = lex.take_ident()
             if kw != "hook":
                 raise ReaderError(
                     f"{lex.filename}:{keyword_pos.line}:{keyword_pos.column}: "
-                    f"unknown rule directive %{kw}; v0 supports only %hook"
+                    f"unknown rule directive %{kw}; only %hook is supported"
                 )
             lex.skip_ws_and_comments()
             if lex.peek() != "=":
@@ -441,13 +516,17 @@ def _parse_production(lex: _RulesLexer) -> Production:
         if c == "{":
             action, _ = lex.take_balanced_braces()
             continue
-        if c == '"':
+        if c == "'":
             literal, lit_pos = lex.take_string()
-            rhs.append(Symbol(name='"' + literal + '"', position=lit_pos))
+            rhs.append(Symbol(name=literal, kind="literal", position=lit_pos))
+            continue
+        if c == "<":
+            name, sym_pos = lex.take_nonterm()
+            rhs.append(Symbol(name=name, kind="nonterm", position=sym_pos))
             continue
         if c.isalpha() or c == "_":
             name, sym_pos = lex.take_ident()
-            rhs.append(Symbol(name=name, position=sym_pos))
+            rhs.append(Symbol(name=name, kind="term", position=sym_pos))
             continue
         raise ReaderError(
             f"{lex.filename}:{lex.line}:{lex.col}: unexpected character {c!r} in production"

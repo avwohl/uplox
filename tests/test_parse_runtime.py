@@ -23,18 +23,18 @@ CALC = """
 
 %tokens
 NUMBER = /[0-9]+/
-PLUS   = "+"
-MINUS  = "-"
-STAR   = "*"
-SLASH  = "/"
-LPAREN = "("
-RPAREN = ")"
+PLUS   = '+'
+MINUS  = '-'
+STAR   = '*'
+SLASH  = '/'
+LPAREN = '('
+RPAREN = ')'
 WS     = /[ \\t\\n]+/    %skip
 
 %rules
-expr  : expr PLUS term | expr MINUS term | term ;
-term  : term STAR factor | term SLASH factor | factor ;
-factor : NUMBER | LPAREN expr RPAREN ;
+<expr>  : <expr> PLUS <term> | <expr> MINUS <term> | <term> ;
+<term>  : <term> STAR <factor> | <term> SLASH <factor> | <factor> ;
+<factor> : NUMBER | LPAREN <expr> RPAREN ;
 """
 
 
@@ -142,10 +142,10 @@ def test_per_production_hook_fires_on_reduce():
     src = """
 %grammar g
 %tokens
-A = "a"
-B = "b"
+A = 'a'
+B = 'b'
 %rules
-s : A B  %hook=pair { $$ = "pair"; } ;
+<s> : A B  %hook=pair { $$ = "pair"; } ;
 """
     ir = read_source(src)
     table = build_lr1(compile_grammar(ir))

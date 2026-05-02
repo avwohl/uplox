@@ -19,27 +19,27 @@ CALC = """
 
 %tokens
 NUMBER = /[0-9]+/
-PLUS   = "+"
-MINUS  = "-"
-STAR   = "*"
-SLASH  = "/"
-LPAREN = "("
-RPAREN = ")"
+PLUS   = '+'
+MINUS  = '-'
+STAR   = '*'
+SLASH  = '/'
+LPAREN = '('
+RPAREN = ')'
 WS     = /[ \\t\\n]+/   %skip
 
 %rules
-expr  : expr PLUS term
-      | expr MINUS term
-      | term
+<expr>  : <expr> PLUS <term>
+      | <expr> MINUS <term>
+      | <term>
       ;
 
-term  : term STAR factor
-      | term SLASH factor
-      | factor
+<term>  : <term> STAR <factor>
+      | <term> SLASH <factor>
+      | <factor>
       ;
 
-factor : NUMBER
-       | LPAREN expr RPAREN
+<factor> : NUMBER
+       | LPAREN <expr> RPAREN
        ;
 """
 
@@ -63,9 +63,9 @@ def test_string_literal_resolves_to_token():
         "%grammar g\n"
         "%tokens\n"
         "NUMBER = /[0-9]+/\n"
-        'PLUS   = "+"\n'
+        "PLUS   = '+'\n"
         "%rules\n"
-        'sum : NUMBER "+" NUMBER ;\n'
+        "<sum> : NUMBER '+' NUMBER ;\n"
     )
     g = compile_grammar(read_source(src))
     [augmented, sum_prod] = g.productions
@@ -78,7 +78,7 @@ def test_undeclared_literal_rejected():
         "%tokens\n"
         "NUMBER = /[0-9]+/\n"
         "%rules\n"
-        'sum : NUMBER "?" ;\n'
+        "<sum> : NUMBER '?' ;\n"
     )
     with pytest.raises(GrammarError, match="not declared"):
         compile_grammar(read_source(src))
@@ -87,11 +87,11 @@ def test_undeclared_literal_rejected():
 def test_undefined_symbol_rejected():
     src = (
         "%grammar g\n"
-        "%tokens\nA = \"a\"\n"
+        "%tokens\nA = 'a'\n"
         "%rules\n"
-        "x : missing ;\n"
+        "<x> : MISSING_TOK ;\n"
     )
-    with pytest.raises(GrammarError, match="neither a declared token nor a rule"):
+    with pytest.raises(GrammarError, match="not a declared token or keyword"):
         compile_grammar(read_source(src))
 
 
@@ -122,9 +122,9 @@ def test_follow_of_factor():
 def test_epsilon_in_first_when_production_is_empty():
     src = (
         "%grammar g\n"
-        "%tokens\nA = \"a\"\n"
+        "%tokens\nA = 'a'\n"
         "%rules\n"
-        "x : A | ;\n"  # empty alternative
+        "<x> : A | ;\n"  # empty alternative
     )
     g = compile_grammar(read_source(src))
     assert EPSILON in g.first_sets["x"]
@@ -134,10 +134,10 @@ def test_epsilon_in_first_when_production_is_empty():
 def test_first_through_nullable_prefix():
     src = (
         "%grammar g\n"
-        "%tokens\nA = \"a\"\nB = \"b\"\n"
+        "%tokens\nA = 'a'\nB = 'b'\n"
         "%rules\n"
-        "s : opt B ;\n"
-        "opt : A | ;\n"
+        "<s> : <opt> B ;\n"
+        "<opt> : A | ;\n"
     )
     g = compile_grammar(read_source(src))
     # FIRST(s) should include both A (from non-empty opt) and B (when opt is empty)

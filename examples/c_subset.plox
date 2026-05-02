@@ -1,4 +1,4 @@
-# C subset grammar — Phase 9 start of the uc_core port.
+# C subset grammar — start of the uc_core port.
 #
 # This grammar covers a deliberate subset of C suitable for the small
 # uc_core / uc80 / uc386 source style:
@@ -13,9 +13,6 @@
 #   * Function calls, array subscripts, member access, increment/decrement
 #   * Storage classes (static, extern, register, auto) and type
 #     qualifiers (const, volatile) — accepted but not validated
-#
-# Now in scope (Phase-9 follow-up):
-#
 #   * struct / union definitions and references (named, anonymous, forward)
 #   * enum definitions and references with optional explicit values
 #   * switch / case / default
@@ -24,7 +21,7 @@
 #     table the parser maintains via a %hook on the declaration rule.
 #     See `plox.hooks.TypedefTracker` for the runtime piece.
 #
-# Out of scope for the v0 sketch:
+# Out of scope:
 #
 #   * Preprocessor (#include, #define, #if) — must be expanded upstream
 #   * Function-pointer casts `(int (*)(int)) p` — would need full abstract
@@ -33,10 +30,9 @@
 #   * Compound literals, designated initializers, _Generic
 #   * Bit-fields
 #
-# Even this subset is substantial — production count and state count
-# easily double calc and triple plm_subset. The point is to verify plox
-# scales to real-language grammars, and to give the uc_core port a head
-# start.
+# This grammar declares each keyword token explicitly (`KW_VOID = 'void'`)
+# rather than using `%keywords`, so the emitted code-side names retain the
+# C-idiomatic uppercase form.
 
 %grammar c_subset
 
@@ -49,11 +45,7 @@ LINE_COMMENT = /\/\/[^\n]*/                      %skip
 BLOCK_COMMENT = /\/\*([^*]|\*+[^*\/])*\*+\//     %skip
 
 # Preprocessor lines are dropped by the lexer — they belong to a separate
-# pass that hosts run before plox sees the input. The body matches: a char
-# that's neither newline nor backslash, OR a `\` followed by a newline (the
-# C line-continuation), OR a `\` followed by any non-newline (so `\"`, `\t`
-# etc. inside strings and char-literals don't end the directive). The
-# directive is terminated by an unescaped newline.
+# pass that hosts run before plox sees the input.
 PREPROC    = /#([^\n\\]|\\\n|\\.)*/              %skip
 
 # Numeric and string literals.
@@ -62,38 +54,38 @@ CHAR_LIT   = /'([^'\\\n]|\\.)+'/
 STRING_LIT = /"([^"\\\n]|\\.)*"/
 
 # Keywords. Must come before IDENT.
-KW_VOID    = "void"
-KW_CHAR    = "char"
-KW_SHORT   = "short"
-KW_INT     = "int"
-KW_LONG    = "long"
-KW_SIGNED  = "signed"
-KW_UNSIGNED = "unsigned"
-KW_CONST   = "const"
-KW_VOLATILE = "volatile"
-KW_STATIC  = "static"
-KW_EXTERN  = "extern"
-KW_REGISTER = "register"
-KW_AUTO    = "auto"
-KW_INLINE  = "inline"
-KW_RETURN  = "return"
-KW_IF      = "if"
-KW_ELSE    = "else"
-KW_WHILE   = "while"
-KW_DO      = "do"
-KW_FOR     = "for"
-KW_BREAK   = "break"
-KW_CONTINUE = "continue"
-KW_GOTO    = "goto"
-KW_SIZEOF  = "sizeof"
-KW_STRUCT  = "struct"
-KW_UNION   = "union"
-KW_ENUM    = "enum"
-KW_TYPEDEF = "typedef"
-KW_SWITCH  = "switch"
-KW_CASE    = "case"
-KW_DEFAULT = "default"
-KW_GENERIC = "_Generic"
+KW_VOID    = 'void'
+KW_CHAR    = 'char'
+KW_SHORT   = 'short'
+KW_INT     = 'int'
+KW_LONG    = 'long'
+KW_SIGNED  = 'signed'
+KW_UNSIGNED = 'unsigned'
+KW_CONST   = 'const'
+KW_VOLATILE = 'volatile'
+KW_STATIC  = 'static'
+KW_EXTERN  = 'extern'
+KW_REGISTER = 'register'
+KW_AUTO    = 'auto'
+KW_INLINE  = 'inline'
+KW_RETURN  = 'return'
+KW_IF      = 'if'
+KW_ELSE    = 'else'
+KW_WHILE   = 'while'
+KW_DO      = 'do'
+KW_FOR     = 'for'
+KW_BREAK   = 'break'
+KW_CONTINUE = 'continue'
+KW_GOTO    = 'goto'
+KW_SIZEOF  = 'sizeof'
+KW_STRUCT  = 'struct'
+KW_UNION   = 'union'
+KW_ENUM    = 'enum'
+KW_TYPEDEF = 'typedef'
+KW_SWITCH  = 'switch'
+KW_CASE    = 'case'
+KW_DEFAULT = 'default'
+KW_GENERIC = '_Generic'
 
 IDENT      = /[A-Za-z_][A-Za-z0-9_]*/
 
@@ -104,467 +96,453 @@ IDENT      = /[A-Za-z_][A-Za-z0-9_]*/
 TYPEDEF_NAME = /[A-Za-z_][A-Za-z0-9_]*/
 
 # Multi-char operators (each must precede its prefix).
-ARROW      = "->"
-INC        = "++"
-DEC        = "--"
-LSHIFT     = "<<"
-RSHIFT     = ">>"
-LE         = "<="
-GE         = ">="
-EQ         = "=="
-NE         = "!="
-LAND       = "&&"
-LOR        = "||"
-ELLIPSIS   = "..."
-PLUS_EQ    = "+="
-MINUS_EQ   = "-="
-STAR_EQ    = "*="
-SLASH_EQ   = "/="
-PERCENT_EQ = "%="
-AMP_EQ     = "&="
-PIPE_EQ    = "|="
-CARET_EQ   = "^="
-LSHIFT_EQ  = "<<="
-RSHIFT_EQ  = ">>="
+ARROW      = '->'
+INC        = '++'
+DEC        = '--'
+LSHIFT     = '<<'
+RSHIFT     = '>>'
+LE         = '<='
+GE         = '>='
+EQ         = '=='
+NE         = '!='
+LAND       = '&&'
+LOR        = '||'
+ELLIPSIS   = '...'
+PLUS_EQ    = '+='
+MINUS_EQ   = '-='
+STAR_EQ    = '*='
+SLASH_EQ   = '/='
+PERCENT_EQ = '%='
+AMP_EQ     = '&='
+PIPE_EQ    = '|='
+CARET_EQ   = '^='
+LSHIFT_EQ  = '<<='
+RSHIFT_EQ  = '>>='
 
 # Single-char operators / delimiters.
-ASSIGN     = "="
-LT         = "<"
-GT         = ">"
-PLUS       = "+"
-MINUS      = "-"
-STAR       = "*"
-SLASH      = "/"
-PERCENT    = "%"
-AMP        = "&"
-PIPE       = "|"
-CARET      = "^"
-TILDE      = "~"
-BANG       = "!"
-QUESTION   = "?"
-COLON      = ":"
-SEMI       = ";"
-COMMA      = ","
-DOT        = "."
-LBRACE     = "{"
-RBRACE     = "}"
-LBRACKET   = "["
-RBRACKET   = "]"
-LPAREN     = "("
-RPAREN     = ")"
+ASSIGN     = '='
+LT         = '<'
+GT         = '>'
+PLUS       = '+'
+MINUS      = '-'
+STAR       = '*'
+SLASH      = '/'
+PERCENT    = '%'
+AMP        = '&'
+PIPE       = '|'
+CARET      = '^'
+TILDE      = '~'
+BANG       = '!'
+QUESTION   = '?'
+COLON      = ':'
+SEMI       = ';'
+COMMA      = ','
+DOT        = '.'
+LBRACE     = '{'
+RBRACE     = '}'
+LBRACKET   = '['
+RBRACKET   = ']'
+LPAREN     = '('
+RPAREN     = ')'
 
 %rules
 
 # A C translation unit is a sequence of top-level declarations and
 # function definitions.
-translation_unit : top_items
-                 ;
+<translation_unit> : <top_items>
+                   ;
 
-top_items : top_items top_item
-          | top_item
-          ;
+<top_items> : <top_items> <top_item>
+            | <top_item>
+            ;
 
-top_item : function_definition
-         | declaration
-         ;
+<top_item> : <function_definition>
+           | <declaration>
+           ;
 
 # --- function definitions --------------------------------------------------
 
-function_definition : decl_specs declarator compound_stmt ;
+<function_definition> : <decl_specs> <declarator> <compound_stmt> ;
 
 # --- declarations ----------------------------------------------------------
 
-declaration : decl_specs init_declarator_list_opt SEMI %hook=record_typedef ;
+<declaration> : <decl_specs> <init_declarator_list_opt> SEMI %hook=record_typedef ;
 
-decl_specs : decl_specs decl_spec
-           | decl_spec
-           ;
+<decl_specs> : <decl_specs> <decl_spec>
+             | <decl_spec>
+             ;
 
-decl_spec : storage_class
-          | type_qualifier
-          | type_spec
-          ;
+<decl_spec> : <storage_class>
+            | <type_qualifier>
+            | <type_spec>
+            ;
 
-storage_class : KW_STATIC | KW_EXTERN | KW_REGISTER | KW_AUTO | KW_INLINE
-              | KW_TYPEDEF
-              ;
+<storage_class> : KW_STATIC | KW_EXTERN | KW_REGISTER | KW_AUTO | KW_INLINE
+                | KW_TYPEDEF
+                ;
 
-type_qualifier : KW_CONST | KW_VOLATILE ;
+<type_qualifier> : KW_CONST | KW_VOLATILE ;
 
-type_spec : KW_VOID | KW_CHAR | KW_SHORT | KW_INT | KW_LONG
-          | KW_SIGNED | KW_UNSIGNED
-          | struct_or_union_specifier
-          | enum_specifier
-          | TYPEDEF_NAME
-          ;
+<type_spec> : KW_VOID | KW_CHAR | KW_SHORT | KW_INT | KW_LONG
+            | KW_SIGNED | KW_UNSIGNED
+            | <struct_or_union_specifier>
+            | <enum_specifier>
+            | TYPEDEF_NAME
+            ;
 
 # struct / union: a tag + body, just a body, or just a tag (reference or
 # forward decl). Empty bodies are not modelled here — uc_core does not use
 # them and standard C disallows them at this level.
-struct_or_union_specifier : struct_or_union IDENT LBRACE struct_decl_list RBRACE
-                          | struct_or_union LBRACE struct_decl_list RBRACE
-                          | struct_or_union IDENT
-                          ;
+<struct_or_union_specifier> : <struct_or_union> IDENT LBRACE <struct_decl_list> RBRACE
+                            | <struct_or_union> LBRACE <struct_decl_list> RBRACE
+                            | <struct_or_union> IDENT
+                            ;
 
-struct_or_union : KW_STRUCT | KW_UNION ;
+<struct_or_union> : KW_STRUCT | KW_UNION ;
 
-struct_decl_list : struct_decl_list struct_decl
-                 | struct_decl
-                 ;
+<struct_decl_list> : <struct_decl_list> <struct_decl>
+                   | <struct_decl>
+                   ;
 
 # Members: typed declarators, no initializers (different from the top-level
 # init_declarator). Bit-fields written `name : width` (named) or `: width`
 # (anonymous, used for padding) parse via the explicit struct_declarator
 # non-terminal.
-struct_decl : decl_specs struct_declarator_list SEMI ;
+<struct_decl> : <decl_specs> <struct_declarator_list> SEMI ;
 
-struct_declarator_list : struct_declarator_list COMMA struct_declarator
-                       | struct_declarator
-                       ;
+<struct_declarator_list> : <struct_declarator_list> COMMA <struct_declarator>
+                         | <struct_declarator>
+                         ;
 
-struct_declarator : declarator
-                  | declarator COLON conditional_expr
-                  | COLON conditional_expr
-                  ;
+<struct_declarator> : <declarator>
+                    | <declarator> COLON <conditional_expr>
+                    | COLON <conditional_expr>
+                    ;
 
 # enum: tag + body (with or without trailing comma), just a body, or just a tag.
-enum_specifier : KW_ENUM IDENT LBRACE enumerator_list RBRACE
-               | KW_ENUM IDENT LBRACE enumerator_list COMMA RBRACE
-               | KW_ENUM LBRACE enumerator_list RBRACE
-               | KW_ENUM LBRACE enumerator_list COMMA RBRACE
-               | KW_ENUM IDENT
-               ;
+<enum_specifier> : KW_ENUM IDENT LBRACE <enumerator_list> RBRACE
+                 | KW_ENUM IDENT LBRACE <enumerator_list> COMMA RBRACE
+                 | KW_ENUM LBRACE <enumerator_list> RBRACE
+                 | KW_ENUM LBRACE <enumerator_list> COMMA RBRACE
+                 | KW_ENUM IDENT
+                 ;
 
-enumerator_list : enumerator_list COMMA enumerator
-                | enumerator
-                ;
+<enumerator_list> : <enumerator_list> COMMA <enumerator>
+                  | <enumerator>
+                  ;
 
 # Enumerator values are constant expressions; conditional_expr is the C
 # standard's "constant-expression" non-terminal — it excludes both
 # assignment and the comma operator.
-enumerator : IDENT
-           | IDENT ASSIGN conditional_expr
-           ;
+<enumerator> : IDENT
+             | IDENT ASSIGN <conditional_expr>
+             ;
 
-init_declarator_list_opt : init_declarator_list
-                         |
-                         ;
+<init_declarator_list_opt> : <init_declarator_list>
+                           |
+                           ;
 
-init_declarator_list : init_declarator_list COMMA init_declarator
-                     | init_declarator
-                     ;
+<init_declarator_list> : <init_declarator_list> COMMA <init_declarator>
+                       | <init_declarator>
+                       ;
 
-init_declarator : declarator
-                | declarator ASSIGN initializer
-                ;
+<init_declarator> : <declarator>
+                  | <declarator> ASSIGN <initializer>
+                  ;
 
 # Declarators allow pointer prefixes and either array brackets or a
 # function-parameter parenthesis suffix.
-declarator : pointer direct_declarator
-           | direct_declarator
-           ;
+<declarator> : <pointer> <direct_declarator>
+             | <direct_declarator>
+             ;
 
-pointer : pointer STAR type_qualifier_list_opt
-        | STAR type_qualifier_list_opt
-        ;
-
-type_qualifier_list_opt : type_qualifier_list
-                        |
-                        ;
-
-type_qualifier_list : type_qualifier_list type_qualifier
-                    | type_qualifier
-                    ;
-
-direct_declarator : IDENT
-                  | LPAREN declarator RPAREN
-                  | direct_declarator LBRACKET conditional_expr RBRACKET
-                  | direct_declarator LBRACKET RBRACKET
-                  | direct_declarator LPAREN parameter_type_list RPAREN
-                  | direct_declarator LPAREN RPAREN
-                  ;
-
-parameter_type_list : parameter_list
-                    | parameter_list COMMA ELLIPSIS
-                    ;
-
-parameter_list : parameter_list COMMA parameter
-               | parameter
-               ;
-
-parameter : decl_specs declarator
-          | decl_specs                    # for `int (*)(int)`-style abstract decls (rough)
+<pointer> : <pointer> STAR <type_qualifier_list_opt>
+          | STAR <type_qualifier_list_opt>
           ;
 
-initializer : assignment_expr
-            | LBRACE initializer_list RBRACE
-            | LBRACE initializer_list COMMA RBRACE
-            ;
+<type_qualifier_list_opt> : <type_qualifier_list>
+                          |
+                          ;
 
-# C99 designated initializers: any element can be prefixed by a
-# designator-list followed by `=`. `.field = ...` and `[expr] = ...`
-# nest freely (`.outer.inner = ...`, `[3].field = ...`).
-initializer_list : initializer_list COMMA designated_initializer
-                 | designated_initializer
+<type_qualifier_list> : <type_qualifier_list> <type_qualifier>
+                      | <type_qualifier>
+                      ;
+
+<direct_declarator> : IDENT
+                    | LPAREN <declarator> RPAREN
+                    | <direct_declarator> LBRACKET <conditional_expr> RBRACKET
+                    | <direct_declarator> LBRACKET RBRACKET
+                    | <direct_declarator> LPAREN <parameter_type_list> RPAREN
+                    | <direct_declarator> LPAREN RPAREN
+                    ;
+
+<parameter_type_list> : <parameter_list>
+                      | <parameter_list> COMMA ELLIPSIS
+                      ;
+
+<parameter_list> : <parameter_list> COMMA <parameter>
+                 | <parameter>
                  ;
 
-designated_initializer : initializer
-                       | designation initializer
-                       ;
+<parameter> : <decl_specs> <declarator>
+            | <decl_specs>
+            ;
 
-designation : designator_list ASSIGN ;
+<initializer> : <assignment_expr>
+              | LBRACE <initializer_list> RBRACE
+              | LBRACE <initializer_list> COMMA RBRACE
+              ;
 
-designator_list : designator_list designator
-                | designator
-                ;
+# C99 designated initializers: any element can be prefixed by a
+# designator-list followed by `=`.
+<initializer_list> : <initializer_list> COMMA <designated_initializer>
+                   | <designated_initializer>
+                   ;
 
-designator : LBRACKET conditional_expr RBRACKET
-           | DOT IDENT
-           ;
+<designated_initializer> : <initializer>
+                         | <designation> <initializer>
+                         ;
+
+<designation> : <designator_list> ASSIGN ;
+
+<designator_list> : <designator_list> <designator>
+                  | <designator>
+                  ;
+
+<designator> : LBRACKET <conditional_expr> RBRACKET
+             | DOT IDENT
+             ;
 
 # --- statements ------------------------------------------------------------
 
-stmt : matched_stmt
-     | unmatched_stmt
-     ;
+<stmt> : <matched_stmt>
+       | <unmatched_stmt>
+       ;
 
 # Threading the matched/unmatched discipline through labels and loop
 # bodies. iteration_stmt's body is a stmt (which can be unmatched) — that
 # would re-introduce the dangling-else conflict if iteration_stmt itself
-# could appear in a position where ELSE follows. Same shape as the
-# plm_full grammar: split labels by matchedness; split iteration by the
-# matchedness of the loop body.
-matched_stmt : matched_if
-             | compound_stmt
-             | expression_stmt
-             | jump_stmt
-             | matched_iteration_stmt
-             | matched_switch_stmt
-             | IDENT COLON matched_stmt
-             | KW_CASE conditional_expr COLON matched_stmt
-             | KW_DEFAULT COLON matched_stmt
-             ;
-
-unmatched_stmt : unmatched_if
-               | unmatched_iteration_stmt
-               | unmatched_switch_stmt
-               | IDENT COLON unmatched_stmt
-               | KW_CASE conditional_expr COLON unmatched_stmt
-               | KW_DEFAULT COLON unmatched_stmt
+# could appear in a position where ELSE follows.
+<matched_stmt> : <matched_if>
+               | <compound_stmt>
+               | <expression_stmt>
+               | <jump_stmt>
+               | <matched_iteration_stmt>
+               | <matched_switch_stmt>
+               | IDENT COLON <matched_stmt>
+               | KW_CASE <conditional_expr> COLON <matched_stmt>
+               | KW_DEFAULT COLON <matched_stmt>
                ;
 
-matched_if : KW_IF LPAREN expr RPAREN matched_stmt KW_ELSE matched_stmt ;
-unmatched_if : KW_IF LPAREN expr RPAREN stmt
-             | KW_IF LPAREN expr RPAREN matched_stmt KW_ELSE unmatched_stmt
-             ;
+<unmatched_stmt> : <unmatched_if>
+                 | <unmatched_iteration_stmt>
+                 | <unmatched_switch_stmt>
+                 | IDENT COLON <unmatched_stmt>
+                 | KW_CASE <conditional_expr> COLON <unmatched_stmt>
+                 | KW_DEFAULT COLON <unmatched_stmt>
+                 ;
 
-matched_iteration_stmt : KW_WHILE LPAREN expr RPAREN matched_stmt
-                       | KW_DO matched_stmt KW_WHILE LPAREN expr RPAREN SEMI
-                       | KW_FOR LPAREN for_init for_cond_opt SEMI for_step_opt RPAREN matched_stmt
-                       ;
+<matched_if> : KW_IF LPAREN <expr> RPAREN <matched_stmt> KW_ELSE <matched_stmt> ;
+<unmatched_if> : KW_IF LPAREN <expr> RPAREN <stmt>
+               | KW_IF LPAREN <expr> RPAREN <matched_stmt> KW_ELSE <unmatched_stmt>
+               ;
 
-unmatched_iteration_stmt : KW_WHILE LPAREN expr RPAREN unmatched_stmt
-                         | KW_FOR LPAREN for_init for_cond_opt SEMI for_step_opt RPAREN unmatched_stmt
+<matched_iteration_stmt> : KW_WHILE LPAREN <expr> RPAREN <matched_stmt>
+                         | KW_DO <matched_stmt> KW_WHILE LPAREN <expr> RPAREN SEMI
+                         | KW_FOR LPAREN <for_init> <for_cond_opt> SEMI <for_step_opt> RPAREN <matched_stmt>
                          ;
 
+<unmatched_iteration_stmt> : KW_WHILE LPAREN <expr> RPAREN <unmatched_stmt>
+                           | KW_FOR LPAREN <for_init> <for_cond_opt> SEMI <for_step_opt> RPAREN <unmatched_stmt>
+                           ;
+
 # switch is matched/unmatched on the body it wraps, just like iteration.
-# `case <const>:` and `default:` are statement labels; their inner stmt
-# follows the same matched/unmatched discipline as goto-style labels.
-matched_switch_stmt : KW_SWITCH LPAREN expr RPAREN matched_stmt ;
-unmatched_switch_stmt : KW_SWITCH LPAREN expr RPAREN unmatched_stmt ;
+<matched_switch_stmt> : KW_SWITCH LPAREN <expr> RPAREN <matched_stmt> ;
+<unmatched_switch_stmt> : KW_SWITCH LPAREN <expr> RPAREN <unmatched_stmt> ;
 
-compound_stmt : LBRACE block_items RBRACE ;
+<compound_stmt> : LBRACE <block_items> RBRACE ;
 
-block_items : block_items block_item
-            |
-            ;
+<block_items> : <block_items> <block_item>
+              |
+              ;
 
-block_item : declaration
-           | stmt
-           ;
+<block_item> : <declaration>
+             | <stmt>
+             ;
 
-expression_stmt : SEMI
-                | expr SEMI
-                ;
+<expression_stmt> : SEMI
+                  | <expr> SEMI
+                  ;
 
 # `for (e; e; e)` and `for (decl e; e)` — covers both classical and C99 forms.
-# expression_stmt already covers the empty-init form (just SEMI), so we don't
-# repeat it here.
-for_init : declaration
-         | expression_stmt
-         ;
+<for_init> : <declaration>
+           | <expression_stmt>
+           ;
 
-for_cond_opt : expr
-             |
-             ;
+<for_cond_opt> : <expr>
+               |
+               ;
 
-for_step_opt : expr
-             |
-             ;
+<for_step_opt> : <expr>
+               |
+               ;
 
-jump_stmt : KW_GOTO IDENT SEMI
-          | KW_CONTINUE SEMI
-          | KW_BREAK SEMI
-          | KW_RETURN SEMI
-          | KW_RETURN expr SEMI
-          ;
+<jump_stmt> : KW_GOTO IDENT SEMI
+            | KW_CONTINUE SEMI
+            | KW_BREAK SEMI
+            | KW_RETURN SEMI
+            | KW_RETURN <expr> SEMI
+            ;
 
 # --- expressions -----------------------------------------------------------
 # Standard C precedence ladder. We stop at assignment_expr for places where
 # comma-expressions are forbidden (function arguments, initializers,
 # declaration sizes); use `expr` (which folds in comma) at the top level.
 
-expr : assignment_expr
-     | expr COMMA assignment_expr
-     ;
+<expr> : <assignment_expr>
+       | <expr> COMMA <assignment_expr>
+       ;
 
-assignment_expr : conditional_expr
-                | unary_expr ASSIGN     assignment_expr
-                | unary_expr PLUS_EQ    assignment_expr
-                | unary_expr MINUS_EQ   assignment_expr
-                | unary_expr STAR_EQ    assignment_expr
-                | unary_expr SLASH_EQ   assignment_expr
-                | unary_expr PERCENT_EQ assignment_expr
-                | unary_expr AMP_EQ     assignment_expr
-                | unary_expr PIPE_EQ    assignment_expr
-                | unary_expr CARET_EQ   assignment_expr
-                | unary_expr LSHIFT_EQ  assignment_expr
-                | unary_expr RSHIFT_EQ  assignment_expr
-                ;
-
-conditional_expr : logical_or_expr
-                 | logical_or_expr QUESTION expr COLON conditional_expr
-                 ;
-
-logical_or_expr : logical_or_expr LOR logical_and_expr
-                | logical_and_expr
-                ;
-
-logical_and_expr : logical_and_expr LAND inclusive_or_expr
-                 | inclusive_or_expr
-                 ;
-
-inclusive_or_expr : inclusive_or_expr PIPE exclusive_or_expr
-                  | exclusive_or_expr
+<assignment_expr> : <conditional_expr>
+                  | <unary_expr> ASSIGN     <assignment_expr>
+                  | <unary_expr> PLUS_EQ    <assignment_expr>
+                  | <unary_expr> MINUS_EQ   <assignment_expr>
+                  | <unary_expr> STAR_EQ    <assignment_expr>
+                  | <unary_expr> SLASH_EQ   <assignment_expr>
+                  | <unary_expr> PERCENT_EQ <assignment_expr>
+                  | <unary_expr> AMP_EQ     <assignment_expr>
+                  | <unary_expr> PIPE_EQ    <assignment_expr>
+                  | <unary_expr> CARET_EQ   <assignment_expr>
+                  | <unary_expr> LSHIFT_EQ  <assignment_expr>
+                  | <unary_expr> RSHIFT_EQ  <assignment_expr>
                   ;
 
-exclusive_or_expr : exclusive_or_expr CARET and_expr
-                  | and_expr
+<conditional_expr> : <logical_or_expr>
+                   | <logical_or_expr> QUESTION <expr> COLON <conditional_expr>
+                   ;
+
+<logical_or_expr> : <logical_or_expr> LOR <logical_and_expr>
+                  | <logical_and_expr>
                   ;
 
-and_expr : and_expr AMP equality_expr
-         | equality_expr
-         ;
+<logical_and_expr> : <logical_and_expr> LAND <inclusive_or_expr>
+                   | <inclusive_or_expr>
+                   ;
 
-equality_expr : equality_expr EQ relational_expr
-              | equality_expr NE relational_expr
-              | relational_expr
-              ;
+<inclusive_or_expr> : <inclusive_or_expr> PIPE <exclusive_or_expr>
+                    | <exclusive_or_expr>
+                    ;
 
-relational_expr : relational_expr LT shift_expr
-                | relational_expr GT shift_expr
-                | relational_expr LE shift_expr
-                | relational_expr GE shift_expr
-                | shift_expr
-                ;
+<exclusive_or_expr> : <exclusive_or_expr> CARET <and_expr>
+                    | <and_expr>
+                    ;
 
-shift_expr : shift_expr LSHIFT additive_expr
-           | shift_expr RSHIFT additive_expr
-           | additive_expr
+<and_expr> : <and_expr> AMP <equality_expr>
+           | <equality_expr>
            ;
 
-additive_expr : additive_expr PLUS  multiplicative_expr
-              | additive_expr MINUS multiplicative_expr
-              | multiplicative_expr
-              ;
+<equality_expr> : <equality_expr> EQ <relational_expr>
+                | <equality_expr> NE <relational_expr>
+                | <relational_expr>
+                ;
 
-multiplicative_expr : multiplicative_expr STAR    cast_expr
-                    | multiplicative_expr SLASH   cast_expr
-                    | multiplicative_expr PERCENT cast_expr
-                    | cast_expr
-                    ;
+<relational_expr> : <relational_expr> LT <shift_expr>
+                  | <relational_expr> GT <shift_expr>
+                  | <relational_expr> LE <shift_expr>
+                  | <relational_expr> GE <shift_expr>
+                  | <shift_expr>
+                  ;
+
+<shift_expr> : <shift_expr> LSHIFT <additive_expr>
+             | <shift_expr> RSHIFT <additive_expr>
+             | <additive_expr>
+             ;
+
+<additive_expr> : <additive_expr> PLUS  <multiplicative_expr>
+                | <additive_expr> MINUS <multiplicative_expr>
+                | <multiplicative_expr>
+                ;
+
+<multiplicative_expr> : <multiplicative_expr> STAR    <cast_expr>
+                      | <multiplicative_expr> SLASH   <cast_expr>
+                      | <multiplicative_expr> PERCENT <cast_expr>
+                      | <cast_expr>
+                      ;
 
 # Casts use the typedef-name lexer hack: after the host installs a token
 # filter and a typedef-tracking hook, `(MyInt) x` lexes its IDENT as
 # TYPEDEF_NAME, which disambiguates `LPAREN type_name RPAREN cast_expr`
 # (a cast) from `LPAREN expr RPAREN op ...` (a parenthesised expression).
-# type_name is a simplified shape: optional pointer suffix, no abstract
-# declarator (so function-pointer casts like `(int (*)(int))` aren't
-# accepted yet). uc_core uses pointer casts heavily and that's covered;
-# function-pointer casts are rare and a Phase-9 follow-up.
-cast_expr : unary_expr
-          | LPAREN type_name RPAREN cast_expr
-          ;
+<cast_expr> : <unary_expr>
+            | LPAREN <type_name> RPAREN <cast_expr>
+            ;
 
 # Abstract declarator — the right-hand side of casts, compound-literal
-# types, and _Generic associations. Mirrors the standard C99 abstract
-# declarator: pointer prefix, parenthesised inner declarator, trailing
-# array brackets, trailing function parameter parens. This admits
-# `int *`, `int [3]`, `int (*)(int)`, `int (*)[4]`, etc.
-type_name : decl_specs
-          | decl_specs abstract_declarator
-          ;
+# types, and _Generic associations.
+<type_name> : <decl_specs>
+            | <decl_specs> <abstract_declarator>
+            ;
 
-abstract_declarator : pointer
-                    | pointer direct_abstract_declarator
-                    | direct_abstract_declarator
-                    ;
+<abstract_declarator> : <pointer>
+                      | <pointer> <direct_abstract_declarator>
+                      | <direct_abstract_declarator>
+                      ;
 
-direct_abstract_declarator : LPAREN abstract_declarator RPAREN
-                           | direct_abstract_declarator LBRACKET conditional_expr RBRACKET
-                           | direct_abstract_declarator LBRACKET RBRACKET
-                           | direct_abstract_declarator LPAREN parameter_type_list RPAREN
-                           | direct_abstract_declarator LPAREN RPAREN
-                           | LBRACKET conditional_expr RBRACKET
-                           | LBRACKET RBRACKET
-                           | LPAREN parameter_type_list RPAREN
-                           | LPAREN RPAREN
-                           ;
+<direct_abstract_declarator> : LPAREN <abstract_declarator> RPAREN
+                             | <direct_abstract_declarator> LBRACKET <conditional_expr> RBRACKET
+                             | <direct_abstract_declarator> LBRACKET RBRACKET
+                             | <direct_abstract_declarator> LPAREN <parameter_type_list> RPAREN
+                             | <direct_abstract_declarator> LPAREN RPAREN
+                             | LBRACKET <conditional_expr> RBRACKET
+                             | LBRACKET RBRACKET
+                             | LPAREN <parameter_type_list> RPAREN
+                             | LPAREN RPAREN
+                             ;
 
-unary_expr : postfix_expr
-           | INC unary_expr
-           | DEC unary_expr
-           | AMP   cast_expr
-           | STAR  cast_expr
-           | PLUS  cast_expr
-           | MINUS cast_expr
-           | TILDE cast_expr
-           | BANG  cast_expr
-           | KW_SIZEOF unary_expr
-           | KW_SIZEOF LPAREN type_name RPAREN
-           ;
-
-postfix_expr : primary_expr
-             | postfix_expr LBRACKET expr RBRACKET
-             | postfix_expr LPAREN argument_list RPAREN
-             | postfix_expr LPAREN RPAREN
-             | postfix_expr DOT IDENT
-             | postfix_expr ARROW IDENT
-             | postfix_expr INC
-             | postfix_expr DEC
-             | LPAREN type_name RPAREN LBRACE initializer_list RBRACE
-             | LPAREN type_name RPAREN LBRACE initializer_list COMMA RBRACE
+<unary_expr> : <postfix_expr>
+             | INC <unary_expr>
+             | DEC <unary_expr>
+             | AMP   <cast_expr>
+             | STAR  <cast_expr>
+             | PLUS  <cast_expr>
+             | MINUS <cast_expr>
+             | TILDE <cast_expr>
+             | BANG  <cast_expr>
+             | KW_SIZEOF <unary_expr>
+             | KW_SIZEOF LPAREN <type_name> RPAREN
              ;
 
-primary_expr : IDENT
-             | INT_LIT
-             | CHAR_LIT
-             | STRING_LIT
-             | LPAREN expr RPAREN
-             | KW_GENERIC LPAREN assignment_expr COMMA generic_assoc_list RPAREN
-             ;
+<postfix_expr> : <primary_expr>
+               | <postfix_expr> LBRACKET <expr> RBRACKET
+               | <postfix_expr> LPAREN <argument_list> RPAREN
+               | <postfix_expr> LPAREN RPAREN
+               | <postfix_expr> DOT IDENT
+               | <postfix_expr> ARROW IDENT
+               | <postfix_expr> INC
+               | <postfix_expr> DEC
+               | LPAREN <type_name> RPAREN LBRACE <initializer_list> RBRACE
+               | LPAREN <type_name> RPAREN LBRACE <initializer_list> COMMA RBRACE
+               ;
 
-generic_assoc_list : generic_assoc_list COMMA generic_association
-                   | generic_association
-                   ;
+<primary_expr> : IDENT
+               | INT_LIT
+               | CHAR_LIT
+               | STRING_LIT
+               | LPAREN <expr> RPAREN
+               | KW_GENERIC LPAREN <assignment_expr> COMMA <generic_assoc_list> RPAREN
+               ;
+
+<generic_assoc_list> : <generic_assoc_list> COMMA <generic_association>
+                     | <generic_association>
+                     ;
 
 # Each association is `type_name : expr` or `default : expr`. The COLON is
 # unambiguous in this context — _Generic is the only place an association
 # list appears.
-generic_association : type_name COLON assignment_expr
-                    | KW_DEFAULT COLON assignment_expr
-                    ;
+<generic_association> : <type_name> COLON <assignment_expr>
+                      | KW_DEFAULT COLON <assignment_expr>
+                      ;
 
-argument_list : argument_list COMMA assignment_expr
-              | assignment_expr
-              ;
+<argument_list> : <argument_list> COMMA <assignment_expr>
+                | <assignment_expr>
+                ;

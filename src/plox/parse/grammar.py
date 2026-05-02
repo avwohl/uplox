@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from ..spec.ir import GrammarIR
+from ..spec.ir import GrammarIR, Symbol
 
 # Reserved symbol names. These cannot appear in user grammars.
 EPSILON = ""        # empty string token; used in FIRST sets
@@ -107,21 +107,31 @@ def compile_grammar(ir: GrammarIR) -> Grammar:
             f"start symbol {ir.start_symbol!r} is not the LHS of any rule"
         )
 
-    def resolve(sym_name: str) -> str:
-        if sym_name.startswith('"') and sym_name.endswith('"'):
-            literal = sym_name[1:-1]
-            tok = literal_to_token.get(literal)
+    keyword_aliases = ir.keyword_aliases
+
+    def resolve(sym: Symbol) -> str:
+        if sym.kind == "literal":
+            tok = literal_to_token.get(sym.name)
             if tok is None:
                 raise GrammarError(
-                    f"string literal {sym_name} is not declared as any token's literal"
+                    f"string literal {sym.name!r} at {sym.position} is not "
+                    f"declared as any token's literal"
                 )
             return tok
-        if sym_name in terminal_names:
-            return sym_name
-        if sym_name in rule_names:
-            return sym_name
+        if sym.kind == "nonterm":
+            if sym.name not in rule_names:
+                raise GrammarError(
+                    f"non-terminal <{sym.name}> at {sym.position} has no rule defining it"
+                )
+            return sym.name
+        # kind == "term"
+        if sym.name in terminal_names:
+            return sym.name
+        alias = keyword_aliases.get(sym.name)
+        if alias is not None:
+            return alias
         raise GrammarError(
-            f"symbol {sym_name!r} is neither a declared token nor a rule"
+            f"terminal {sym.name!r} at {sym.position} is not a declared token or keyword"
         )
 
     grammar = Grammar(
@@ -141,7 +151,7 @@ def compile_grammar(ir: GrammarIR) -> Grammar:
     user_idx = 0
     for rule in ir.rules:
         for prod in rule.productions:
-            rhs_resolved = tuple(resolve(s.name) for s in prod.rhs)
+            rhs_resolved = tuple(resolve(s) for s in prod.rhs)
             grammar.productions.append(
                 CompiledProduction(
                     index=len(grammar.productions),

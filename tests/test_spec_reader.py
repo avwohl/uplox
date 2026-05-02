@@ -1,4 +1,4 @@
-"""Bootstrap reader tests for the v0 ``.plox`` DSL."""
+"""Bootstrap reader tests for the ``.plox`` DSL."""
 
 from __future__ import annotations
 
@@ -14,8 +14,8 @@ start = expr
 
 %tokens
 NUMBER = /[0-9]+/
-PLUS   = "+"
-MINUS  = "-"
+PLUS   = '+'
+MINUS  = '-'
 WS     = /[ \\t\\n]+/    %skip
 
 %hooks
@@ -23,7 +23,7 @@ log_token  pre_shift
 recover    on_error
 
 %rules
-expr : expr PLUS NUMBER | NUMBER ;
+<expr> : <expr> PLUS NUMBER | NUMBER ;
 """
 
 
@@ -50,7 +50,7 @@ def test_comments_and_blank_lines_ignored():
     # block comment in the middle
 
     %tokens
-    A = "a"   # trailing comment
+    A = 'a'   # trailing comment
     """
     ir = read_source(src)
     assert ir.name == "c1"
@@ -59,7 +59,7 @@ def test_comments_and_blank_lines_ignored():
 
 def test_missing_grammar_directive():
     with pytest.raises(ReaderError, match="expected `%grammar"):
-        read_source("%tokens\nA = \"a\"\n")
+        read_source("%tokens\nA = 'a'\n")
 
 
 def test_duplicate_grammar_directive():
@@ -94,7 +94,7 @@ HASH = /#/
 def test_string_escape_in_literal():
     src = """%grammar g
 %tokens
-TAB = "\\t"
+TAB = '\\t'
 """
     ir = read_source(src)
     assert ir.tokens[0].literal == "\t"

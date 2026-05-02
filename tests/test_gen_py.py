@@ -32,18 +32,18 @@ CALC = """
 
 %tokens
 NUMBER = /[0-9]+/
-PLUS   = "+"
-MINUS  = "-"
-STAR   = "*"
-SLASH  = "/"
-LPAREN = "("
-RPAREN = ")"
+PLUS   = '+'
+MINUS  = '-'
+STAR   = '*'
+SLASH  = '/'
+LPAREN = '('
+RPAREN = ')'
 WS     = /[ \\t\\n]+/    %skip
 
 %rules
-expr  : expr PLUS term | expr MINUS term | term ;
-term  : term STAR factor | term SLASH factor | factor ;
-factor : NUMBER | LPAREN expr RPAREN ;
+<expr>  : <expr> PLUS <term> | <expr> MINUS <term> | <term> ;
+<term>  : <term> STAR <factor> | <term> SLASH <factor> | <factor> ;
+<factor> : NUMBER | LPAREN <expr> RPAREN ;
 """
 
 

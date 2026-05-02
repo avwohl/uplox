@@ -1,4 +1,4 @@
-# PL/M-80 grammar — extended subset for Phase 9.
+# PL/M-80 grammar — extended subset.
 #
 # Targets the constructs used by Digital Research's BDOS source
 # (sample_code/bdos1.4.plm in the uplm80 repo) on top of plm_subset.plox:
@@ -19,8 +19,6 @@
 # * The pre-lexer that expands LITERALLY macros (we keep their definitions
 #   in the grammar but don't expand: hosts handle this).
 # * $-conditional compilation directives ($COND, $IF, $INCLUDE).
-#   These have to be filtered upstream of the lexer; the grammar treats
-#   them as if they aren't there.
 # * Embedded assignment within parens `(x := y)` — uplm80 supports it,
 #   but it requires a non-trivial parser tweak that's noise for now.
 
@@ -29,6 +27,16 @@
 %options
 start = module
 
+%keyword_prefix KW_
+%keywords
+PROCEDURE EXTERNAL REENTRANT INTERRUPT PUBLIC
+DECLARE INITIAL DATA LITERALLY LABEL
+BYTE ADDRESS BASED AT
+IF THEN ELSE DO WHILE CASE BY TO END
+CALL RETURN GOTO GO HALT ENABLE DISABLE
+AND OR XOR NOT MOD PLUS MINUS
+EOF STRUCTURE
+
 %tokens
 WS         = /[ \t\r\n]+/                        %skip
 COMMENT    = /\/\*([^*]|\*+[^*\/])*\*+\//        %skip
@@ -36,329 +44,288 @@ COMMENT    = /\/\*([^*]|\*+[^*\/])*\*+\//        %skip
 NUMBER     = /[0-9][0-9A-Fa-f$]*[BbDdHhOoQq]?/
 STRING     = /'([^'\n]|'')*'/
 
-PROCEDURE  = "PROCEDURE"
-EXTERNAL   = "EXTERNAL"
-REENTRANT  = "REENTRANT"
-INTERRUPT  = "INTERRUPT"
-PUBLIC     = "PUBLIC"
-DECLARE    = "DECLARE"
-INITIAL    = "INITIAL"
-DATA       = "DATA"
-LITERALLY  = "LITERALLY"
-LABEL      = "LABEL"
-BYTE       = "BYTE"
-ADDRESS    = "ADDRESS"
-BASED      = "BASED"
-AT         = "AT"
-KW_IF      = "IF"
-THEN       = "THEN"
-ELSE       = "ELSE"
-DO         = "DO"
-WHILE      = "WHILE"
-CASE       = "CASE"
-BY         = "BY"
-TO         = "TO"
-END        = "END"
-CALL       = "CALL"
-RETURN     = "RETURN"
-GOTO       = "GOTO"
-GO         = "GO"
-HALT       = "HALT"
-ENABLE     = "ENABLE"
-DISABLE    = "DISABLE"
-KW_AND     = "AND"
-KW_OR      = "OR"
-KW_XOR     = "XOR"
-KW_NOT     = "NOT"
-KW_MOD     = "MOD"
-KW_PLUS    = "PLUS"
-KW_MINUS   = "MINUS"
-EOF_KW     = "EOF"
-STRUCTURE  = "STRUCTURE"
-
 # Note: PL/M-80 sources sometimes declare `EQU LITERALLY 'LITERALLY'` and
 # then use `EQU` as a macro alias. That requires running a macro expander
-# *before* the lexer — we don't do that in v0, so EQU is just an identifier
+# *before* the lexer — we don't do that, so EQU is just an identifier
 # here. Sources that rely on the EQU alias need a pre-pass; the LITERALLY
 # keyword still works directly.
 
-# Identifiers (last so the keyword literals win on a tie).
+# Identifiers (declared after %keywords so the synthesised keyword
+# tokens win the longest-match tie at lex time).
 IDENT      = /[A-Za-z_$][A-Za-z0-9_$]*/
 
 # Multi-char operators before single-char.
-LE         = "<="
-GE         = ">="
-NE         = "<>"
+LE         = '<='
+GE         = '>='
+NE         = '<>'
 
-EQ         = "="
-LT         = "<"
-GT         = ">"
-PLUS       = "+"
-MINUS      = "-"
-STAR       = "*"
-SLASH      = "/"
-LPAREN     = "("
-RPAREN     = ")"
-COMMA      = ","
-SEMI       = ";"
-COLON      = ":"
-DOT        = "."
+EQ         = '='
+LT         = '<'
+GT         = '>'
+OP_PLUS    = '+'
+OP_MINUS   = '-'
+STAR       = '*'
+SLASH      = '/'
+LPAREN     = '('
+RPAREN     = ')'
+COMMA      = ','
+SEMI       = ';'
+COLON      = ':'
+DOT        = '.'
 
 %rules
 
 # A module is items terminated by an optional trailing EOF keyword. A
 # module item is either a stand-alone declaration / statement / proc /
 # address-literal, OR a top-level labeled DO block.
-module      : items
-            | items EOF_KW
-            ;
+<module>      : <items>
+              | <items> EOF
+              ;
 
-items       : items item
-            | item
-            ;
+<items>       : <items> <item>
+              | <item>
+              ;
 
-item        : address_literal
-            | proc_decl
-            | declare_stmt
-            | stmt
-            ;
+<item>        : <address_literal>
+              | <proc_decl>
+              | <declare_stmt>
+              | <stmt>
+              ;
 
-address_literal : NUMBER COLON ;
+<address_literal> : NUMBER ':' ;
 
 # --- procedures -----------------------------------------------------------
 
-proc_decl   : IDENT COLON PROCEDURE proc_signature proc_body
-            ;
+<proc_decl>   : IDENT ':' PROCEDURE <proc_signature> <proc_body>
+              ;
 
 # proc_signature wraps everything between PROCEDURE and the SEMI that
 # starts the body. Variants: BYTE / ADDRESS return type + parens + attrs.
-proc_signature : proc_return proc_params proc_attrs SEMI ;
+<proc_signature> : <proc_return> <proc_params> <proc_attrs> ';' ;
 
-proc_return : BYTE
-            | ADDRESS
-            |
-            ;
+<proc_return> : BYTE
+              | ADDRESS
+              |
+              ;
 
-proc_params : LPAREN ident_list RPAREN
-            | LPAREN RPAREN
-            |
-            ;
+<proc_params> : '(' <ident_list> ')'
+              | '(' ')'
+              |
+              ;
 
-proc_attrs  : proc_attrs proc_attr
-            |
-            ;
+<proc_attrs>  : <proc_attrs> <proc_attr>
+              |
+              ;
 
-proc_attr   : EXTERNAL
-            | PUBLIC
-            | REENTRANT
-            | INTERRUPT NUMBER
-            ;
+<proc_attr>   : EXTERNAL
+              | PUBLIC
+              | REENTRANT
+              | INTERRUPT NUMBER
+              ;
 
-proc_body   : body_items END opt_end_label SEMI ;
+<proc_body>   : <body_items> END <opt_end_label> ';' ;
 
 # A single sequence of declarations and/or statements. PL/M-80 conventionally
 # puts declarations first, but enforcing that at the grammar level means
 # either splitting into two empty-derivable lists (which collides on every
 # block-internal terminal) or threading a phase marker. Both add a lot of
-# states for no parser-level value, since downstream tools that care about
-# the convention can check it post-parse on the resulting body_items list.
-body_items  : body_items body_item
-            |
-            ;
-body_item   : declare_stmt
-            | stmt
-            ;
-
-opt_end_label : IDENT
+# states for no parser-level value.
+<body_items>  : <body_items> <body_item>
               |
               ;
+<body_item>   : <declare_stmt>
+              | <stmt>
+              ;
 
-ident_list  : IDENT
-            | ident_list COMMA IDENT
-            ;
+<opt_end_label> : IDENT
+                |
+                ;
+
+<ident_list>  : IDENT
+              | <ident_list> ',' IDENT
+              ;
 
 # --- declarations ---------------------------------------------------------
 
-declare_stmt : DECLARE decl_list SEMI ;
+<declare_stmt> : DECLARE <decl_list> ';' ;
 
-decl_list   : decl_list COMMA decl_item
-            | decl_item
-            ;
+<decl_list>   : <decl_list> ',' <decl_item>
+              | <decl_item>
+              ;
 
 # A decl_item is one of:
 #   simple-typed:   NAME (or (a,b)) TYPE [attrs]
 #   data-init:      NAME DATA (...)
 #   literally:      NAME LITERALLY 'value' / NAME EQU 'value'
 #   structure:      NAME STRUCTURE ( ... ) [attrs]
-decl_item   : decl_names based_opt array_size_opt type_spec attrs_opt
-            | decl_names DATA LPAREN arg_list RPAREN
-            | IDENT LITERALLY STRING
-            | IDENT STRUCTURE LPAREN struct_member_list RPAREN attrs_opt
-            ;
+<decl_item>   : <decl_names> <based_opt> <array_size_opt> <type_spec> <attrs_opt>
+              | <decl_names> DATA '(' <arg_list> ')'
+              | IDENT LITERALLY STRING
+              | IDENT STRUCTURE '(' <struct_member_list> ')' <attrs_opt>
+              ;
 
-decl_names  : IDENT
-            | LPAREN ident_list RPAREN
-            ;
+<decl_names>  : IDENT
+              | '(' <ident_list> ')'
+              ;
 
 # `BUFF BASED BUFFA (128) BYTE` — the BASED clause sits between the name(s)
 # and the array size, before the type proper.
-based_opt   : BASED IDENT
-            |
-            ;
+<based_opt>   : BASED IDENT
+              |
+              ;
 
 # `TRAN(32) BYTE` — array size goes between name and type. (PL/M-80 also
 # allows `TRAN BYTE(32)` and we keep that as a type_spec form below.)
-array_size_opt : LPAREN size_expr RPAREN
-               |
-               ;
+<array_size_opt> : '(' <size_expr> ')'
+                 |
+                 ;
 
-type_spec   : BYTE
-            | ADDRESS
-            | LABEL
-            | BYTE LPAREN size_expr RPAREN
-            | ADDRESS LPAREN size_expr RPAREN
-            ;
+<type_spec>   : BYTE
+              | ADDRESS
+              | LABEL
+              | BYTE '(' <size_expr> ')'
+              | ADDRESS '(' <size_expr> ')'
+              ;
 
 # Sizes inside type specs are usually NUMBER but may be IDENT (a LITERALLY
 # macro that expands to a constant).
-size_expr   : NUMBER
-            | IDENT
-            ;
+<size_expr>   : NUMBER
+              | IDENT
+              ;
 
-attrs_opt   : attrs_opt attr_clause
-            |
-            ;
+<attrs_opt>   : <attrs_opt> <attr_clause>
+              |
+              ;
 
-attr_clause : EXTERNAL
-            | PUBLIC
-            | INITIAL LPAREN arg_list RPAREN
-            | AT      LPAREN expr     RPAREN
-            ;
+<attr_clause> : EXTERNAL
+              | PUBLIC
+              | INITIAL '(' <arg_list> ')'
+              | AT      '(' <expr>     ')'
+              ;
 
 # --- structure types (parsed for shape; semantics deferred) ---------------
 
-struct_member_list : struct_member
-                   | struct_member_list COMMA struct_member
-                   ;
+<struct_member_list> : <struct_member>
+                     | <struct_member_list> ',' <struct_member>
+                     ;
 
-struct_member : decl_names type_spec ;
+<struct_member> : <decl_names> <type_spec> ;
 
 # --- statements -----------------------------------------------------------
 
-stmt        : matched_stmt
-            | unmatched_stmt
-            ;
+<stmt>          : <matched_stmt>
+                | <unmatched_stmt>
+                ;
 
 # Threading the matched/unmatched discipline through labels: an
 # `IDENT: stmt` is matched iff the inner stmt is matched. Without this,
 # `stmt -> matched_stmt` would cover a labelled-unmatched-if and ELSE
-# binding would conflict — broke when label_stmt was a flat
-# `IDENT COLON stmt`.
-matched_stmt   : matched_if | non_if_stmt | IDENT COLON matched_stmt ;
-unmatched_stmt : unmatched_if            | IDENT COLON unmatched_stmt ;
+# binding would conflict.
+<matched_stmt>   : <matched_if> | <non_if_stmt> | IDENT ':' <matched_stmt> ;
+<unmatched_stmt> : <unmatched_if>               | IDENT ':' <unmatched_stmt> ;
 
-matched_if     : KW_IF expr THEN matched_stmt ELSE matched_stmt ;
-unmatched_if   : KW_IF expr THEN stmt
-               | KW_IF expr THEN matched_stmt ELSE unmatched_stmt
-               ;
+<matched_if>     : IF <expr> THEN <matched_stmt> ELSE <matched_stmt> ;
+<unmatched_if>   : IF <expr> THEN <stmt>
+                 | IF <expr> THEN <matched_stmt> ELSE <unmatched_stmt>
+                 ;
 
-non_if_stmt : assignment_stmt
-            | call_stmt
-            | return_stmt
-            | goto_stmt
-            | halt_stmt
-            | enable_stmt
-            | disable_stmt
-            | do_block
-            | null_stmt
-            ;
+<non_if_stmt> : <assignment_stmt>
+              | <call_stmt>
+              | <return_stmt>
+              | <goto_stmt>
+              | <halt_stmt>
+              | <enable_stmt>
+              | <disable_stmt>
+              | <do_block>
+              | <null_stmt>
+              ;
 
-null_stmt   : SEMI ;
-call_stmt   : CALL primary SEMI ;
+<null_stmt>   : ';' ;
+<call_stmt>   : CALL <primary> ';' ;
 
-return_stmt : RETURN SEMI
-            | RETURN expr SEMI
-            ;
+<return_stmt> : RETURN ';'
+              | RETURN <expr> ';'
+              ;
 
-goto_stmt   : GOTO IDENT SEMI
-            | GO TO IDENT SEMI
-            ;
+<goto_stmt>   : GOTO IDENT ';'
+              | GO TO IDENT ';'
+              ;
 
-halt_stmt    : HALT SEMI ;
-enable_stmt  : ENABLE SEMI ;
-disable_stmt : DISABLE SEMI ;
+<halt_stmt>    : HALT ';' ;
+<enable_stmt>  : ENABLE ';' ;
+<disable_stmt> : DISABLE ';' ;
 
-assignment_stmt : primary EQ expr SEMI ;
+<assignment_stmt> : <primary> '=' <expr> ';' ;
 
 # DO blocks come in five flavours:
 #   plain         DO; ... END;
 #   while         DO WHILE expr; ... END;
 #   iterative     DO i = expr TO expr [BY expr]; ... END;
 #   case          DO CASE expr; ... END;
-do_block    : DO SEMI body_items END opt_end_label SEMI
-            | DO WHILE expr SEMI body_items END opt_end_label SEMI
-            | DO IDENT EQ expr TO expr SEMI body_items END opt_end_label SEMI
-            | DO IDENT EQ expr TO expr BY expr SEMI body_items END opt_end_label SEMI
-            | DO CASE expr SEMI body_items END opt_end_label SEMI
-            ;
+<do_block>    : DO ';' <body_items> END <opt_end_label> ';'
+              | DO WHILE <expr> ';' <body_items> END <opt_end_label> ';'
+              | DO IDENT '=' <expr> TO <expr> ';' <body_items> END <opt_end_label> ';'
+              | DO IDENT '=' <expr> TO <expr> BY <expr> ';' <body_items> END <opt_end_label> ';'
+              | DO CASE <expr> ';' <body_items> END <opt_end_label> ';'
+              ;
 
 # --- expressions ---------------------------------------------------------
 
-expr        : or_xor ;
+<expr>        : <or_xor> ;
 
-or_xor      : or_xor KW_OR  and_e
-            | or_xor KW_XOR and_e
-            | and_e
-            ;
+<or_xor>      : <or_xor> OR  <and_e>
+              | <or_xor> XOR <and_e>
+              | <and_e>
+              ;
 
-and_e       : and_e KW_AND not_e
-            | not_e
-            ;
+<and_e>       : <and_e> AND <not_e>
+              | <not_e>
+              ;
 
-not_e       : KW_NOT not_e
-            | rel_e
-            ;
+<not_e>       : NOT <not_e>
+              | <rel_e>
+              ;
 
-rel_e       : add_e EQ add_e
-            | add_e LT add_e
-            | add_e GT add_e
-            | add_e LE add_e
-            | add_e GE add_e
-            | add_e NE add_e
-            | add_e
-            ;
+<rel_e>       : <add_e> '='  <add_e>
+              | <add_e> '<'  <add_e>
+              | <add_e> '>'  <add_e>
+              | <add_e> '<=' <add_e>
+              | <add_e> '>=' <add_e>
+              | <add_e> '<>' <add_e>
+              | <add_e>
+              ;
 
-add_e       : add_e PLUS  mul_e
-            | add_e MINUS mul_e
-            | add_e KW_PLUS  mul_e
-            | add_e KW_MINUS mul_e
-            | mul_e
-            ;
+<add_e>       : <add_e> '+'  <mul_e>
+              | <add_e> '-'  <mul_e>
+              | <add_e> PLUS  <mul_e>
+              | <add_e> MINUS <mul_e>
+              | <mul_e>
+              ;
 
-mul_e       : mul_e STAR  unary
-            | mul_e SLASH unary
-            | mul_e KW_MOD unary
-            | unary
-            ;
+<mul_e>       : <mul_e> '*' <unary>
+              | <mul_e> '/' <unary>
+              | <mul_e> MOD <unary>
+              | <unary>
+              ;
 
-unary       : MINUS unary
-            | primary
-            ;
+<unary>       : '-' <unary>
+              | <primary>
+              ;
 
-primary     : DOT LPAREN arg_list RPAREN
-            | DOT qualname
-            | qualname
-            | NUMBER
-            | STRING
-            | LPAREN expr RPAREN
-            ;
+<primary>     : '.' '(' <arg_list> ')'
+              | '.' <qualname>
+              | <qualname>
+              | NUMBER
+              | STRING
+              | '(' <expr> ')'
+              ;
 
-qualname    : IDENT
-            | IDENT LPAREN arg_list RPAREN
-            | IDENT LPAREN RPAREN
-            | qualname DOT IDENT
-            ;
+<qualname>    : IDENT
+              | IDENT '(' <arg_list> ')'
+              | IDENT '(' ')'
+              | <qualname> '.' IDENT
+              ;
 
-arg_list    : arg_list COMMA expr
-            | expr
-            ;
+<arg_list>    : <arg_list> ',' <expr>
+              | <expr>
+              ;

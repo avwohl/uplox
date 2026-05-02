@@ -89,7 +89,7 @@ def test_grammar_with_tokens(self_host):
 %tokens
 WS = /[ \\t\\n]+/  %skip
 NUMBER = /[0-9]+/
-PLUS = "+"
+PLUS = '+'
 """
     tree = parse_str(scanner, table, src)
     assert isinstance(tree, ParseNode)
@@ -101,9 +101,9 @@ def test_grammar_with_rules(self_host):
 %grammar calc
 %tokens
 NUMBER = /[0-9]+/
-PLUS = "+"
+PLUS = '+'
 %rules
-expr : expr PLUS NUMBER | NUMBER ;
+<expr> : <expr> PLUS NUMBER | NUMBER ;
 """
     tree = parse_str(scanner, table, src)
     assert isinstance(tree, ParseNode)
@@ -116,10 +116,10 @@ def test_grammar_with_hooks_section(self_host):
 %hooks
 block_scope pre_reduce
 %tokens
-LBRACE = "{"
-RBRACE = "}"
+LBRACE = '{'
+RBRACE = '}'
 %rules
-block : LBRACE RBRACE ;
+<block> : LBRACE RBRACE ;
 """
     tree = parse_str(scanner, table, src)
     assert isinstance(tree, ParseNode)
@@ -130,28 +130,28 @@ def test_per_alternative_hook_annotation(self_host):
     src = """
 %grammar t
 %tokens
-A = "a"
-SEMI = ";"
+A = 'a'
+SEMI = ';'
 %rules
-decl : A SEMI %hook=record_typedef
-     | SEMI
-     ;
+<decl> : A SEMI %hook=record_typedef
+       | SEMI
+       ;
 """
     tree = parse_str(scanner, table, src)
     assert isinstance(tree, ParseNode)
 
 
 def test_empty_alternative(self_host):
-    """Epsilon productions like `xs : xs x | ;`."""
+    """Epsilon productions like `<xs> : <xs> x | ;`."""
     scanner, table = self_host
     src = """
 %grammar t
 %tokens
-A = "a"
+A = 'a'
 %rules
-xs : xs A
-   |
-   ;
+<xs> : <xs> A
+     |
+     ;
 """
     tree = parse_str(scanner, table, src)
     assert isinstance(tree, ParseNode)
@@ -201,10 +201,10 @@ def test_action_body_with_nested_braces(self_host):
     src = """
 %grammar t
 %tokens
-A = "a"
+A = 'a'
 %rules
-xs : A { if (cond) { do_thing(); } }
-   ;
+<xs> : A { if (cond) { do_thing(); } }
+     ;
 """
     tree = parse_str(scanner, table, src)
     assert isinstance(tree, ParseNode)
@@ -217,13 +217,13 @@ def test_action_body_with_multi_line_content(self_host):
     src = """
 %grammar t
 %tokens
-A = "a"
+A = 'a'
 %rules
-xs : A {
+<xs> : A {
         $$ = $1;
         log("got it");
-     }
-   ;
+       }
+     ;
 """
     tree = parse_str(scanner, table, src)
     assert isinstance(tree, ParseNode)
@@ -238,10 +238,10 @@ def test_unterminated_action_body_is_lex_error(self_host):
     src = """
 %grammar t
 %tokens
-A = "a"
+A = 'a'
 %rules
-xs : A { unterminated
-   ;
+<xs> : A { unterminated
+     ;
 """
     with pytest.raises(ScanError):
         parse_str(scanner, table, src)

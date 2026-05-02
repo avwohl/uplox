@@ -3,29 +3,23 @@
 # The bootstrap is plox/spec/reader.py, a hand-written recursive-descent
 # parser. This file is the *self-host* grammar: a .plox source that
 # describes the .plox source format. plox can build it and produce a
-# parser that reads .plox files. The plan called for self-host once the
-# generator was stable; this is that.
+# parser that reads .plox files.
 #
 # What's covered:
 #
-#   * %grammar / %options / %tokens / %hooks / %rules sections
-#   * tokens with regex /.../ or literal "..." patterns and the optional
-#     %skip flag
+#   * %grammar / %options / %keyword_prefix / %keywords / %tokens / %hooks
+#     / %rules sections
+#   * tokens with regex /.../ or literal '...' patterns and the optional
+#     %skip flag and %balanced='close' attribute
 #   * BNF rules with `|` alternatives, `;` terminator, and the optional
 #     `%hook=<name>` annotation per alternative
-#
-# What's deferred (out of scope for this self-host pass):
-#
-#   * `%prec <terminal>` annotations — not yet used by any plox grammar.
+#   * Single-quote string literals in token decls and rule RHS
+#   * Bracketed non-terminals `<name>` on rule LHS and RHS
 #
 # Embedded action bodies `{ ... }` are handled via the lexer's
-# `%balanced=...` extension: the ACTION_BODY token's DFA matches just
+# `%balanced='}'` extension: the ACTION_BODY token's DFA matches just
 # the opening `{`, then the runtime extends the match by counting
-# nested `{`/`}` until depth returns to zero. The whole body — newlines,
-# nested braces and all — comes through as one token's text.
-#
-# Symmetry note: this grammar uses lower-case rule names and UPPER_CASE
-# terminal names, exactly like the rest of the plox examples.
+# nested `{`/`}` until depth returns to zero.
 
 %grammar plox_self
 
@@ -38,143 +32,158 @@ COMMENT    = /#[^\n]*/                     %skip
 
 # Section directives are lexed as a single percent-prefixed token so they
 # don't collide with rule-named "grammar", "options", etc.
-PCT_GRAMMAR = "%grammar"
-PCT_OPTIONS = "%options"
-PCT_TOKENS  = "%tokens"
-PCT_HOOKS   = "%hooks"
-PCT_RULES   = "%rules"
-PCT_SKIP    = "%skip"
-PCT_HOOK    = "%hook"
-PCT_PREC    = "%prec"
-PCT_BALANCED = "%balanced"
+PCT_GRAMMAR        = '%grammar'
+PCT_OPTIONS        = '%options'
+PCT_TOKENS         = '%tokens'
+PCT_HOOKS          = '%hooks'
+PCT_RULES          = '%rules'
+PCT_KEYWORDS       = '%keywords'
+PCT_KEYWORD_PREFIX = '%keyword_prefix'
+PCT_SKIP           = '%skip'
+PCT_HOOK           = '%hook'
+PCT_PREC           = '%prec'
+PCT_BALANCED       = '%balanced'
 
-EQ         = "="
-COLON      = ":"
-SEMI       = ";"
-PIPE       = "|"
+EQ         = '='
+COLON      = ':'
+SEMI       = ';'
+PIPE       = '|'
 
-# Regex literals: /.../ with escapes. The character class `[^/\\]` rules
-# out unescaped slashes; `\\.` admits any escaped char.
+# Regex literals: /.../ with escapes.
 REGEX      = /\/([^\/\\]|\\.)*\//
 
-# String literals: "..." with escapes.
-STRING     = /"([^"\\]|\\.)*"/
+# Single-quoted string literals: '...' with escapes.
+STRING     = /'([^'\\]|\\.)*'/
 
-# Identifiers (rule names, terminal names, hook names, option keys/values).
+# Non-terminal reference: <ident>. Lexed as a single token so the rules
+# parser sees one shape per non-terminal site.
+NONTERM    = /<[A-Za-z_][A-Za-z0-9_]*>/
+
+# Bare identifiers (option keys/values, terminal names, hook names,
+# keyword spellings).
 IDENT      = /[A-Za-z_][A-Za-z0-9_]*/
 
 # Action body: opaque target-language source. The DFA only recognises the
 # opening `{`; the runtime's %balanced extension extends the match by
-# counting nested `{`/`}` until depth returns to zero. The closing `}` is
-# included in the matched text.
-ACTION_BODY = "{" %balanced="}"
+# counting nested `{`/`}` until depth returns to zero.
+ACTION_BODY = '{' %balanced='}'
 
 %rules
 
-# A .plox file is the %grammar declaration followed by zero or more
-# named sections in any order.
-file : grammar_decl sections
-     ;
+# A .plox file is %grammar followed by zero or more sections and one-shot
+# directives in any order.
+<file> : <grammar_decl> <items>
+       ;
 
-grammar_decl : PCT_GRAMMAR IDENT ;
+<grammar_decl> : PCT_GRAMMAR IDENT ;
 
-sections : sections section
-         |
-         ;
-
-section : options_section
-        | tokens_section
-        | hooks_section
-        | rules_section
+<items> : <items> <item>
+        |
         ;
+
+<item> : <options_section>
+       | <tokens_section>
+       | <hooks_section>
+       | <keywords_section>
+       | <keyword_prefix_directive>
+       | <rules_section>
+       ;
 
 # --- options ---------------------------------------------------------------
 
-options_section : PCT_OPTIONS option_lines ;
+<options_section> : PCT_OPTIONS <option_lines> ;
 
-option_lines : option_lines option_line
-             |
-             ;
+<option_lines> : <option_lines> <option_line>
+               |
+               ;
 
-option_line : IDENT EQ option_value ;
+<option_line> : IDENT EQ <option_value> ;
 
-option_value : IDENT
-             | STRING
-             ;
+<option_value> : IDENT
+               | STRING
+               ;
+
+# --- keyword prefix (one-shot directive) ----------------------------------
+
+<keyword_prefix_directive> : PCT_KEYWORD_PREFIX IDENT ;
+
+# --- keywords --------------------------------------------------------------
+
+<keywords_section> : PCT_KEYWORDS <ident_seq> ;
+
+<ident_seq> : <ident_seq> IDENT
+            |
+            ;
 
 # --- tokens ----------------------------------------------------------------
 
-tokens_section : PCT_TOKENS token_lines ;
+<tokens_section> : PCT_TOKENS <token_lines> ;
 
-token_lines : token_lines token_line
-            |
-            ;
-
-token_line : IDENT EQ token_pattern token_attrs ;
-
-# Optional per-token attributes. `%balanced="<close>"` marks the token as
-# balanced-bracket (the lexer-feedback runtime extends the match by counting
-# nested open/close pairs); `%skip` drops matches silently. Both can appear,
-# in any order.
-token_attrs : token_attrs token_attr
-            |
-            ;
-
-token_attr : PCT_SKIP
-           | PCT_BALANCED EQ STRING
-           ;
-
-token_pattern : REGEX
-              | STRING
+<token_lines> : <token_lines> <token_line>
+              |
               ;
+
+<token_line> : IDENT EQ <token_pattern> <token_attrs> ;
+
+# Optional per-token attributes. `%balanced='<close>'` marks the token as
+# balanced-bracket; `%skip` drops matches silently.
+<token_attrs> : <token_attrs> <token_attr>
+              |
+              ;
+
+<token_attr> : PCT_SKIP
+             | PCT_BALANCED EQ STRING
+             ;
+
+<token_pattern> : REGEX
+                | STRING
+                ;
 
 # --- hooks -----------------------------------------------------------------
 
-hooks_section : PCT_HOOKS hook_lines ;
+<hooks_section> : PCT_HOOKS <hook_lines> ;
 
-hook_lines : hook_lines hook_line
-           |
-           ;
+<hook_lines> : <hook_lines> <hook_line>
+             |
+             ;
 
 # A hook line is `<name> <when>` where both are bare identifiers. The
 # bootstrap reader validates that <when> is one of the four legal events;
 # we leave that to the host since it's a semantic check, not syntactic.
-hook_line : IDENT IDENT ;
+<hook_line> : IDENT IDENT ;
 
 # --- rules -----------------------------------------------------------------
 
-rules_section : PCT_RULES rule_list ;
+<rules_section> : PCT_RULES <rule_list> ;
 
-rule_list : rule_list rule
-          | rule
-          ;
+<rule_list> : <rule_list> <rule>
+            | <rule>
+            ;
 
-rule : IDENT COLON alts SEMI ;
+<rule> : NONTERM COLON <alts> SEMI ;
 
-alts : alts PIPE alt
-     | alt
-     ;
-
-alt : symbols opt_hook opt_action ;
-
-# Action body sits at the end of an alternative, after any %hook annotation.
-# It's parsed as a single ACTION_BODY token; the inner content is opaque to
-# the LR(1) parser.
-opt_action : ACTION_BODY
-           |
-           ;
-
-symbols : symbols symbol
-        |
-        ;
-
-# A symbol on the RHS is either a rule reference / terminal name (IDENT)
-# or an inline string literal (anonymous terminal).
-symbol : IDENT
-       | STRING
+<alts> : <alts> PIPE <alt>
+       | <alt>
        ;
 
-# `%hook=<name>` annotation, optional per alternative.
-opt_hook : PCT_HOOK EQ IDENT
-         |
+<alt> : <symbols> <opt_hook> <opt_action> ;
+
+<opt_action> : ACTION_BODY
+             |
+             ;
+
+<symbols> : <symbols> <symbol>
+          |
+          ;
+
+# A symbol on the RHS is a terminal name (IDENT), a non-terminal
+# reference (NONTERM = <ident>), or an inline string literal.
+<symbol> : IDENT
+         | NONTERM
+         | STRING
          ;
+
+# `%hook=<name>` annotation, optional per alternative.
+<opt_hook> : PCT_HOOK EQ IDENT
+           |
+           ;

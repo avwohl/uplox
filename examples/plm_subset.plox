@@ -1,4 +1,4 @@
-# PL/M-80 subset grammar — Phase 5 milestone (the first "real" plox grammar).
+# PL/M-80 subset grammar — first "real" plox grammar.
 #
 # Targets the constructs used by the sample program examples/hello_cpm.plm
 # in the uplm80 repo: address literals, procedures (EXTERNAL and definition),
@@ -6,15 +6,12 @@
 # location-of operator, RETURN, IF/THEN/ELSE, DO/END blocks, expressions
 # with PL/M-80's precedence ladder.
 #
-# Out of scope for v0:
+# Out of scope:
 #   * Macros (LITERALLY)
 #   * Conditional compilation directives ($COND, $IF, $INCLUDE, ...)
 #   * STRUCTURE types
 #   * BASED variables (basic form supported), INITIAL, AT clauses
 #   * Iterative DO with TO/BY, DO CASE
-#
-# About 60 productions over 60+ terminals — well past calc, into territory
-# that exercises plox's LR(1) builder properly.
 #
 # Conflict-resolution decisions:
 #   * Dangling-else is split into matched/unmatched stmt non-terminals.
@@ -28,6 +25,16 @@
 %options
 start = module
 
+%keyword_prefix KW_
+%keywords
+PROCEDURE EXTERNAL REENTRANT INTERRUPT PUBLIC
+DECLARE INITIAL DATA LITERALLY LABEL
+BYTE ADDRESS BASED AT
+IF THEN ELSE DO WHILE CASE BY TO END
+CALL RETURN GOTO GO HALT ENABLE DISABLE
+AND OR XOR NOT MOD PLUS MINUS
+EOF
+
 %tokens
 # --- whitespace and comments ----------------------------------------------
 WS         = /[ \t\r\n]+/                        %skip
@@ -37,269 +44,228 @@ COMMENT    = /\/\*([^*]|\*+[^*\/])*\*+\//        %skip
 NUMBER     = /[0-9][0-9A-Fa-f$]*[BbDdHhOoQq]?/
 STRING     = /'([^'\n]|'')*'/
 
-# --- keywords (declared before IDENT so longest-match + earlier-decl wins) -
-PROCEDURE  = "PROCEDURE"
-EXTERNAL   = "EXTERNAL"
-REENTRANT  = "REENTRANT"
-INTERRUPT  = "INTERRUPT"
-PUBLIC     = "PUBLIC"
-DECLARE    = "DECLARE"
-INITIAL    = "INITIAL"
-DATA       = "DATA"
-LITERALLY  = "LITERALLY"
-LABEL      = "LABEL"
-BYTE       = "BYTE"
-ADDRESS    = "ADDRESS"
-BASED      = "BASED"
-AT         = "AT"
-KW_IF      = "IF"
-THEN       = "THEN"
-ELSE       = "ELSE"
-DO         = "DO"
-WHILE      = "WHILE"
-CASE       = "CASE"
-BY         = "BY"
-TO         = "TO"
-END        = "END"
-CALL       = "CALL"
-RETURN     = "RETURN"
-GOTO       = "GOTO"
-GO         = "GO"
-HALT       = "HALT"
-ENABLE     = "ENABLE"
-DISABLE    = "DISABLE"
-KW_AND     = "AND"
-KW_OR      = "OR"
-KW_XOR     = "XOR"
-KW_NOT     = "NOT"
-KW_MOD     = "MOD"
-KW_PLUS    = "PLUS"
-KW_MINUS   = "MINUS"
-EOF_KW     = "EOF"
-
-# --- identifiers (last so keywords match first by declaration order) ------
+# --- identifiers (declared after %keywords so the synthesised keyword
+#     tokens win the longest-match tie at lex time) ----------------------
 IDENT      = /[A-Za-z_$][A-Za-z0-9_$]*/
 
-# --- multi-char operators (must come before single-char prefixes) ---------
-LE         = "<="
-GE         = ">="
-NE         = "<>"
-
-# --- single-char operators and delimiters ---------------------------------
-EQ         = "="
-LT         = "<"
-GT         = ">"
-PLUS       = "+"
-MINUS      = "-"
-STAR       = "*"
-SLASH      = "/"
-LPAREN     = "("
-RPAREN     = ")"
-COMMA      = ","
-SEMI       = ";"
-COLON      = ":"
-DOT        = "."
+# --- operators and delimiters --------------------------------------------
+LE         = '<='
+GE         = '>='
+NE         = '<>'
+EQ         = '='
+LT         = '<'
+GT         = '>'
+OP_PLUS    = '+'
+OP_MINUS   = '-'
+STAR       = '*'
+SLASH      = '/'
+LPAREN     = '('
+RPAREN     = ')'
+COMMA      = ','
+SEMI       = ';'
+COLON      = ':'
+DOT        = '.'
 
 %rules
 
 # Top level: a module is a sequence of items, optionally terminated by
 # the EOF keyword that some PL/M sources use.
-module      : items
-            | items EOF_KW
-            ;
+<module>      : <items>
+              | <items> EOF
+              ;
 
-items       : items item
-            | item
-            ;
+<items>       : <items> <item>
+              | <item>
+              ;
 
-item        : address_literal
-            | proc_decl
-            | declare_stmt
-            | stmt
-            ;
+<item>        : <address_literal>
+              | <proc_decl>
+              | <declare_stmt>
+              | <stmt>
+              ;
 
 # 0100H: — address-literal at the start of the module.
-address_literal : NUMBER COLON ;
+<address_literal> : NUMBER ':' ;
 
 # --- procedures -----------------------------------------------------------
 
-proc_decl   : IDENT COLON PROCEDURE proc_params proc_attrs SEMI proc_body
-            ;
+<proc_decl>   : IDENT ':' PROCEDURE <proc_params> <proc_attrs> ';' <proc_body>
+              ;
 
-proc_params : LPAREN ident_list RPAREN
-            | LPAREN RPAREN
-            |
-            ;
-
-proc_attrs  : proc_attrs proc_attr
-            |
-            ;
-
-proc_attr   : EXTERNAL
-            | PUBLIC
-            | REENTRANT
-            | INTERRUPT NUMBER
-            ;
-
-# An EXTERNAL declaration has no body before END; a regular procedure has
-# zero or more inner declarations followed by zero or more statements.
-proc_body   : block_decls block_stmts END opt_end_label SEMI
-            | block_decls END opt_end_label SEMI
-            ;
-
-block_decls : block_decls declare_stmt
-            |
-            ;
-
-block_stmts : block_stmts stmt
-            | stmt
-            ;
-
-opt_end_label : IDENT
+<proc_params> : '(' <ident_list> ')'
+              | '(' ')'
               |
               ;
 
-ident_list  : IDENT
-            | ident_list COMMA IDENT
-            ;
+<proc_attrs>  : <proc_attrs> <proc_attr>
+              |
+              ;
+
+<proc_attr>   : EXTERNAL
+              | PUBLIC
+              | REENTRANT
+              | INTERRUPT NUMBER
+              ;
+
+# An EXTERNAL declaration has no body before END; a regular procedure has
+# zero or more inner declarations followed by zero or more statements.
+<proc_body>   : <block_decls> <block_stmts> END <opt_end_label> ';'
+              | <block_decls> END <opt_end_label> ';'
+              ;
+
+<block_decls> : <block_decls> <declare_stmt>
+              |
+              ;
+
+<block_stmts> : <block_stmts> <stmt>
+              | <stmt>
+              ;
+
+<opt_end_label> : IDENT
+                |
+                ;
+
+<ident_list>  : IDENT
+              | <ident_list> ',' IDENT
+              ;
 
 # --- declarations ---------------------------------------------------------
 
-declare_stmt : DECLARE decl_list SEMI ;
+<declare_stmt> : DECLARE <decl_list> ';' ;
 
-decl_list   : decl_list COMMA decl_item
-            | decl_item
-            ;
+<decl_list>   : <decl_list> ',' <decl_item>
+              | <decl_item>
+              ;
 
-decl_item   : decl_names type_spec
-            | decl_names DATA LPAREN arg_list RPAREN
-            ;
+<decl_item>   : <decl_names> <type_spec>
+              | <decl_names> DATA '(' <arg_list> ')'
+              ;
 
-decl_names  : IDENT
-            | LPAREN ident_list RPAREN
-            ;
+<decl_names>  : IDENT
+              | '(' <ident_list> ')'
+              ;
 
 # Simple types only: BYTE, ADDRESS, optional length-as-array (N), BASED.
-type_spec   : BYTE
-            | ADDRESS
-            | LABEL
-            | BYTE LPAREN NUMBER RPAREN
-            | ADDRESS LPAREN NUMBER RPAREN
-            | BYTE BASED IDENT
-            | ADDRESS BASED IDENT
-            ;
+<type_spec>   : BYTE
+              | ADDRESS
+              | LABEL
+              | BYTE '(' NUMBER ')'
+              | ADDRESS '(' NUMBER ')'
+              | BYTE BASED IDENT
+              | ADDRESS BASED IDENT
+              ;
 
 # --- statements -----------------------------------------------------------
 
-stmt        : matched_stmt
-            | unmatched_stmt
-            ;
+<stmt>          : <matched_stmt>
+                | <unmatched_stmt>
+                ;
 
-matched_stmt   : matched_if
-               | non_if_stmt
-               ;
+<matched_stmt>   : <matched_if>
+                 | <non_if_stmt>
+                 ;
 
-unmatched_stmt : unmatched_if ;
+<unmatched_stmt> : <unmatched_if> ;
 
-matched_if     : KW_IF expr THEN matched_stmt ELSE matched_stmt ;
-unmatched_if   : KW_IF expr THEN stmt
-               | KW_IF expr THEN matched_stmt ELSE unmatched_stmt
-               ;
+<matched_if>     : IF <expr> THEN <matched_stmt> ELSE <matched_stmt> ;
+<unmatched_if>   : IF <expr> THEN <stmt>
+                 | IF <expr> THEN <matched_stmt> ELSE <unmatched_stmt>
+                 ;
 
-non_if_stmt : assignment_stmt
-            | call_stmt
-            | return_stmt
-            | goto_stmt
-            | halt_stmt
-            | enable_stmt
-            | disable_stmt
-            | do_block
-            | null_stmt
-            ;
+<non_if_stmt> : <assignment_stmt>
+              | <call_stmt>
+              | <return_stmt>
+              | <goto_stmt>
+              | <halt_stmt>
+              | <enable_stmt>
+              | <disable_stmt>
+              | <do_block>
+              | <null_stmt>
+              ;
 
-null_stmt   : SEMI ;
+<null_stmt>   : ';' ;
 
-call_stmt   : CALL primary SEMI ;
+<call_stmt>   : CALL <primary> ';' ;
 
-return_stmt : RETURN SEMI
-            | RETURN expr SEMI
-            ;
+<return_stmt> : RETURN ';'
+              | RETURN <expr> ';'
+              ;
 
-goto_stmt   : GOTO IDENT SEMI
-            | GO TO IDENT SEMI
-            ;
+<goto_stmt>   : GOTO IDENT ';'
+              | GO TO IDENT ';'
+              ;
 
-halt_stmt    : HALT SEMI ;
-enable_stmt  : ENABLE SEMI ;
-disable_stmt : DISABLE SEMI ;
+<halt_stmt>    : HALT ';' ;
+<enable_stmt>  : ENABLE ';' ;
+<disable_stmt> : DISABLE ';' ;
 
-assignment_stmt : primary EQ expr SEMI ;
+<assignment_stmt> : <primary> '=' <expr> ';' ;
 
-do_block    : DO SEMI block_stmts END opt_end_label SEMI
-            | DO WHILE expr SEMI block_stmts END opt_end_label SEMI
-            ;
+<do_block>    : DO ';' <block_stmts> END <opt_end_label> ';'
+              | DO WHILE <expr> ';' <block_stmts> END <opt_end_label> ';'
+              ;
 
 # --- expressions ---------------------------------------------------------
 # Precedence (loose to tight, per PL/M-80):
 #    or_xor  ->  and  ->  not_e  ->  rel_e  ->  add_e  ->  mul_e  ->  unary  ->  primary
 
-expr        : or_xor ;
+<expr>        : <or_xor> ;
 
-or_xor      : or_xor KW_OR  and_e
-            | or_xor KW_XOR and_e
-            | and_e
-            ;
+<or_xor>      : <or_xor> OR  <and_e>
+              | <or_xor> XOR <and_e>
+              | <and_e>
+              ;
 
-and_e       : and_e KW_AND not_e
-            | not_e
-            ;
+<and_e>       : <and_e> AND <not_e>
+              | <not_e>
+              ;
 
-not_e       : KW_NOT not_e
-            | rel_e
-            ;
+<not_e>       : NOT <not_e>
+              | <rel_e>
+              ;
 
-rel_e       : add_e EQ add_e
-            | add_e LT add_e
-            | add_e GT add_e
-            | add_e LE add_e
-            | add_e GE add_e
-            | add_e NE add_e
-            | add_e
-            ;
+<rel_e>       : <add_e> '='  <add_e>
+              | <add_e> '<'  <add_e>
+              | <add_e> '>'  <add_e>
+              | <add_e> '<=' <add_e>
+              | <add_e> '>=' <add_e>
+              | <add_e> '<>' <add_e>
+              | <add_e>
+              ;
 
-add_e       : add_e PLUS  mul_e
-            | add_e MINUS mul_e
-            | add_e KW_PLUS  mul_e
-            | add_e KW_MINUS mul_e
-            | mul_e
-            ;
+<add_e>       : <add_e> '+'  <mul_e>
+              | <add_e> '-'  <mul_e>
+              | <add_e> PLUS  <mul_e>
+              | <add_e> MINUS <mul_e>
+              | <mul_e>
+              ;
 
-mul_e       : mul_e STAR  unary
-            | mul_e SLASH unary
-            | mul_e KW_MOD unary
-            | unary
-            ;
+<mul_e>       : <mul_e> '*' <unary>
+              | <mul_e> '/' <unary>
+              | <mul_e> MOD <unary>
+              | <unary>
+              ;
 
-unary       : MINUS unary
-            | primary
-            ;
+<unary>       : '-' <unary>
+              | <primary>
+              ;
 
 # `primary` has three top-level shapes; nesting under `qualname` keeps
 # `.X.Y` parsing as `location_of(X.Y)` without DOT shift/reduce ambiguity.
-primary     : DOT LPAREN arg_list RPAREN     # constant-list pointer .( ... )
-            | DOT qualname                   # location-of
-            | qualname
-            | NUMBER
-            | STRING
-            | LPAREN expr RPAREN
-            ;
+<primary>     : '.' '(' <arg_list> ')'     # constant-list pointer .( ... )
+              | '.' <qualname>             # location-of
+              | <qualname>
+              | NUMBER
+              | STRING
+              | '(' <expr> ')'
+              ;
 
-qualname    : IDENT
-            | IDENT LPAREN arg_list RPAREN
-            | IDENT LPAREN RPAREN
-            | qualname DOT IDENT
-            ;
+<qualname>    : IDENT
+              | IDENT '(' <arg_list> ')'
+              | IDENT '(' ')'
+              | <qualname> '.' IDENT
+              ;
 
-arg_list    : arg_list COMMA expr
-            | expr
-            ;
+<arg_list>    : <arg_list> ',' <expr>
+              | <expr>
+              ;

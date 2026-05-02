@@ -49,9 +49,22 @@ class TokenDecl:
 
 @dataclass
 class Symbol:
-    """Right-hand-side symbol — either a terminal or a non-terminal reference."""
+    """Right-hand-side symbol.
+
+    ``kind`` distinguishes the three syntactic forms:
+
+    * ``"term"``    — bare identifier; resolves to a declared terminal name
+                      or a synthesised keyword token.
+    * ``"nonterm"`` — ``<name>``; resolves to a rule LHS.
+    * ``"literal"`` — ``'…'``; resolves to whichever declared token has that
+                      literal text.
+
+    ``name`` holds the bare identifier (for ``term``/``nonterm``) or the
+    literal contents without quotes (for ``literal``).
+    """
 
     name: str
+    kind: str = "term"
     position: Optional[Position] = None
 
 
@@ -88,3 +101,7 @@ class GrammarIR:
     hooks: list[HookDecl] = field(default_factory=list)
     options: dict[str, str] = field(default_factory=dict)
     source_file: Optional[str] = None
+    keyword_prefix: str = ""
+    # Bare-name -> synthesised token name. ``%keywords`` lists populate this so
+    # bare keyword references on rule RHS resolve back to the prefixed token.
+    keyword_aliases: dict[str, str] = field(default_factory=dict)

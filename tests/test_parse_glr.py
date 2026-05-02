@@ -31,16 +31,16 @@ CALC = """
 
 %tokens
 NUMBER = /[0-9]+/
-PLUS   = "+"
-STAR   = "*"
-LPAREN = "("
-RPAREN = ")"
+PLUS   = '+'
+STAR   = '*'
+LPAREN = '('
+RPAREN = ')'
 WS     = /[ \\t\\n]+/   %skip
 
 %rules
-expr  : expr PLUS term | term ;
-term  : term STAR factor | factor ;
-factor : NUMBER | LPAREN expr RPAREN ;
+<expr>  : <expr> PLUS <term> | <term> ;
+<term>  : <term> STAR <factor> | <factor> ;
+<factor> : NUMBER | LPAREN <expr> RPAREN ;
 """
 
 
@@ -97,11 +97,11 @@ AMBIG = """
 %grammar ambig
 %tokens
 NUMBER = /[0-9]+/
-PLUS   = "+"
-STAR   = "*"
+PLUS   = '+'
+STAR   = '*'
 WS     = /[ \\t\\n]+/  %skip
 %rules
-e : e PLUS e | e STAR e | NUMBER ;
+<e> : <e> PLUS <e> | <e> STAR <e> | NUMBER ;
 """
 
 
@@ -148,14 +148,14 @@ def test_glr_rejects_invalid_input_with_descriptive_error():
 DANGLING = """
 %grammar dang
 %tokens
-IF   = "if"
-THEN = "then"
-ELSE = "else"
-S    = "s"
+IF   = 'if'
+THEN = 'then'
+ELSE = 'else'
+S    = 's'
 WS   = /[ \\t\\n]+/  %skip
 %rules
-stmt : IF S THEN stmt
-     | IF S THEN stmt ELSE stmt
+<stmt> : IF S THEN <stmt>
+     | IF S THEN <stmt> ELSE <stmt>
      | S
      ;
 """
