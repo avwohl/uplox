@@ -14,14 +14,17 @@
 #   * Storage classes (static, extern, register, auto) and type
 #     qualifiers (const, volatile) — accepted but not validated
 #
+# Now in scope (Phase-9 follow-up):
+#
+#   * struct / union definitions and references (named, anonymous, forward)
+#   * enum definitions and references with optional explicit values
+#
 # Out of scope for the v0 sketch:
 #
-#   * typedef / struct / union / enum (parse-only stubs would help; we
-#     don't even sketch them yet, to keep the grammar small)
+#   * typedef declarations (the typedef-name lexer hack is the missing piece;
+#     without it `(T)x` is a shift/reduce against `(expr) ...`)
 #   * Preprocessor (#include, #define, #if) — must be expanded upstream
-#   * The "typedef name" lexer hack: in real C, an identifier that's been
-#     typedef'd parses differently. v0 treats any IDENT as a name; the
-#     host disambiguates after the parse.
+#   * Casts `(type) expr` — same story as typedef
 #   * Variadic functions (...)
 #   * Compound literals, designated initializers, _Generic
 #   * Bit-fields
@@ -71,6 +74,10 @@ KW_BREAK   = "break"
 KW_CONTINUE = "continue"
 KW_GOTO    = "goto"
 KW_SIZEOF  = "sizeof"
+KW_STRUCT  = "struct"
+KW_UNION   = "union"
+KW_ENUM    = "enum"
+KW_TYPEDEF = "typedef"
 
 IDENT      = /[A-Za-z_][A-Za-z0-9_]*/
 
@@ -156,13 +163,58 @@ decl_spec : storage_class
           | type_spec
           ;
 
-storage_class : KW_STATIC | KW_EXTERN | KW_REGISTER | KW_AUTO | KW_INLINE ;
+storage_class : KW_STATIC | KW_EXTERN | KW_REGISTER | KW_AUTO | KW_INLINE
+              | KW_TYPEDEF
+              ;
 
 type_qualifier : KW_CONST | KW_VOLATILE ;
 
 type_spec : KW_VOID | KW_CHAR | KW_SHORT | KW_INT | KW_LONG
           | KW_SIGNED | KW_UNSIGNED
+          | struct_or_union_specifier
+          | enum_specifier
           ;
+
+# struct / union: a tag + body, just a body, or just a tag (reference or
+# forward decl). Empty bodies are not modelled here — uc_core does not use
+# them and standard C disallows them at this level.
+struct_or_union_specifier : struct_or_union IDENT LBRACE struct_decl_list RBRACE
+                          | struct_or_union LBRACE struct_decl_list RBRACE
+                          | struct_or_union IDENT
+                          ;
+
+struct_or_union : KW_STRUCT | KW_UNION ;
+
+struct_decl_list : struct_decl_list struct_decl
+                 | struct_decl
+                 ;
+
+# Members: typed declarators, no initializers (different from the top-level
+# init_declarator). Bit-fields are not modelled.
+struct_decl : decl_specs struct_declarator_list SEMI ;
+
+struct_declarator_list : struct_declarator_list COMMA declarator
+                       | declarator
+                       ;
+
+# enum: tag + body (with or without trailing comma), just a body, or just a tag.
+enum_specifier : KW_ENUM IDENT LBRACE enumerator_list RBRACE
+               | KW_ENUM IDENT LBRACE enumerator_list COMMA RBRACE
+               | KW_ENUM LBRACE enumerator_list RBRACE
+               | KW_ENUM LBRACE enumerator_list COMMA RBRACE
+               | KW_ENUM IDENT
+               ;
+
+enumerator_list : enumerator_list COMMA enumerator
+                | enumerator
+                ;
+
+# Enumerator values are constant expressions; conditional_expr is the C
+# standard's "constant-expression" non-terminal — it excludes both
+# assignment and the comma operator.
+enumerator : IDENT
+           | IDENT ASSIGN conditional_expr
+           ;
 
 init_declarator_list_opt : init_declarator_list
                          |

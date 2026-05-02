@@ -1,9 +1,9 @@
 """Phase 9: c_subset.plox parses a meaningful subset of C.
 
 The grammar is the start of the uc_core port. Full uc_core (and the
-typedef-name lexer hack, casts, struct/union/enum, the preprocessor)
-remains a Phase-9 follow-up. The tests below pin the size of what we *do*
-parse and assert structural correctness on representative programs.
+typedef-name lexer hack, casts, the preprocessor) remains a Phase-9
+follow-up. The tests below pin the size of what we *do* parse and assert
+structural correctness on representative programs.
 """
 
 from __future__ import annotations
@@ -31,31 +31,40 @@ def c_pipeline():
     return scanner, table
 
 
+@pytest.fixture(scope="module")
+def built():
+    """Module-scoped pipeline. Building the LR(1) table for c_subset takes
+    several seconds; rebuilding for each test made the file the slowest in
+    the suite. The two `_subset_*` tests below still exercise construction
+    explicitly."""
+    return c_pipeline()
+
+
 def parse_str(scanner, table, src: str) -> ParseNode:
     return parse(table, scanner.scan(src), hooks=HookRegistry(ignore_missing=True))
 
 
-def test_c_subset_no_conflicts():
-    _scanner, table = c_pipeline()
+def test_c_subset_no_conflicts(built):
+    _scanner, table = built
     assert table.conflicts == []
 
 
-def test_c_subset_state_count_in_range():
-    _scanner, table = c_pipeline()
-    # 1181 as of the Phase-9 sketch. Allow generous slack so the test stays
-    # green through small grammar tweaks; flag if it explodes.
-    assert 700 <= len(table.states) <= 2000, len(table.states)
+def test_c_subset_state_count_in_range(built):
+    _scanner, table = built
+    # 1299 once struct/union/enum landed. Allow generous slack so the test
+    # stays green through small grammar tweaks; flag if it explodes.
+    assert 700 <= len(table.states) <= 2200, len(table.states)
 
 
-def test_c_simple_function_definition():
-    scanner, table = c_pipeline()
+def test_c_simple_function_definition(built):
+    scanner, table = built
     src = "int main(void) { return 0; }\n"
     tree = parse_str(scanner, table, src)
     assert isinstance(tree, ParseNode) and tree.kind == "translation_unit"
 
 
-def test_c_if_else_with_braces():
-    scanner, table = c_pipeline()
+def test_c_if_else_with_braces(built):
+    scanner, table = built
     src = """
 int abs(int x) {
     if (x < 0) {
@@ -69,8 +78,8 @@ int abs(int x) {
     assert isinstance(tree, ParseNode)
 
 
-def test_c_dangling_else_binds_innermost():
-    scanner, table = c_pipeline()
+def test_c_dangling_else_binds_innermost(built):
+    scanner, table = built
     src = """
 int test(int a, int b, int c) {
     if (a) if (b) return 1; else return 2;
@@ -81,8 +90,8 @@ int test(int a, int b, int c) {
     assert isinstance(tree, ParseNode)
 
 
-def test_c_while_loop():
-    scanner, table = c_pipeline()
+def test_c_while_loop(built):
+    scanner, table = built
     src = """
 int countdown(int n) {
     while (n > 0) {
@@ -95,8 +104,8 @@ int countdown(int n) {
     assert isinstance(tree, ParseNode)
 
 
-def test_c_for_loop_with_decl():
-    scanner, table = c_pipeline()
+def test_c_for_loop_with_decl(built):
+    scanner, table = built
     src = """
 int sum_to(int n) {
     int total = 0;
@@ -110,8 +119,8 @@ int sum_to(int n) {
     assert isinstance(tree, ParseNode)
 
 
-def test_c_pointer_arithmetic():
-    scanner, table = c_pipeline()
+def test_c_pointer_arithmetic(built):
+    scanner, table = built
     src = """
 int sum(int *p, int n) {
     int total = 0;
@@ -127,8 +136,8 @@ int sum(int *p, int n) {
     assert isinstance(tree, ParseNode)
 
 
-def test_c_array_declaration_and_subscript():
-    scanner, table = c_pipeline()
+def test_c_array_declaration_and_subscript(built):
+    scanner, table = built
     src = """
 void zero(void) {
     int arr[10];
@@ -142,8 +151,8 @@ void zero(void) {
     assert isinstance(tree, ParseNode)
 
 
-def test_c_recursive_function_calls():
-    scanner, table = c_pipeline()
+def test_c_recursive_function_calls(built):
+    scanner, table = built
     src = """
 int factorial(int n) {
     if (n <= 1) return 1;
@@ -154,8 +163,8 @@ int factorial(int n) {
     assert isinstance(tree, ParseNode)
 
 
-def test_c_storage_class_and_qualifiers_accepted():
-    scanner, table = c_pipeline()
+def test_c_storage_class_and_qualifiers_accepted(built):
+    scanner, table = built
     src = """
 static const int PI = 314;
 extern int counter;
@@ -165,22 +174,22 @@ volatile int flag;
     assert isinstance(tree, ParseNode)
 
 
-def test_c_complex_expression_precedence():
-    scanner, table = c_pipeline()
+def test_c_complex_expression_precedence(built):
+    scanner, table = built
     src = "int test(void) { return 1 + 2 * 3 - 4 / 2 << 1 == 8; }\n"
     tree = parse_str(scanner, table, src)
     assert isinstance(tree, ParseNode)
 
 
-def test_c_logical_short_circuit():
-    scanner, table = c_pipeline()
+def test_c_logical_short_circuit(built):
+    scanner, table = built
     src = "int test(int a, int b) { return a && b || (a + 1) >= 0; }\n"
     tree = parse_str(scanner, table, src)
     assert isinstance(tree, ParseNode)
 
 
-def test_c_assignment_operators():
-    scanner, table = c_pipeline()
+def test_c_assignment_operators(built):
+    scanner, table = built
     src = """
 void modify(int *x) {
     *x += 1;
@@ -199,8 +208,8 @@ void modify(int *x) {
     assert isinstance(tree, ParseNode)
 
 
-def test_c_increment_decrement():
-    scanner, table = c_pipeline()
+def test_c_increment_decrement(built):
+    scanner, table = built
     src = """
 void p(int *x) {
     ++*x;
@@ -213,10 +222,8 @@ void p(int *x) {
     assert isinstance(tree, ParseNode)
 
 
-def test_c_struct_member_access_via_pointer():
-    """Even though we don't define struct types, member access syntax still
-    parses; the host validates after the parse."""
-    scanner, table = c_pipeline()
+def test_c_struct_member_access_via_pointer(built):
+    scanner, table = built
     src = """
 int test(int *p) {
     return p->x + p->y;
@@ -226,8 +233,155 @@ int test(int *p) {
     assert isinstance(tree, ParseNode)
 
 
-def test_c_string_and_char_literals():
-    scanner, table = c_pipeline()
+def test_c_struct_definition_and_use(built):
+    scanner, table = built
+    src = """
+struct Point {
+    int x;
+    int y;
+};
+
+int sum(struct Point p) {
+    return p.x + p.y;
+}
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode) and tree.kind == "translation_unit"
+
+
+def test_c_struct_with_pointer_and_array_fields(built):
+    scanner, table = built
+    src = """
+struct Buffer {
+    char *data;
+    int len;
+    int slots[16];
+};
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_anonymous_struct_at_file_scope(built):
+    scanner, table = built
+    src = """
+struct {
+    int a;
+    int b;
+} pair;
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_struct_forward_declaration(built):
+    scanner, table = built
+    src = """
+struct Node;
+
+int test(struct Node *n) {
+    return 0;
+}
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_union_definition(built):
+    scanner, table = built
+    src = """
+union Word {
+    int as_int;
+    char as_bytes[4];
+};
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_enum_basic_definition(built):
+    scanner, table = built
+    src = """
+enum Color {
+    RED,
+    GREEN,
+    BLUE
+};
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_enum_with_explicit_values(built):
+    scanner, table = built
+    src = """
+enum Status {
+    OK = 0,
+    ERROR = 1,
+    PENDING = 100,
+    DONE
+};
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_enum_with_trailing_comma(built):
+    scanner, table = built
+    src = """
+enum E {
+    A,
+    B,
+    C,
+};
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_enum_value_uses_constant_expression(built):
+    scanner, table = built
+    src = """
+enum Bits {
+    BIT0 = 1 << 0,
+    BIT1 = 1 << 1,
+    MASK = BIT0 | BIT1
+};
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_anonymous_enum_used_for_constants(built):
+    scanner, table = built
+    src = """
+enum {
+    BUFSIZE = 256,
+    MAXARGS = 8
+};
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_typedef_accepted_as_storage_class(built):
+    """We don't implement the typedef-name lexer hack, but the syntactic
+    form `typedef <type> <name>;` parses cleanly because typedef is a
+    storage class in the grammar (same shape as static/extern)."""
+    scanner, table = built
+    src = """
+typedef int handle_t;
+typedef struct Point {
+    int x;
+    int y;
+} point_t;
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_string_and_char_literals(built):
+    scanner, table = built
     src = '''
 char *greeting(void) { return "hello, world"; }
 char first_letter(void) { return 'h'; }
@@ -236,9 +390,9 @@ char first_letter(void) { return 'h'; }
     assert isinstance(tree, ParseNode)
 
 
-def test_c_real_world_factorial_and_loops():
+def test_c_real_world_factorial_and_loops(built):
     """One bigger sample exercising several features at once."""
-    scanner, table = c_pipeline()
+    scanner, table = built
     src = """
 int factorial(int n) {
     if (n <= 1) {
@@ -260,4 +414,37 @@ void run(void) {
 }
 """
     tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode) and tree.kind == "translation_unit"
+
+
+# --- real uc80 source files ------------------------------------------------
+# Vendored from /home/wohl/src/uc80/examples — small, hand-written K&R-style
+# C programs the uc80 compiler is supposed to handle. Parsing them here
+# verifies that the c_subset grammar covers idiomatic uc-family C, not just
+# our hand-rolled minimal cases. Fixtures are committed snapshots so the
+# tests don't depend on adjacent repos being checked out.
+
+UC80_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "uc80"
+
+UC80_SAMPLES = [
+    "hello2.c",
+    "test_arith.c",
+    "test_break.c",
+    "test_compound.c",
+    "test_struct.c",
+    "test_struct2.c",
+    "test_enum.c",
+    "test_incdec.c",
+    "test_global.c",
+    "test_static.c",
+]
+
+
+@pytest.mark.parametrize("name", UC80_SAMPLES)
+def test_uc80_example_parses(built, name):
+    path = UC80_FIXTURES / name
+    if not path.exists():
+        pytest.skip(f"uc80 fixture {name} missing")
+    scanner, table = built
+    tree = parse_str(scanner, table, path.read_text())
     assert isinstance(tree, ParseNode) and tree.kind == "translation_unit"

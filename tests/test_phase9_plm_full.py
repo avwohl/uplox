@@ -39,17 +39,24 @@ def plm_full_pipeline():
     return scanner, table
 
 
+@pytest.fixture(scope="module")
+def built():
+    """Module-scoped pipeline; building the LR(1) table for plm_full takes
+    several seconds and shouldn't be repeated per test."""
+    return plm_full_pipeline()
+
+
 def parse_str(scanner, table, src: str) -> ParseNode:
     return parse(table, scanner.scan(src), hooks=HookRegistry(ignore_missing=True))
 
 
-def test_plm_full_no_conflicts():
-    _scanner, table = plm_full_pipeline()
+def test_plm_full_no_conflicts(built):
+    _scanner, table = built
     assert table.conflicts == []
 
 
-def test_module_level_labeled_do_block_parses():
-    scanner, table = plm_full_pipeline()
+def test_module_level_labeled_do_block_parses(built):
+    scanner, table = built
     src = (
         "BDOS:\n"
         "DO;\n"
@@ -61,8 +68,8 @@ def test_module_level_labeled_do_block_parses():
     assert isinstance(tree, ParseNode) and tree.kind == "module"
 
 
-def test_literally_declaration_parses():
-    scanner, table = plm_full_pipeline()
+def test_literally_declaration_parses(built):
+    scanner, table = built
     src = (
         "MAIN: PROCEDURE;\n"
         "  DECLARE\n"
@@ -74,8 +81,8 @@ def test_literally_declaration_parses():
     assert isinstance(tree, ParseNode)
 
 
-def test_array_initial_and_based():
-    scanner, table = plm_full_pipeline()
+def test_array_initial_and_based(built):
+    scanner, table = built
     src = (
         "MAIN: PROCEDURE;\n"
         "  DECLARE\n"
@@ -88,8 +95,8 @@ def test_array_initial_and_based():
     assert isinstance(tree, ParseNode)
 
 
-def test_at_clause():
-    scanner, table = plm_full_pipeline()
+def test_at_clause(built):
+    scanner, table = built
     src = (
         "MAIN: PROCEDURE;\n"
         "  DECLARE MEMSIZE ADDRESS AT(0006H);\n"
@@ -99,8 +106,8 @@ def test_at_clause():
     assert isinstance(tree, ParseNode)
 
 
-def test_iterative_do_to_by():
-    scanner, table = plm_full_pipeline()
+def test_iterative_do_to_by(built):
+    scanner, table = built
     src = (
         "MAIN: PROCEDURE;\n"
         "  DECLARE I BYTE, X BYTE;\n"
@@ -116,8 +123,8 @@ def test_iterative_do_to_by():
     assert isinstance(tree, ParseNode)
 
 
-def test_do_case():
-    scanner, table = plm_full_pipeline()
+def test_do_case(built):
+    scanner, table = built
     src = (
         "MAIN: PROCEDURE;\n"
         "  DECLARE X BYTE;\n"
@@ -132,8 +139,8 @@ def test_do_case():
     assert isinstance(tree, ParseNode)
 
 
-def test_do_while():
-    scanner, table = plm_full_pipeline()
+def test_do_while(built):
+    scanner, table = built
     src = (
         "MAIN: PROCEDURE;\n"
         "  DECLARE X BYTE;\n"
@@ -146,9 +153,9 @@ def test_do_while():
     assert isinstance(tree, ParseNode)
 
 
-def test_array_size_after_name():
+def test_array_size_after_name(built):
     """`TRAN(32) BYTE EXTERNAL` — PL/M's preferred form for fixed-size arrays."""
-    scanner, table = plm_full_pipeline()
+    scanner, table = built
     src = (
         "MAIN: PROCEDURE;\n"
         "  DECLARE\n"
@@ -161,19 +168,19 @@ def test_array_size_after_name():
 
 
 @pytest.mark.skipif(not BDOS_PREFIX.exists(), reason="bdos prefix fixture missing")
-def test_bdos_prefix_parses_end_to_end():
+def test_bdos_prefix_parses_end_to_end(built):
     """The 162-line prefix of Digital Research's BDOS source — everything up
     to but not including the EQU-as-LITERALLY-alias macro pattern that
     requires upstream macro expansion."""
-    scanner, table = plm_full_pipeline()
+    scanner, table = built
     src = BDOS_PREFIX.read_text()
     tree = parse_str(scanner, table, src)
     assert isinstance(tree, ParseNode) and tree.kind == "module"
 
 
-def test_plm_full_supersedes_plm_subset():
+def test_plm_full_supersedes_plm_subset(built):
     """Sanity: plm_subset's calc-style examples still work under plm_full."""
-    scanner, table = plm_full_pipeline()
+    scanner, table = built
     src = (
         "MAIN: PROCEDURE;\n"
         "  DECLARE X BYTE, Y BYTE;\n"
