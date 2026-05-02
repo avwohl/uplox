@@ -25,7 +25,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .grammar import END_MARKER, EPSILON, Grammar, first_of_sequence
+from .grammar import END_MARKER, EPSILON, Grammar
 
 
 # Items are encoded as (production_index, dot_position, lookahead).
@@ -126,38 +126,39 @@ def _closure(grammar: Grammar, items: frozenset[Item]) -> frozenset[Item]:
     add every item ``(q, 0, b)`` for each B-production ``q`` and every
     ``b ∈ FIRST(β la)`` where ``β`` is the rest of the original item's RHS
     after ``B``.
+
+    Uses Grammar.first_tail (populated at compile time) to avoid recomputing
+    FIRST(β) from scratch on every call — the hot loop for big grammars.
     """
+    productions = grammar.productions
+    non_terminals = grammar.non_terminals
+    productions_by_lhs = grammar.productions_by_lhs
+    first_tail = grammar.first_tail
+
     out = set(items)
     work: list[Item] = list(items)
     while work:
         prod_idx, dot, la = work.pop()
-        prod = grammar.productions[prod_idx]
+        prod = productions[prod_idx]
         if dot >= len(prod.rhs):
             continue
         sym = prod.rhs[dot]
-        if sym not in grammar.non_terminals:
+        if sym not in non_terminals:
             continue
-        beta = prod.rhs[dot + 1:]
-        lookaheads = first_of_sequence(beta + (la,), grammar.first_sets) - {EPSILON}
-        for q in grammar.productions_by_lhs.get(sym, []):
+        # FIRST(rhs[dot+1:] · la). first_tail has FIRST(β) pre-computed; the
+        # only la-dependent piece is whether β can derive ε.
+        beta_first = first_tail[(prod_idx, dot + 1)]
+        if EPSILON in beta_first:
+            lookaheads = (beta_first - {EPSILON}) | {la}
+        else:
+            lookaheads = beta_first
+        for q in productions_by_lhs.get(sym, ()):
             for new_la in lookaheads:
                 new_item = (q, 0, new_la)
                 if new_item not in out:
                     out.add(new_item)
                     work.append(new_item)
     return frozenset(out)
-
-
-def _goto(grammar: Grammar, items: frozenset[Item], symbol: str) -> frozenset[Item]:
-    """Compute GOTO(items, symbol): advance dot past every item whose next symbol matches."""
-    moved: set[Item] = set()
-    for prod_idx, dot, la in items:
-        prod = grammar.productions[prod_idx]
-        if dot < len(prod.rhs) and prod.rhs[dot] == symbol:
-            moved.add((prod_idx, dot + 1, la))
-    if not moved:
-        return frozenset()
-    return _closure(grammar, frozenset(moved))
 
 
 def _kernel_key(items: frozenset[Item]) -> tuple[Item, ...]:
@@ -176,6 +177,7 @@ def build_lr1(grammar: Grammar) -> LRTable:
     surface every conflict at once or stop on the first.
     """
     table = LRTable(grammar=grammar)
+    productions = grammar.productions
 
     # Initial state: closure of {(start_prod, 0, $)}.
     start_item: Item = (0, 0, END_MARKER)
@@ -189,17 +191,31 @@ def build_lr1(grammar: Grammar) -> LRTable:
         cursor += 1
         items = table.states[state_id]
 
-        # Determine the symbols that appear immediately after a dot.
-        next_symbols: set[str] = set()
-        for prod_idx, dot, _la in items:
-            prod = grammar.productions[prod_idx]
-            if dot < len(prod.rhs):
-                next_symbols.add(prod.rhs[dot])
+        # Bucket items by the symbol after the dot, in one pass. Items with
+        # the dot at the end go to the reduce list. This avoids the
+        # quadratic "iterate items once per next-symbol" pattern: each goto
+        # group has its `moved` set built up directly from the bucket.
+        moved_by_sym: dict[str, set[Item]] = {}
+        reduce_items: list[Item] = []
+        for item in items:
+            prod_idx, dot, la = item
+            prod = productions[prod_idx]
+            if dot >= len(prod.rhs):
+                reduce_items.append(item)
+                continue
+            sym = prod.rhs[dot]
+            advanced = (prod_idx, dot + 1, la)
+            bucket = moved_by_sym.get(sym)
+            if bucket is None:
+                bucket = {advanced}
+                moved_by_sym[sym] = bucket
+            else:
+                bucket.add(advanced)
 
         # Build successor states for each next-symbol in sorted order so state
         # numbering is deterministic.
-        for sym in sorted(next_symbols):
-            successor = _goto(grammar, items, sym)
+        for sym in sorted(moved_by_sym):
+            successor = _closure(grammar, frozenset(moved_by_sym[sym]))
             key = _kernel_key(successor)
             if key not in index_of:
                 index_of[key] = len(table.states)
@@ -213,10 +229,7 @@ def build_lr1(grammar: Grammar) -> LRTable:
         # Reductions: any item with the dot at the end contributes a reduce on
         # its lookahead. Production 0 (the augmented start) reduces to ACCEPT
         # on $; all others reduce by their production.
-        for prod_idx, dot, la in items:
-            prod = grammar.productions[prod_idx]
-            if dot != len(prod.rhs):
-                continue
+        for prod_idx, dot, la in reduce_items:
             if prod_idx == 0 and la == END_MARKER:
                 _record_action(table, state_id, END_MARKER, AcceptAction())
             else:
