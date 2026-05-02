@@ -212,6 +212,17 @@ class _GLRDriver:
             reduces = [a for a in actions if isinstance(a, ReduceAction)]
             non_reduces = [a for a in actions if not isinstance(a, ReduceAction)]
 
+            # Default-reduction fallback. Same rationale as the LR runtime:
+            # a state whose only valid actions are all reduce-X for the same
+            # X reduces unconditionally on any unmapped lookahead. The action
+            # cell may be empty in `actions` (no entries at all), in which
+            # case we synthesise the reduce here so feedback grammars
+            # (typedef-name etc.) work under GLR too.
+            if not actions and not reduces:
+                default_prod = self.table.default_reductions.get(stack.top())
+                if default_prod is not None:
+                    reduces = [ReduceAction(production=default_prod)]
+
             if not reduces:
                 # Leave the stack as-is; shift/accept handled later.
                 out.append(stack)

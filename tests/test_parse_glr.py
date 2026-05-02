@@ -59,6 +59,16 @@ def test_glr_on_unambiguous_grammar_produces_single_tree():
     assert forest.kind == "expr"
 
 
+def test_glr_table_carries_default_reductions():
+    """default_reductions populated on the underlying LR(1) table must
+    propagate to the GLR view. Without them, GLR can't support
+    lexer-feedback grammars (typedef-name etc.) any better than canonical
+    LR(1) could."""
+    _scanner, glr_table, lr_table = calc_pipeline_glr()
+    assert glr_table.default_reductions == lr_table.default_reductions
+    assert glr_table.default_reductions, "calc should have some default reductions"
+
+
 def test_glr_matches_lr_shape_on_calc():
     scanner, glr_table, lr_table = calc_pipeline_glr()
     glr_forest = glr_parse(glr_table, scanner.scan("(1 + 2) * 3"))

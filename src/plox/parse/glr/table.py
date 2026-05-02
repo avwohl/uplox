@@ -31,6 +31,11 @@ class GLRTable:
     cell. An empty cell is *absent* from the dict (parser error on lookahead).
     Single-action cells contain exactly one entry; conflicting cells contain
     the conflict's full action list, sorted shifts-then-reduces.
+
+    ``default_reductions`` mirrors :attr:`LRTable.default_reductions` — for
+    each state listed, the production index to reduce by when ACTION lookup
+    finds no entries. Lexer-feedback grammars (typedef-name etc.) need this
+    for the same reason canonical LR(1) does, even under GLR.
     """
 
     grammar: Grammar
@@ -38,6 +43,7 @@ class GLRTable:
     goto: dict[tuple[int, str], int] = field(default_factory=dict)
     state_count: int = 0
     start_state: int = 0
+    default_reductions: dict[int, int] = field(default_factory=dict)
 
 
 def _action_sort_key(a: Action) -> tuple[int, int]:
@@ -79,6 +85,7 @@ def glr_from_lr(table: LRTable) -> GLRTable:
         goto=dict(table.goto),
         state_count=len(table.states),
         start_state=table.start_state,
+        default_reductions=dict(table.default_reductions),
     )
 
 
