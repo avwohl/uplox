@@ -72,6 +72,15 @@ tree = plox_my_c_grammar.parse(
 The grammar attaches `%hook=record_typedef` to its declaration rule;
 the rest is the generic plox machinery.
 
+## Balanced-bracket tokens (since 1.2.0; emitted shim 1.3.0)
+
+The Python runtime's Scanner has supported `%balanced="<close>"`
+since 1.2.0 via its `balanced` constructor argument. The emitted
+shim wires this through automatically by reading the bundle's
+`lex.balanced` map via `balanced_from_json` and passing it to
+`Scanner(...)`. Hosts don't need to do anything; grammars that
+declare `%balanced=` get balanced-bracket scanning out of the box.
+
 ## Re-entrancy
 
 Each `parse()` call constructs a fresh `ParseContext`. Nothing mutates

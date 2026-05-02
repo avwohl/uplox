@@ -9,7 +9,7 @@ The JSON bundle is the contract. Backends are independent and replaceable. plox 
 
 ## Status
 
-**v1.2.0** — all nine phases of the original plan landed in [v1.0.0](CHANGELOG.md#100--2026-05-02); v1.1.0 closed feature parity between the Python runtime and the C / C++ / Lua backends, shipped the self-host bootstrap, and sped up the LR(1) builder by ~30%; v1.2.0 closes the post-1.0 deferred-grammar list (variadic `...`, multi-line `#define`, bit-fields, designated initializers, compound literals, full abstract declarators, `_Generic`) and lifts the action-body carve-out from the self-host grammar via a new `%balanced=` lexer feature. See [CHANGELOG.md](CHANGELOG.md) for the full release notes. The grammar DSL, the JSON bundle schema, and the hook firing points are stable; future minor releases will be backwards-compatible at all three layers.
+**v1.3.0** — all nine phases of the original plan landed in [v1.0.0](CHANGELOG.md#100--2026-05-02); v1.1.0 closed feature parity between the Python runtime and the C / C++ / Lua backends, shipped the self-host bootstrap, and sped up the LR(1) builder by ~30%; v1.2.0 closed the post-1.0 deferred-grammar list (variadic `...`, multi-line `#define`, bit-fields, designated initializers, compound literals, full abstract declarators, `_Generic`) and lifted the action-body carve-out from the self-host grammar via a new `%balanced=` lexer feature; v1.3.0 closes the cross-language parity gap for `%balanced=` (JSON bundle, plus C / C++ / Lua / emitted-Python scanners). See [CHANGELOG.md](CHANGELOG.md) for the full release notes. The grammar DSL, the JSON bundle schema, and the hook firing points are stable; future minor releases will be backwards-compatible at all three layers.
 
 ## Goals
 
@@ -62,11 +62,12 @@ All nine phases of the original plan landed in v1.0.0; the v1.1.0 polish round c
 | —     | c_subset: designated initializers, compound literals                     | 1.2.0   |
 | —     | c_subset: full abstract declarators, `_Generic`, `sizeof(type)`          | 1.2.0   |
 | —     | Lexer `%balanced=` for non-regular tokens; action bodies in plox_self    | 1.2.0   |
+| —     | `%balanced=` parity in JSON bundle + C / C++ / Lua / emitted-Python      | 1.3.0   |
 
 ## Quick start
 
 ```bash
-plox version                                  # plox 1.2.0 (schema 1)
+plox version                                  # plox 1.3.0 (schema 1)
 plox build  examples/calc.plox -o calc.json   # grammar -> bundle
 plox check  examples/calc.plox                # build + report conflicts
 plox parse  calc.json input.txt               # parse a file

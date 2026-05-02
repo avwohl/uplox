@@ -68,6 +68,17 @@ The Parser owns every `Node` allocated during a parse. Children pointers
 in `Node::children` are non-owning observer pointers into the same
 arena. Destroy the Parser to free the tree.
 
+## Balanced-bracket tokens (since 1.3.0)
+
+Tokens declared with `%balanced="<close>"` in the grammar source come
+through to the emitted scanner via a per-grammar `kTokenBalanced[]`
+constexpr array (one entry per token, holding the close-delimiter byte
+or 0). After the DFA matches a balanced token, `next_token()` extends
+the match by counting nested open/close pairs in the input until depth
+returns to zero. An unmatched close surfaces as a parse error through
+the same path as a lexical error. Same shape as the C backend's
+`plox_<g>_token_balanced[]`.
+
 ## Worked example
 
 [`tests/test_gen_cpp.py::test_cpp_typedef_name_hack_end_to_end`](../tests/test_gen_cpp.py)

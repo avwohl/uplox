@@ -150,6 +150,21 @@ plox_calc_set_post_reduce(ctx, on_reduce, &my_typedefs);
 A complete worked example is in
 [`tests/test_gen_c.py::test_emitted_c_typedef_name_hack_end_to_end`](../tests/test_gen_c.py).
 
+## Balanced-bracket tokens (since 1.3.0)
+
+Tokens declared with `%balanced="<close>"` in the grammar source come
+through to the emitted scanner via a per-grammar `plox_<g>_token_balanced[]`
+array (one entry per token, holding the close-delimiter byte or 0). After
+the DFA matches a balanced token, the scanner extends the match by
+counting nested open/close pairs in the input until depth returns to
+zero — the open byte is whatever the DFA already consumed at the start
+of the token. An unmatched close raises an "unterminated balanced token"
+error via the same `plox_<g>_error` path as a lexical error.
+
+The feature is what lets non-regular bodies (target-language action
+bodies, Lua-style long brackets, etc.) be lexed as a single token.
+The Python runtime had it since 1.2.0; the C backend gained it in 1.3.0.
+
 ## Default reductions
 
 The emitted ACTION table is sparse; a state whose only valid actions are

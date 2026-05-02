@@ -5,6 +5,54 @@ All notable changes to plox land here. Format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) for the public
 surface (CLI, JSON bundle schema, Python API, hook firing points).
 
+## 1.3.0 — 2026-05-02
+
+Closes the cross-language parity gap for the `%balanced=` lexer feature
+that landed in 1.2.0. The Python runtime had it; the emitted C / C++ /
+Lua scanners did not. Same shape of work as 1.1.0's token-filter parity
+fix: thread the metadata through the JSON bundle and teach every emitted
+scanner to honour it.
+
+### Added
+
+- **JSON bundle: `lex.balanced` field.** The serialiser writes a
+  `{token_name: close_char}` map under the lex section when at least
+  one token uses `%balanced=`; the key is omitted otherwise, so
+  pre-1.3 bundles round-trip byte-identical and pre-1.3 readers see
+  no schema change. New `balanced_from_json` helper reads the map
+  back; existing `dfa_from_json` keeps its 3-tuple return.
+- **CLI: `plox build` writes the balanced map.** `plox parse`
+  rebuilds the Scanner with the map applied, so `%balanced=`
+  grammars round-trip through the bundle from the command line.
+- **C backend: balanced-bracket scanner support.** The emitted file
+  carries a per-grammar `plox_<g>_token_balanced[]` array (close
+  byte per token; 0 = not balanced). After every DFA accept whose
+  token is balanced, the scanner counts nested open/close pairs
+  until depth zero, extending `last_accept_end`. An unterminated
+  run surfaces as "unterminated balanced token" through the
+  existing `plox_<g>_error` path.
+- **C++ backend: balanced-bracket scanner support.** Same shape as
+  the C backend, with `kTokenBalanced[]` in the anonymous namespace
+  and the balanced extension inside `next_token()`.
+- **Lua backend: balanced-bracket scanner support.** Same shape with
+  a `token_balanced` Lua table and the balanced extension inside
+  `Parser:next_token()`.
+- **Python emitted shim: balanced-bracket scanner support.** The
+  generated `plox_<grammar>.py` shim now constructs `Scanner(...)`
+  with `balanced=balanced_from_json(BUNDLE["lex"])`. Hosts using
+  the in-process `plox.parse.runtime.parse(...)` already had this
+  in 1.2.0; this commit closes the gap for hosts using the
+  generated module.
+
+### Test surface
+
+342 tests, ~57s wall on the reference machine. New coverage in this
+cycle: end-to-end balanced-token tests for the C, C++, and Lua
+backends — each parses input where action bodies contain nested
+braces and asserts the scanner emits one ACTION token per top-level
+item; each also asserts that an unterminated `{` returns a non-zero
+exit code with a useful error.
+
 ## 1.2.0 — 2026-05-02
 
 Closes the post-1.0 deferred-grammar list and lifts the action-body

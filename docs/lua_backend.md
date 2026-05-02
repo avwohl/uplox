@@ -58,6 +58,17 @@ The runtime invokes the filter on every freshly fetched lookahead and
 again after every reduction; the post-reduce hook fires before the
 filter re-runs. Same ordering and contract as the C and C++ backends.
 
+## Balanced-bracket tokens (since 1.3.0)
+
+Tokens declared with `%balanced="<close>"` in the grammar source come
+through to the emitted scanner via a `token_balanced` Lua table (one
+entry per token, holding the close-delimiter byte or 0). After the
+DFA matches a balanced token, `Parser:next_token()` extends the
+match by counting nested open/close pairs in the input until depth
+returns to zero. An unmatched close sets `parser.error` to
+"unterminated balanced token..." and aborts the scan; `parser:parse()`
+then returns false and the host reads `parser.error`.
+
 ## Worked example
 
 [`tests/test_gen_lua.py::test_lua_typedef_name_hack_end_to_end`](../tests/test_gen_lua.py)
