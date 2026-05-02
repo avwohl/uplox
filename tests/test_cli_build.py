@@ -84,6 +84,91 @@ def test_emit_is_stubbed(tmp_path, capsys):
     assert "not yet implemented" in capsys.readouterr().err
 
 
+def test_build_emits_parse_section(tmp_path):
+    src = write_calc_grammar(tmp_path)
+    out = tmp_path / "calc.json"
+    rc = main(["build", str(src), "-o", str(out)])
+    assert rc == 0
+    bundle = json.loads(out.read_text())
+    assert bundle["parse"]["kind"] == "lr1"
+    assert bundle["parse"]["start_symbol"] == "expr"
+    assert any(p["lhs"] == "$start" for p in bundle["parse"]["productions"])
+    assert len(bundle["parse"]["states"]) > 0
+
+
+def test_lex_only_skips_parse_section(tmp_path):
+    src = write_calc_grammar(tmp_path)
+    out = tmp_path / "calc.json"
+    rc = main(["build", str(src), "--lex-only", "-o", str(out)])
+    assert rc == 0
+    bundle = json.loads(out.read_text())
+    assert bundle["parse"] == {}
+
+
+def test_build_refuses_conflicts(tmp_path, capsys):
+    src = tmp_path / "amb.plox"
+    src.write_text(
+        "%grammar amb\n"
+        "%tokens\n"
+        'IF   = "if"\n'
+        'THEN = "then"\n'
+        'ELSE = "else"\n'
+        'S    = "s"\n'
+        "%rules\n"
+        "stmt : IF cond THEN stmt\n"
+        "     | IF cond THEN stmt ELSE stmt\n"
+        "     | S\n"
+        "     ;\n"
+        "cond : S ;\n"
+    )
+    out = tmp_path / "amb.json"
+    rc = main(["build", str(src), "-o", str(out)])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "conflict" in err.lower()
+    assert not out.exists()
+
+
+def test_parse_command_round_trips(tmp_path, capsys):
+    src = write_calc_grammar(tmp_path)
+    bundle = tmp_path / "calc.json"
+    main(["build", str(src), "-o", str(bundle)])
+    inp = tmp_path / "input.txt"
+    # Fixture rule: `expr : expr PLUS NUMBER | NUMBER`. Stick to that shape.
+    inp.write_text("1 + 2 + 3\n")
+    rc = main(["parse", str(bundle), str(inp)])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "expr" in out
+    assert "NUMBER '1'" in out
+    assert "NUMBER '2'" in out
+    assert "NUMBER '3'" in out
+
+
+def test_parse_command_reports_syntax_error(tmp_path, capsys):
+    src = write_calc_grammar(tmp_path)
+    bundle = tmp_path / "calc.json"
+    main(["build", str(src), "-o", str(bundle)])
+    inp = tmp_path / "input.txt"
+    inp.write_text("1 + + 2\n")
+    rc = main(["parse", str(bundle), str(inp)])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "unexpected" in err.lower()
+
+
+def test_parse_command_rejects_lex_only_bundle(tmp_path, capsys):
+    src = write_calc_grammar(tmp_path)
+    bundle = tmp_path / "calc.json"
+    main(["build", str(src), "--lex-only", "-o", str(bundle)])
+    inp = tmp_path / "input.txt"
+    inp.write_text("1\n")
+    rc = main(["parse", str(bundle), str(inp)])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "no parse section" in err.lower()
+
+
 def test_check_reports_conflicts(tmp_path, capsys):
     src = tmp_path / "amb.plox"
     src.write_text(
