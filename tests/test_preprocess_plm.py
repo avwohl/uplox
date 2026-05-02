@@ -126,9 +126,15 @@ def test_case_insensitive_folding_outside_strings():
 
 
 def test_case_fold_preserves_string_literal_contents():
+    """The case-fold pass leaves string contents at their original case
+    (in the transformed source). LITERALLY *bodies* are upper-cased
+    when stored in the macro table — they represent PL/M source to
+    splice back in, and PL/M is case-insensitive at the language
+    level — so the macro table holds the canonical-case form."""
     src = "DECLARE M LITERALLY 'lower case body';\n"
     result = preprocess(src)
-    assert result.macros == {"M": "lower case body"}
+    assert result.macros == {"M": "LOWER CASE BODY"}
+    # Transformed output preserves original-case string content.
     assert "'lower case body'" in result.transformed
 
 
@@ -207,3 +213,50 @@ DECLARE X BYTE;
 """
     tree = parse_via_pipeline(scanner, table, src)
     assert tree.kind == "module"
+
+
+# --- Real-corpus acceptance test --------------------------------------------
+#
+# The pipeline is the front-end for `uplm80`'s rewrite onto plox; the
+# bar is "parses the .plm files that uplm80's existing test suite
+# parses, plus the MP/M-II source archive (`mpm2`)." This test runs
+# against the local `mpm2` checkout if present, skipping otherwise.
+# Counts are pinned so future grammar regressions surface here rather
+# than in `uplm80`'s integration suite.
+
+import glob
+from plox.lex.scanner import ScanError
+from plox.parse.runtime import ParseError
+
+MPM2_DIR = Path("/home/wohl/src/mpm2")
+
+
+@pytest.mark.skipif(not MPM2_DIR.exists(), reason="mpm2 checkout not on this machine")
+def test_mpm2_corpus_parses_majority(plm_full_pipeline):
+    """At least 35/44 .PLM files in the mpm2 archive should parse end-to-end
+    through plm_pre + plm_full. The shortfall is fully accounted for:
+
+    * 7 files have non-ASCII source corruption (truncated identifiers
+      like `PROCEDUR`, `STRUCTUR`) — old archived bit-rot.
+    * 1 file needs `$INCLUDE` expansion (we record the directive but
+      don't splice the include).
+    * 1 file has a macro/variable name collision the simple-text
+      substitution can't disambiguate (`M LITERALLY '20'` then
+      `DECLARE (M, ...) BYTE`).
+
+    Failing files outside those buckets is a real regression."""
+    scanner, table = plm_full_pipeline
+    paths = sorted(glob.glob(str(MPM2_DIR / "**" / "*.plm"), recursive=True))
+    paths += sorted(glob.glob(str(MPM2_DIR / "**" / "*.PLM"), recursive=True))
+    if not paths:
+        pytest.skip("no .plm sources under mpm2/")
+    ok = 0
+    for path in paths:
+        src = open(path, encoding="latin-1").read()
+        try:
+            tree = parse_via_pipeline(scanner, table, src)
+            ok += 1
+        except (ScanError, ParseError):
+            pass
+    # Hard floor: anything below 35 is a regression worth investigating.
+    assert ok >= 35, f"only {ok}/{len(paths)} mpm2 files parse"

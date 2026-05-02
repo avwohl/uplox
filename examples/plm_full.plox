@@ -42,7 +42,10 @@ WS         = /[ \t\r\n]+/                        %skip
 COMMENT    = /\/\*([^*]|\*+[^*\/])*\*+\//        %skip
 
 NUMBER     = /[0-9][0-9A-Fa-f$]*[BbDdHhOoQq]?/
-STRING     = /'([^'\n]|'')*'/
+# String literals can span multiple lines (LITERALLY bodies routinely
+# break into 4-byte groups across line ends). `''` is the escape for
+# a single quote.
+STRING     = /'([^'\\]|\\.|'')*'/
 
 # Note: PL/M-80 sources sometimes declare `EQU LITERALLY 'LITERALLY'` and
 # then use `EQU` as a macro alias. That requires running a macro expander
@@ -163,8 +166,16 @@ DOT        = '.'
 #   literally:      NAME LITERALLY 'value' / NAME EQU 'value'
 #   structure:      NAME STRUCTURE ( ... ) [attrs]
 <decl_item>   : <decl_names> <based_opt> <array_size_opt> <decl_tail>
+              | '(' <based_decl_list> ')' <array_size_opt> <decl_tail>
               | IDENT LITERALLY STRING
               ;
+
+# `(NAME BASED BASE)` parenthesised form, comma-listed in PIP-style
+# code: `DECLARE (SA BASED A, SB BASED B) BYTE;`. Each name has its
+# own BASED clause; they share the trailing array-size and type.
+<based_decl_list> : IDENT BASED <dotted_ident>
+                  | <based_decl_list> ',' IDENT BASED <dotted_ident>
+                  ;
 
 # A typed decl_item ends in a type-spec (with optional attrs), a DATA
 # initializer, or a STRUCTURE body. Unifying these tails into one
@@ -172,24 +183,39 @@ DOT        = '.'
 # array_size_opt`) intact and lets the array-of-structures form
 # `DECLARE POINTS(5) STRUCTURE(...)` parse via the same rule as
 # scalar declarations.
+## Real PL/M-80 allows attribute clauses on either side of a DATA
+## initializer — `address public data (0)` and `byte data (0c3h) public`
+## both occur in MP/M sources. The attrs_opt slot wraps the optional
+## DATA(...) so attributes can appear before, after, or both.
 <decl_tail>   : <type_spec> <attrs_opt>
-              | DATA '(' <arg_list> ')'
+              | <type_spec> <attrs_opt> DATA '(' <arg_list> ')' <attrs_opt>
+              | DATA '(' <arg_list> ')' <attrs_opt>
               | STRUCTURE '(' <struct_member_list> ')' <attrs_opt>
+              | STRUCTURE '(' <struct_member_list> ')' <attrs_opt> DATA '(' <arg_list> ')' <attrs_opt>
               ;
 
 <decl_names>  : IDENT
               | '(' <ident_list> ')'
               ;
 
-# `BUFF BASED BUFFA (128) BYTE` — the BASED clause sits between the name(s)
-# and the array size, before the type proper.
-<based_opt>   : BASED IDENT
-              |
-              ;
+# `BUFF BASED BUFFA (128) BYTE` — the BASED clause sits between the
+# name(s) and the array size, before the type proper. The base name
+# may be a member access (`BASED PARSE$FN.BUFF$ADR`); use a
+# parens-free dotted form here so the trailing array-size LPAREN is
+# unambiguous.
+<based_opt>     : BASED <dotted_ident>
+                |
+                ;
 
-# `TRAN(32) BYTE` — array size goes between name and type. (PL/M-80 also
-# allows `TRAN BYTE(32)` and we keep that as a type_spec form below.)
+<dotted_ident>  : IDENT
+                | <dotted_ident> '.' IDENT
+                ;
+
+# `TRAN(32) BYTE` — array size goes between name and type. PL/M-80
+# also allows `TRAN(*) BYTE DATA(...)` where `*` means "size determined
+# by initializer length"; that form is common in MP/M sources.
 <array_size_opt> : '(' <size_expr> ')'
+                 | '(' '*' ')'
                  |
                  ;
 
@@ -198,6 +224,7 @@ DOT        = '.'
               | LABEL
               | BYTE '(' <size_expr> ')'
               | ADDRESS '(' <size_expr> ')'
+              | IDENT                          # user-defined type name (struct alias)
               ;
 
 # Sizes inside type specs are usually NUMBER but may be IDENT (a LITERALLY
@@ -222,7 +249,12 @@ DOT        = '.'
                      | <struct_member_list> ',' <struct_member>
                      ;
 
-<struct_member> : <decl_names> <array_size_opt> <type_spec> ;
+# Struct members may omit the type (defaults to BYTE per PL/M-80) —
+# common in BDOS-derived structs that list a queue header field by
+# name without re-spelling its byte layout.
+<struct_member> : <decl_names> <array_size_opt> <type_spec>
+                | <decl_names> <array_size_opt>
+                ;
 
 # --- statements -----------------------------------------------------------
 

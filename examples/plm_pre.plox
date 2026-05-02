@@ -46,15 +46,20 @@ record_macro  post_reduce
 WS         = /[ \t\r\n]+/                        %skip
 COMMENT    = /\/\*([^*]|\*+[^*\/])*\*+\//        %skip
 
-# `$<UPPER>...` line-start directive — captured as a single token so
-# the action sees the whole `$Q=1` / `$INCLUDE (:F1:CPIO.PLB)` body
-# in one piece. Declared first to win the longest-match tie against
-# IDENT, which (unlike plm_full's IDENT) does not admit a leading `$`
-# in this grammar — see below.
-DOLLAR_DIR = /\$[A-Za-z][^\n]*/
+# `$<directive>...` line-start directive — captured as a single token
+# so the action sees the whole `$Q=1` / `$INCLUDE (:F1:CPIO.PLB)` /
+# `$ TITLE('...')` body in one piece. Optional whitespace between `$`
+# and the directive keyword is permitted (ISIS / MP/M sources use
+# both `$INCLUDE` and `$ TITLE` styles). Declared first to win the
+# longest-match tie against IDENT, which (unlike plm_full's IDENT)
+# does not admit a leading `$` in this grammar — see below.
+DOLLAR_DIR = /\$[ \t]*[A-Za-z][^\n]*/
 
 NUMBER     = /[0-9][0-9A-Fa-f$]*[BbDdHhOoQq]?/
-STRING     = /'([^'\n]|'')*'/
+# String literals can span multiple lines in PL/M-80 — LITERALLY
+# bodies routinely break into 4-byte groups across line ends.
+# Doubled `''` is the escape for a single quote inside a string.
+STRING     = /'([^'\\]|\\.|'')*'/
 
 # Identifiers do *not* start with `$` here — that prefix is owned by
 # DOLLAR_DIR. PL/M-80 does allow `$` mid-identifier as a soft hyphen

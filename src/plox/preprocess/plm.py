@@ -102,9 +102,13 @@ def preprocess(source: str) -> PreprocessResult:
     ``$``-directives."""
     # CP/M source files conventionally end with a Ctrl-Z (0x1A) — the
     # CP/M end-of-file marker — and may carry stray 0x1A bytes elsewhere.
-    # Strip them before lexing; the main parser would also choke on them.
-    if "\x1a" in source:
-        source = source.replace("\x1a", "")
+    # Old archived PL/M sources also occasionally hold isolated non-ASCII
+    # bytes from past bit-rot or encoding mishaps. PL/M-80 itself is
+    # ASCII, so drop anything outside printable ASCII + standard
+    # whitespace before lexing — the main parser would choke on them
+    # anyway.
+    if any(c == "\x1a" or ord(c) > 127 for c in source):
+        source = "".join(c for c in source if ord(c) <= 127 and c != "\x1a")
     # PL/M is case-insensitive: `procedure` / `Procedure` / `PROCEDURE`
     # are the same keyword; `foo` and `FOO` are the same identifier.
     # Real PL/M-80 compilers fold to a canonical case before parsing.
@@ -148,7 +152,13 @@ def preprocess(source: str) -> PreprocessResult:
         body_tok = children[2]
         if not isinstance(name_tok, Token) or not isinstance(body_tok, Token):
             return
-        body = _strip_string_quotes(body_tok.text)
+        # The body is PL/M source to splice in at substitution time.
+        # PL/M-80 is case-insensitive, so uppercase the body to match
+        # plm_full's expectation of uppercase keywords. This also makes
+        # the EQU-bootstrap detection (`body == "LITERALLY"`) robust to
+        # source like `lit literally 'literally'` where the string
+        # content was preserved at its original case by the fold pass.
+        body = _strip_string_quotes(body_tok.text).upper()
         macros[name_tok.text] = body
         if body == "LITERALLY":
             aliases.add(name_tok.text)
@@ -159,11 +169,16 @@ def preprocess(source: str) -> PreprocessResult:
     tree = parse(table, iter(tokens), hooks=hooks, token_filter=token_filter)
     assert isinstance(tree, ParseNode), "plm_pre always returns a tree"
 
-    state = _WalkState(source=source, macros=macros)
+    # Token offsets are byte offsets into the UTF-8 encoded source —
+    # the scanner converts internally before scanning. Sources with
+    # stray non-ASCII bytes (e.g. ancient bit-rotted CP/M files) shift
+    # byte vs. character indices. Walk in bytes and decode at the end
+    # so inter-token slices stay aligned.
+    state = _WalkState(source_bytes=source.encode("utf-8"), macros=macros)
     _walk(tree, state)
-    state.out.append(source[state.cursor:])
+    state.out.append(state.source_bytes[state.cursor:])
     return PreprocessResult(
-        transformed="".join(state.out),
+        transformed=b"".join(state.out).decode("utf-8", errors="replace"),
         macros=state.macros,
         directives=state.directives,
     )
@@ -185,11 +200,11 @@ def preprocess(source: str) -> PreprocessResult:
 
 @dataclass
 class _WalkState:
-    source: str
+    source_bytes: bytes
     macros: dict[str, str] = field(default_factory=dict)
-    out: list[str] = field(default_factory=list)
+    out: list[bytes] = field(default_factory=list)
     directives: list[Directive] = field(default_factory=list)
-    cursor: int = 0  # byte offset in source of next un-emitted character
+    cursor: int = 0  # byte offset in source_bytes of next un-emitted byte
 
 
 def _walk(root: ParseNode | Token, st: _WalkState) -> None:
@@ -208,8 +223,8 @@ def _walk(root: ParseNode | Token, st: _WalkState) -> None:
             if isinstance(leaf, Token):
                 if leaf.name == "DOLLAR_DIR":
                     st.directives.append(Directive(raw=leaf.text, line=leaf.line))
-                    st.out.append(st.source[st.cursor:leaf.offset])
-                    st.cursor = leaf.offset + len(leaf.text)
+                    st.out.append(st.source_bytes[st.cursor:leaf.offset])
+                    st.cursor = leaf.offset + len(leaf.text.encode("utf-8"))
                     continue
                 if leaf.name == "IDENT":
                     sub = st.macros.get(leaf.text)
@@ -245,10 +260,15 @@ def _walk(root: ParseNode | Token, st: _WalkState) -> None:
 def _emit_token(tok: Token, st: _WalkState, *, replacement: str | None) -> None:
     """Emit ``tok`` at its source position, preceded by the original
     inter-token whitespace and comments. If ``replacement`` is given,
-    that text is emitted instead of ``tok.text``."""
-    st.out.append(st.source[st.cursor:tok.offset])
-    st.out.append(replacement if replacement is not None else tok.text)
-    st.cursor = tok.offset + len(tok.text)
+    that text is emitted instead of ``tok.text``.
+
+    Operates in UTF-8 byte space so token offsets (which the scanner
+    reports as byte offsets) line up with source slicing on inputs
+    that contain non-ASCII bytes."""
+    st.out.append(st.source_bytes[st.cursor:tok.offset])
+    text = replacement if replacement is not None else tok.text
+    st.out.append(text.encode("utf-8"))
+    st.cursor = tok.offset + len(tok.text.encode("utf-8"))
 
 
 def _fold_to_upper(source: str) -> str:
