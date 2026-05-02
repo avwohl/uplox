@@ -796,6 +796,98 @@ struct widths {
     assert isinstance(tree, ParseNode)
 
 
+def test_c_designated_initializer_struct_dot(built):
+    scanner, table = built
+    src = """
+struct point { int x; int y; };
+struct point p = { .x = 1, .y = 2 };
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_designated_initializer_array_index(built):
+    scanner, table = built
+    src = "int arr[5] = { [0] = 1, [4] = 5 };\n"
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_designated_initializer_nested_path(built):
+    """A designator-list may chain `.inner.z` and `[i][j]` paths."""
+    scanner, table = built
+    src = """
+struct outer { struct { int z; } inner; };
+struct outer o = { .inner.z = 7 };
+int m[3][3] = { [1][1] = 9, [0][0] = 1 };
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_initializer_mixes_designated_and_positional(built):
+    """The C99 grammar lets designated and positional elements interleave —
+    `{ 1, .x = 2, 3 }` is legal, even if hostile to readability."""
+    scanner, table = built
+    src = """
+struct triple { int a; int b; int c; };
+struct triple t = { 1, .b = 2, 3 };
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_compound_literal_scalar(built):
+    scanner, table = built
+    src = "int main(void) { return (int){42}; }\n"
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_compound_literal_with_explicit_array_size(built):
+    scanner, table = built
+    src = "int main(void) { int *p = (int[3]){1, 2, 3}; return p[0]; }\n"
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_compound_literal_with_unsized_array(built):
+    scanner, table = built
+    src = "int sum(int *a, int n); int main(void) { return sum((int[]){1, 2, 3}, 3); }\n"
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_compound_literal_struct_with_designators(built):
+    scanner, table = built
+    src = """
+struct point { int x; int y; };
+int main(void) {
+    struct point p = (struct point){.x = 1, .y = 2};
+    return p.x;
+}
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
+def test_c_cast_still_parses_after_compound_literal_added(built):
+    """The compound literal `(t){...}` and the cast `(t)e` share the
+    `LPAREN type_name RPAREN` prefix; the disambiguator is one-token
+    lookahead at the position after RPAREN. This test pins that casts
+    don't regress."""
+    scanner, table = built
+    src = """
+int main(void) {
+    int x = (int) 3;
+    char *p = (char *) 0;
+    return x;
+}
+"""
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode)
+
+
 # --- real uc80 source files ------------------------------------------------
 # Vendored from /home/wohl/src/uc80/examples — small, hand-written K&R-style
 # C programs the uc80 compiler is supposed to handle. Parsing them here

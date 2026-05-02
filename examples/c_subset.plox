@@ -300,9 +300,26 @@ initializer : assignment_expr
             | LBRACE initializer_list COMMA RBRACE
             ;
 
-initializer_list : initializer_list COMMA initializer
-                 | initializer
+# C99 designated initializers: any element can be prefixed by a
+# designator-list followed by `=`. `.field = ...` and `[expr] = ...`
+# nest freely (`.outer.inner = ...`, `[3].field = ...`).
+initializer_list : initializer_list COMMA designated_initializer
+                 | designated_initializer
                  ;
+
+designated_initializer : initializer
+                       | designation initializer
+                       ;
+
+designation : designator_list ASSIGN ;
+
+designator_list : designator_list designator
+                | designator
+                ;
+
+designator : LBRACKET conditional_expr RBRACKET
+           | DOT IDENT
+           ;
 
 # --- statements ------------------------------------------------------------
 
@@ -478,9 +495,21 @@ cast_expr : unary_expr
           | LPAREN type_name RPAREN cast_expr
           ;
 
+# Abstract declarator — the right-hand side of casts and compound-literal
+# types. Pointer prefix and trailing array suffix are covered here;
+# function-pointer abstract declarators (`(*)(int)`) are out of scope and
+# tracked separately as a Phase-9 follow-up.
 type_name : decl_specs
           | decl_specs pointer
+          | decl_specs type_array_suffix
+          | decl_specs pointer type_array_suffix
           ;
+
+type_array_suffix : LBRACKET conditional_expr RBRACKET
+                  | LBRACKET RBRACKET
+                  | type_array_suffix LBRACKET conditional_expr RBRACKET
+                  | type_array_suffix LBRACKET RBRACKET
+                  ;
 
 unary_expr : postfix_expr
            | INC unary_expr
@@ -502,6 +531,8 @@ postfix_expr : primary_expr
              | postfix_expr ARROW IDENT
              | postfix_expr INC
              | postfix_expr DEC
+             | LPAREN type_name RPAREN LBRACE initializer_list RBRACE
+             | LPAREN type_name RPAREN LBRACE initializer_list COMMA RBRACE
              ;
 
 primary_expr : IDENT
