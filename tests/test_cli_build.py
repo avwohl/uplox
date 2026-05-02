@@ -88,12 +88,33 @@ def test_emit_target_c_writes_files(tmp_path):
     assert (out / "plox_calc.c").exists()
 
 
-def test_emit_target_cpp_still_stubbed(tmp_path, capsys):
+def test_emit_target_cpp_writes_files(tmp_path):
     src = write_calc_grammar(tmp_path)
     bundle = tmp_path / "calc.json"
     main(["build", str(src), "-o", str(bundle)])
     out = tmp_path / "gen"
     rc = main(["emit", str(bundle), "--target", "cpp", "--out", str(out)])
+    assert rc == 0
+    assert (out / "plox_calc.hpp").exists()
+    assert (out / "plox_calc.cpp").exists()
+
+
+def test_emit_target_lua_writes_module(tmp_path):
+    src = write_calc_grammar(tmp_path)
+    bundle = tmp_path / "calc.json"
+    main(["build", str(src), "-o", str(bundle)])
+    out = tmp_path / "gen"
+    rc = main(["emit", str(bundle), "--target", "lua", "--out", str(out)])
+    assert rc == 0
+    assert (out / "plox_calc.lua").exists()
+
+
+def test_emit_target_py_still_stubbed(tmp_path, capsys):
+    src = write_calc_grammar(tmp_path)
+    bundle = tmp_path / "calc.json"
+    main(["build", str(src), "-o", str(bundle)])
+    out = tmp_path / "gen"
+    rc = main(["emit", str(bundle), "--target", "py", "--out", str(out)])
     assert rc == 2
     assert "not yet implemented" in capsys.readouterr().err
 

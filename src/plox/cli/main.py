@@ -25,6 +25,8 @@ from ..lex.scanner import Scanner
 from ..parse.grammar import GrammarError, compile_grammar
 from ..parse.lr1 import build_lr1
 from ..gen.c import emit_c
+from ..gen.cpp import emit_cpp
+from ..gen.lua import emit_lua
 from ..parse.glr import GLRParseError, glr_from_lr, glr_parse
 from ..parse.glr.runtime import AmbiguityNode, GLRNode
 from ..parse.runtime import HookRegistry, ParseError, parse as run_parser
@@ -184,26 +186,39 @@ def _cmd_emit(args: argparse.Namespace) -> int:
     import json as _json
     import os as _os
 
-    if args.target != "c":
-        print(
-            f"plox emit --target={args.target}: not yet implemented "
-            f"(only --target=c lands in Phase 7; others follow in Phase 8)",
-            file=sys.stderr,
-        )
-        return 2
-
     with open(args.bundle, "r", encoding="utf-8") as fh:
         bundle = _json.load(fh)
+
+    grammar = (args.prefix or bundle.get("meta", {}).get("grammar") or "grammar").lower()
+    _os.makedirs(args.out, exist_ok=True)
+
     try:
-        header, impl = emit_c(bundle, prefix=args.prefix)
+        if args.target == "c":
+            header, impl = emit_c(bundle, prefix=args.prefix)
+            header_path = _os.path.join(args.out, f"plox_{grammar}.h")
+            impl_path = _os.path.join(args.out, f"plox_{grammar}.c")
+        elif args.target == "cpp":
+            header, impl = emit_cpp(bundle, prefix=args.prefix)
+            header_path = _os.path.join(args.out, f"plox_{grammar}.hpp")
+            impl_path = _os.path.join(args.out, f"plox_{grammar}.cpp")
+        elif args.target == "lua":
+            module_text = emit_lua(bundle, prefix=args.prefix)
+            module_path = _os.path.join(args.out, f"plox_{grammar}.lua")
+            with open(module_path, "w", encoding="utf-8") as fh:
+                fh.write(module_text)
+            print(f"wrote {module_path}")
+            return 0
+        else:
+            print(
+                f"plox emit --target={args.target}: not yet implemented "
+                f"(c/cpp/lua land in Phase 7-8; py is a Phase-9 follow-up)",
+                file=sys.stderr,
+            )
+            return 2
     except ValueError as e:
         print(f"{args.bundle}: {e}", file=sys.stderr)
         return 1
 
-    grammar = (args.prefix or bundle.get("meta", {}).get("grammar") or "grammar").lower()
-    _os.makedirs(args.out, exist_ok=True)
-    header_path = _os.path.join(args.out, f"plox_{grammar}.h")
-    impl_path = _os.path.join(args.out, f"plox_{grammar}.c")
     with open(header_path, "w", encoding="utf-8") as fh:
         fh.write(header)
     with open(impl_path, "w", encoding="utf-8") as fh:
