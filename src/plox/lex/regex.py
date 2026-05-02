@@ -178,6 +178,7 @@ class _Parser:
                   "(": ord("("), ")": ord(")"), "|": ord("|"),
                   "*": ord("*"), "+": ord("+"), "?": ord("?"),
                   ".": ord("."), "-": ord("-"), "^": ord("^"),
+                  "{": ord("{"), "}": ord("}"), "$": ord("$"),
                   '"': ord('"'), "'": ord("'"), "0": 0}
         if c in simple:
             return simple[c]

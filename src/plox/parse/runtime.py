@@ -64,10 +64,13 @@ class HookRegistry:
     """Map hook-name -> Python callable. Resolution happens at parse time.
 
     The registry is a separate object so tests and host drivers can swap
-    callbacks without rebuilding the parser. A missing name is fatal — silent
-    no-ops would mask spec/driver mismatches.
+    callbacks without rebuilding the parser. By default a missing name is
+    fatal — silent no-ops would mask spec/driver mismatches. Tools that
+    intentionally skip hooks (smoke parsers, syntax checkers) can pass
+    ``ignore_missing=True`` so unknown names are dropped silently.
     """
     callbacks: dict[str, HookCallback] = field(default_factory=dict)
+    ignore_missing: bool = False
 
     def register(self, name: str, fn: HookCallback) -> None:
         self.callbacks[name] = fn
@@ -75,6 +78,8 @@ class HookRegistry:
     def fire(self, name: str, ctx: "ParseContext", payload: dict) -> None:
         cb = self.callbacks.get(name)
         if cb is None:
+            if self.ignore_missing:
+                return
             raise ParseError(f"hook {name!r} fired but no callback registered")
         cb(ctx, payload)
 

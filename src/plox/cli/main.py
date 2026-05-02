@@ -24,7 +24,7 @@ from ..lex.build import lex_from_ir
 from ..lex.scanner import Scanner
 from ..parse.grammar import GrammarError, compile_grammar
 from ..parse.lr1 import build_lr1
-from ..parse.runtime import ParseError, parse as run_parser
+from ..parse.runtime import HookRegistry, ParseError, parse as run_parser
 from ..spec.reader import ReaderError, read_file
 from ..tables import (
     dfa_from_json,
@@ -104,7 +104,10 @@ def _cmd_parse(args: argparse.Namespace) -> int:
             text = fh.read()
 
     try:
-        tree = run_parser(table, scanner.scan(text))
+        # The CLI is a smoke tool; we don't try to resolve hooks the way a
+        # real host driver would. Unknown names just no-op so any grammar
+        # builds and parses end-to-end.
+        tree = run_parser(table, scanner.scan(text), hooks=HookRegistry(ignore_missing=True))
     except ParseError as e:
         print(f"{args.input}: {e}", file=sys.stderr)
         return 1
