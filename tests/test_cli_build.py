@@ -82,3 +82,26 @@ def test_emit_is_stubbed(tmp_path, capsys):
     rc = main(["emit", "ignored.json", "--target", "c", "--out", str(out)])
     assert rc == 2
     assert "not yet implemented" in capsys.readouterr().err
+
+
+def test_check_reports_conflicts(tmp_path, capsys):
+    src = tmp_path / "amb.plox"
+    src.write_text(
+        "%grammar amb\n"
+        "%tokens\n"
+        'IF   = "if"\n'
+        'THEN = "then"\n'
+        'ELSE = "else"\n'
+        'S    = "s"\n'
+        "%rules\n"
+        "stmt : IF cond THEN stmt\n"
+        "     | IF cond THEN stmt ELSE stmt\n"
+        "     | S\n"
+        "     ;\n"
+        "cond : S ;\n"
+    )
+    rc = main(["check", str(src)])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "conflict" in err.lower()
+    assert "ELSE" in err

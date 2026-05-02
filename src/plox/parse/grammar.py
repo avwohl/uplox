@@ -1,0 +1,239 @@
+"""Compiled grammar form: indexed productions, terminal/non-terminal classification,
+FIRST/FOLLOW sets.
+
+The :class:`Grammar` produced here is what the LR(1) builder consumes. It owns:
+
+* a flat ordered list of productions (with augmented start at index 0),
+* the disjoint sets of terminals and non-terminals,
+* the FIRST and FOLLOW sets, computed once at construction.
+
+Resolving symbols
+-----------------
+
+The grammar IR comes from :mod:`plox.spec` with two flavours of right-hand-side
+symbol: identifiers (UPPER tokens, lower non-terminals) and string literals
+(``"+"``). String literals must match a previously declared token's literal
+field; mismatches are reported here, not silently treated as new terminals.
+
+End-of-input
+------------
+
+We add a synthetic ``$`` terminal as the end-of-input marker. The augmented
+start production is ``S' -> S $`` where ``S`` is the user's start symbol.
+Reduction by production 0 with lookahead ``$`` is the LR accept action.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from ..spec.ir import GrammarIR
+
+# Reserved symbol names. These cannot appear in user grammars.
+EPSILON = ""        # empty string token; used in FIRST sets
+END_MARKER = "$"    # synthetic end-of-input
+AUGMENTED_START = "$start"
+
+
+@dataclass(frozen=True)
+class CompiledProduction:
+    """One production in the compiled grammar.
+
+    ``index`` is the global production number; ``lhs``/``rhs`` use compiled
+    symbol names (resolved from string literals to their token name).
+    """
+    index: int
+    lhs: str
+    rhs: tuple[str, ...]
+    action: str | None = None
+    hook: str | None = None
+    user_index: int = -1
+    """Index into the user's original Production list, or -1 for the augmented start."""
+
+
+@dataclass
+class Grammar:
+    productions: list[CompiledProduction] = field(default_factory=list)
+    terminals: set[str] = field(default_factory=set)
+    non_terminals: set[str] = field(default_factory=set)
+    start_symbol: str = ""
+    augmented_start: str = AUGMENTED_START
+    first_sets: dict[str, set[str]] = field(default_factory=dict)
+    follow_sets: dict[str, set[str]] = field(default_factory=dict)
+    productions_by_lhs: dict[str, list[int]] = field(default_factory=dict)
+
+    def is_terminal(self, sym: str) -> bool:
+        return sym in self.terminals
+
+    def is_non_terminal(self, sym: str) -> bool:
+        return sym in self.non_terminals
+
+
+class GrammarError(ValueError):
+    pass
+
+
+def compile_grammar(ir: GrammarIR) -> Grammar:
+    """Build a :class:`Grammar` from a parsed :class:`GrammarIR`.
+
+    Raises :class:`GrammarError` when:
+
+    * the IR has no rules,
+    * a string literal in an RHS does not correspond to any declared token,
+    * a referenced non-terminal has no rule defining it,
+    * the start symbol does not name a rule.
+    """
+    if not ir.rules:
+        raise GrammarError(f"grammar {ir.name!r} has no rules")
+    if ir.start_symbol is None:
+        raise GrammarError(f"grammar {ir.name!r} has no start symbol")
+
+    # Map string literals to their declared token names.
+    literal_to_token: dict[str, str] = {}
+    terminal_names: set[str] = {END_MARKER}
+    for tok in ir.tokens:
+        terminal_names.add(tok.name)
+        if tok.literal is not None:
+            literal_to_token[tok.literal] = tok.name
+
+    rule_names = {r.name for r in ir.rules}
+    if ir.start_symbol not in rule_names:
+        raise GrammarError(
+            f"start symbol {ir.start_symbol!r} is not the LHS of any rule"
+        )
+
+    def resolve(sym_name: str) -> str:
+        if sym_name.startswith('"') and sym_name.endswith('"'):
+            literal = sym_name[1:-1]
+            tok = literal_to_token.get(literal)
+            if tok is None:
+                raise GrammarError(
+                    f"string literal {sym_name} is not declared as any token's literal"
+                )
+            return tok
+        if sym_name in terminal_names:
+            return sym_name
+        if sym_name in rule_names:
+            return sym_name
+        raise GrammarError(
+            f"symbol {sym_name!r} is neither a declared token nor a rule"
+        )
+
+    grammar = Grammar(
+        start_symbol=ir.start_symbol,
+        terminals=set(terminal_names),
+    )
+    grammar.non_terminals = set(rule_names) | {AUGMENTED_START}
+
+    # Production 0 is always the augmented start: $start -> S
+    grammar.productions.append(
+        CompiledProduction(
+            index=0,
+            lhs=AUGMENTED_START,
+            rhs=(ir.start_symbol,),
+        )
+    )
+    user_idx = 0
+    for rule in ir.rules:
+        for prod in rule.productions:
+            rhs_resolved = tuple(resolve(s.name) for s in prod.rhs)
+            grammar.productions.append(
+                CompiledProduction(
+                    index=len(grammar.productions),
+                    lhs=rule.name,
+                    rhs=rhs_resolved,
+                    action=prod.action,
+                    hook=prod.hook,
+                    user_index=user_idx,
+                )
+            )
+            user_idx += 1
+
+    for p in grammar.productions:
+        grammar.productions_by_lhs.setdefault(p.lhs, []).append(p.index)
+
+    grammar.first_sets = _compute_first(grammar)
+    grammar.follow_sets = _compute_follow(grammar)
+    return grammar
+
+
+# ---- FIRST -------------------------------------------------------------------
+
+
+def _compute_first(g: Grammar) -> dict[str, set[str]]:
+    """Closed-form FIRST: smallest map such that
+
+    * for every terminal t, FIRST(t) = {t};
+    * for every production A -> X1...Xn, FIRST(A) ⊇ FIRST(X1...Xn) where
+      FIRST of a sequence is the union of FIRST(Xi) (minus epsilon) for the
+      longest prefix that derives epsilon, plus epsilon if the whole prefix does.
+
+    Computed by fixed-point iteration. Empty productions add EPSILON to the LHS.
+    """
+    first: dict[str, set[str]] = {t: {t} for t in g.terminals}
+    for nt in g.non_terminals:
+        first[nt] = set()
+
+    changed = True
+    while changed:
+        changed = False
+        for prod in g.productions:
+            before = len(first[prod.lhs])
+            first[prod.lhs] |= first_of_sequence(prod.rhs, first)
+            if len(first[prod.lhs]) != before:
+                changed = True
+    return first
+
+
+def first_of_sequence(seq: tuple[str, ...], first: dict[str, set[str]]) -> set[str]:
+    """FIRST of a symbol sequence given a FIRST map for individual symbols.
+
+    Iterates through ``seq`` accumulating non-epsilon members of FIRST(Xi)
+    for as long as the prefix can derive epsilon; adds EPSILON if every
+    symbol in the sequence does. ``first`` must contain entries for every
+    symbol that appears.
+    """
+    out: set[str] = set()
+    if not seq:
+        out.add(EPSILON)
+        return out
+    for sym in seq:
+        sym_first = first[sym]
+        out |= sym_first - {EPSILON}
+        if EPSILON not in sym_first:
+            return out
+    out.add(EPSILON)
+    return out
+
+
+# ---- FOLLOW ------------------------------------------------------------------
+
+
+def _compute_follow(g: Grammar) -> dict[str, set[str]]:
+    """Standard FOLLOW computation:
+
+    * FOLLOW(start_augmented) ⊇ {$}
+    * For A -> α B β: FOLLOW(B) ⊇ FIRST(β) − {ε}
+    * If β derives ε (or is empty): FOLLOW(B) ⊇ FOLLOW(A)
+
+    Useful for SLR/LALR diagnostics; the LR(1) builder computes its own
+    lookaheads from items rather than using FOLLOW.
+    """
+    follow: dict[str, set[str]] = {nt: set() for nt in g.non_terminals}
+    follow[AUGMENTED_START].add(END_MARKER)
+
+    changed = True
+    while changed:
+        changed = False
+        for prod in g.productions:
+            for i, sym in enumerate(prod.rhs):
+                if sym not in g.non_terminals:
+                    continue
+                trailer = first_of_sequence(prod.rhs[i + 1:], g.first_sets)
+                before = len(follow[sym])
+                follow[sym] |= trailer - {EPSILON}
+                if EPSILON in trailer:
+                    follow[sym] |= follow[prod.lhs]
+                if len(follow[sym]) != before:
+                    changed = True
+    return follow

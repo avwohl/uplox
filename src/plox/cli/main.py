@@ -21,6 +21,8 @@ import sys
 
 from .. import PLOX_SCHEMA_VERSION, __version__
 from ..lex.build import lex_from_ir
+from ..parse.grammar import GrammarError, compile_grammar
+from ..parse.lr1 import build_lr1
 from ..spec.reader import ReaderError, read_file
 from ..tables import dfa_to_json, dump_bundle, empty_bundle
 
@@ -61,11 +63,31 @@ def _cmd_check(args: argparse.Namespace) -> int:
     except (ReaderError, ValueError) as e:
         print(str(e), file=sys.stderr)
         return 1
+
+    parser_summary = ""
+    parser_conflicts = 0
+    try:
+        grammar = compile_grammar(ir)
+        table = build_lr1(grammar)
+        parser_conflicts = len(table.conflicts)
+        if table.conflicts:
+            print(f"{args.source}: {parser_conflicts} parser conflict(s):", file=sys.stderr)
+            for c in table.conflicts:
+                print(c.describe(table.grammar), file=sys.stderr)
+                print("", file=sys.stderr)
+        parser_summary = (
+            f", {len(grammar.productions)} productions, "
+            f"{len(table.states)} states, {parser_conflicts} conflicts"
+        )
+    except GrammarError as e:
+        print(f"{args.source}: {e}", file=sys.stderr)
+        return 1
+
     print(
         f"{args.source}: {ir.name} — {len(ir.tokens)} tokens, "
-        f"{len(ir.hooks)} hooks (rules section not validated in Phase 2)"
+        f"{len(ir.hooks)} hooks{parser_summary}"
     )
-    return 0
+    return 1 if parser_conflicts else 0
 
 
 def _cmd_emit(args: argparse.Namespace) -> int:

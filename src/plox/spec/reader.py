@@ -8,11 +8,10 @@ plox-generated front-end (the self-hosting milestone).
 Implementation status
 ---------------------
 
-* ``%grammar``, ``%options``, ``%tokens``, ``%hooks``: implemented for v0.
-* ``%rules``: stored verbatim as raw text in :attr:`GrammarIR.options` under the
-  key ``__rules_text__`` and parsed in Phase 3 alongside the LR builder. This
-  keeps Phase 2 deliverables (lexer end-to-end) testable from real ``.plox`` files
-  without waiting for the full grammar parser.
+All v0 sections are implemented: ``%grammar``, ``%options``, ``%tokens``,
+``%hooks``, ``%rules``. The raw rules text remains accessible via the
+``__rules_text__`` key in :attr:`GrammarIR.options` for diagnostics that want to
+quote the source verbatim.
 
 Diagnostics
 -----------
@@ -26,7 +25,7 @@ from __future__ import annotations
 
 import re
 
-from .ir import GrammarIR, HookDecl, Position, TokenDecl
+from .ir import GrammarIR, HookDecl, Position, Production, Rule, Symbol, TokenDecl
 
 _HOOK_WHENS = ("pre_shift", "pre_reduce", "post_reduce", "on_error")
 
@@ -106,7 +105,10 @@ def read_source(text: str, filename: str = "<source>") -> GrammarIR:
         elif section == "hooks":
             _parse_hooks(ir, section_buf, filename)
         elif section == "rules":
-            ir.options["__rules_text__"] = "\n".join(t for _l, t in section_buf)
+            text = "\n".join(t for _l, t in section_buf)
+            ir.options["__rules_text__"] = text
+            base_line = section_buf[0][0] if section_buf else 0
+            _parse_rules(ir, text, base_line, filename)
         section = None
         section_buf = []
 
@@ -232,3 +234,212 @@ def _parse_hooks(ir: GrammarIR, lines: list[tuple[int, str]], filename: str) -> 
                 f"{filename}:{lineno}: unknown hook event {when!r}; expected one of {_HOOK_WHENS}"
             )
         ir.hooks.append(HookDecl(name=name, when=when, position=Position(filename, lineno, 1)))
+
+
+# ---- Rules parser ------------------------------------------------------------
+#
+# Grammar of the rules section (informal):
+#
+#   rules       := rule+
+#   rule        := IDENT ':' production ('|' production)* ';'
+#   production  := symbol* opt_hook opt_action
+#   symbol      := IDENT | UPPER | STRING_LITERAL
+#   opt_hook    := '%hook' '=' IDENT  | empty
+#   opt_action  := '{' balanced '}'   | empty
+#   STRING_LITERAL := '"' (\\. | [^"\\])* '"'
+#
+# String literals are anonymous tokens; the IR records them as Symbols whose
+# name is the same as the literal (resolution against `%tokens` happens later).
+# Action bodies are copied verbatim including embedded braces.
+
+
+class _RulesLexer:
+    """Single-pass tokeniser over the rules section.
+
+    Tracks line/column so error messages can point inside the rules block.
+    ``base_line`` is the source-file line of the first character — set by the
+    section-flush logic so positions are absolute, not section-local.
+    """
+
+    def __init__(self, text: str, base_line: int, filename: str):
+        self.src = text
+        self.pos = 0
+        self.line = base_line
+        self.col = 1
+        self.filename = filename
+
+    def at_eof(self) -> bool:
+        return self.pos >= len(self.src)
+
+    def _advance_one(self) -> str:
+        c = self.src[self.pos]
+        self.pos += 1
+        if c == "\n":
+            self.line += 1
+            self.col = 1
+        else:
+            self.col += 1
+        return c
+
+    def skip_ws_and_comments(self) -> None:
+        while self.pos < len(self.src):
+            c = self.src[self.pos]
+            if c in " \t\r\n":
+                self._advance_one()
+            elif c == "#":
+                while self.pos < len(self.src) and self.src[self.pos] != "\n":
+                    self._advance_one()
+            else:
+                return
+
+    def position(self) -> Position:
+        return Position(self.filename, self.line, self.col)
+
+    def peek(self) -> str:
+        return self.src[self.pos] if self.pos < len(self.src) else ""
+
+    def take(self) -> str:
+        return self._advance_one()
+
+    def take_string(self) -> tuple[str, Position]:
+        pos = self.position()
+        assert self.take() == '"'
+        out = []
+        while True:
+            if self.at_eof():
+                raise ReaderError(
+                    f"{self.filename}:{pos.line}:{pos.column}: unterminated string literal"
+                )
+            c = self.take()
+            if c == '"':
+                break
+            if c == "\\" and not self.at_eof():
+                out.append(c)
+                out.append(self.take())
+                continue
+            out.append(c)
+        return "".join(out), pos
+
+    def take_ident(self) -> tuple[str, Position]:
+        pos = self.position()
+        if not (self.peek().isalpha() or self.peek() == "_"):
+            raise ReaderError(
+                f"{self.filename}:{pos.line}:{pos.column}: expected identifier, "
+                f"got {self.peek()!r}"
+            )
+        out = [self.take()]
+        while self.pos < len(self.src):
+            c = self.peek()
+            if c.isalnum() or c == "_":
+                out.append(self.take())
+            else:
+                break
+        return "".join(out), pos
+
+    def take_balanced_braces(self) -> tuple[str, Position]:
+        """Take ``{ ... }`` allowing nested braces. Strips the outer pair."""
+        pos = self.position()
+        assert self.take() == "{"
+        depth = 1
+        out = []
+        while True:
+            if self.at_eof():
+                raise ReaderError(
+                    f"{self.filename}:{pos.line}:{pos.column}: unterminated action block"
+                )
+            c = self.take()
+            if c == "{":
+                depth += 1
+                out.append(c)
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+                out.append(c)
+            else:
+                out.append(c)
+        return "".join(out).strip(), pos
+
+
+def _parse_rules(ir: GrammarIR, text: str, base_line: int, filename: str) -> None:
+    lex = _RulesLexer(text, base_line, filename)
+    while True:
+        lex.skip_ws_and_comments()
+        if lex.at_eof():
+            break
+        rule = _parse_one_rule(lex)
+        ir.rules.append(rule)
+    if ir.start_symbol is None and ir.rules:
+        ir.start_symbol = ir.rules[0].name
+
+
+def _parse_one_rule(lex: _RulesLexer) -> Rule:
+    name, pos = lex.take_ident()
+    lex.skip_ws_and_comments()
+    if lex.peek() != ":":
+        raise ReaderError(
+            f"{lex.filename}:{lex.line}:{lex.col}: expected ':' after rule name {name!r}"
+        )
+    lex.take()
+    productions = [_parse_production(lex)]
+    while True:
+        lex.skip_ws_and_comments()
+        c = lex.peek()
+        if c == "|":
+            lex.take()
+            productions.append(_parse_production(lex))
+        elif c == ";":
+            lex.take()
+            return Rule(name=name, productions=productions, position=pos)
+        else:
+            raise ReaderError(
+                f"{lex.filename}:{lex.line}:{lex.col}: "
+                f"expected '|' or ';' inside rule {name!r}, got {c!r}"
+            )
+
+
+def _parse_production(lex: _RulesLexer) -> Production:
+    rhs: list[Symbol] = []
+    hook: str | None = None
+    action: str | None = None
+    prod_pos = lex.position()
+    while True:
+        lex.skip_ws_and_comments()
+        c = lex.peek()
+        if not c or c in "|;":
+            break
+        if c == "%":
+            # Either %hook or %prec. Only %hook in v0.
+            keyword_pos = lex.position()
+            lex.take()
+            kw, _kw_pos = lex.take_ident()
+            if kw != "hook":
+                raise ReaderError(
+                    f"{lex.filename}:{keyword_pos.line}:{keyword_pos.column}: "
+                    f"unknown rule directive %{kw}; v0 supports only %hook"
+                )
+            lex.skip_ws_and_comments()
+            if lex.peek() != "=":
+                raise ReaderError(
+                    f"{lex.filename}:{lex.line}:{lex.col}: expected '=' after %hook"
+                )
+            lex.take()
+            lex.skip_ws_and_comments()
+            hook_name, _ = lex.take_ident()
+            hook = hook_name
+            continue
+        if c == "{":
+            action, _ = lex.take_balanced_braces()
+            continue
+        if c == '"':
+            literal, lit_pos = lex.take_string()
+            rhs.append(Symbol(name='"' + literal + '"', position=lit_pos))
+            continue
+        if c.isalpha() or c == "_":
+            name, sym_pos = lex.take_ident()
+            rhs.append(Symbol(name=name, position=sym_pos))
+            continue
+        raise ReaderError(
+            f"{lex.filename}:{lex.line}:{lex.col}: unexpected character {c!r} in production"
+        )
+    return Production(rhs=rhs, action=action, hook=hook, position=prod_pos)
