@@ -49,25 +49,64 @@ BLOCK_COMMENT = /\/\*([^*]|\*+[^*\/])*\*+\//     %skip
 PREPROC    = /#([^\n\\]|\\\n|\\.)*/              %skip
 
 # Numeric and string literals.
-INT_LIT    = /(0[xX][0-9A-Fa-f]+|0[0-7]*|[1-9][0-9]*)[uUlL]*/
-CHAR_LIT   = /'([^'\\\n]|\\.)+'/
-STRING_LIT = /"([^"\\\n]|\\.)*"/
+#
+# Floating literals — declared before INT_LIT so the digit-leading
+# overlap resolves to FLOAT_LIT only when at least one of ``.`` /
+# exponent / hex-float ``p`` is present. Plain integer digits without
+# a fractional part or exponent fall through to INT_LIT.  Suffixes:
+# ``f``/``F``/``l``/``L`` and the C23 decimal-float pairs
+# ``df``/``dd``/``dl`` / ``DF``/``DD``/``DL``.
+FLOAT_LIT  = /(0[xX]([0-9A-Fa-f]+\.[0-9A-Fa-f]*|\.[0-9A-Fa-f]+|[0-9A-Fa-f]+)[pP][+-]?[0-9]+|[0-9]+\.[0-9]*([eE][+-]?[0-9]+)?|\.[0-9]+([eE][+-]?[0-9]+)?|[0-9]+[eE][+-]?[0-9]+)([fFlL]|[dD][fFdDlL])?/
+
+# Integer literals: decimal / hex / octal / binary. C23 added ``0b``
+# binary literals and the ``wb``/``uwb`` BitInt suffixes; the ``'``
+# digit separator is also C23 (e.g. ``1'000'000``). All standard
+# integer suffixes (``u``/``l``/``ll`` and any case mix) are accepted.
+INT_LIT    = /(0[xX][0-9A-Fa-f]+('[0-9A-Fa-f]+)*|0[bB][01]+('[01]+)*|0[0-7]*('[0-7]+)*|[1-9][0-9]*('[0-9]+)*)([uU]?(ll|LL|[lL])?|(ll|LL|[lL])[uU]?|[uU]?wb|[uU]?WB|wb[uU]?|WB[uU]?)/
+
+# Char literals. Optional encoding prefix ``u8``/``u``/``U``/``L``
+# (C23 explicitly added ``u8`` for char literals; the others were
+# already in C11).
+CHAR_LIT   = /(u8|u|U|L)?'([^'\\\n]|\\.)+'/
+
+# String literals. Same encoding-prefix set as char literals.
+STRING_LIT = /(u8|u|U|L)?"([^"\\\n]|\\.)*"/
 
 # Keywords. Must come before IDENT.
+#
+# Many keywords here have GCC ``__keyword__`` / ``__keyword`` aliases that
+# real-world C source uses (typically inside system headers). uc_core's
+# legacy lexer mapped them to the same token; we do the same with a regex
+# alternation. Longest alternatives go first so the DFA resolves
+# ``__const__`` to KW_CONST rather than IDENT.
 KW_VOID    = 'void'
 KW_CHAR    = 'char'
 KW_SHORT   = 'short'
 KW_INT     = 'int'
 KW_LONG    = 'long'
-KW_SIGNED  = 'signed'
+KW_SIGNED  = /__signed__|__signed|signed/
 KW_UNSIGNED = 'unsigned'
-KW_CONST   = 'const'
-KW_VOLATILE = 'volatile'
+KW_FLOAT   = 'float'
+KW_DOUBLE  = 'double'
+KW_BOOL    = /_Bool|bool/
+KW_COMPLEX = /__complex__|__complex|_Complex/
+KW_IMAGINARY = '_Imaginary'
+KW_DECIMAL32 = '_Decimal32'
+KW_DECIMAL64 = '_Decimal64'
+KW_DECIMAL128 = '_Decimal128'
+KW_BITINT  = '_BitInt'
+KW_CONST   = /__const__|__const|const/
+KW_VOLATILE = /__volatile__|__volatile|volatile/
+KW_RESTRICT = /__restrict__|__restrict|restrict/
+KW_ATOMIC  = '_Atomic'
 KW_STATIC  = 'static'
 KW_EXTERN  = 'extern'
 KW_REGISTER = 'register'
 KW_AUTO    = 'auto'
-KW_INLINE  = 'inline'
+KW_INLINE  = /__inline__|__inline|inline/
+KW_NORETURN = '_Noreturn'
+KW_CONSTEXPR = 'constexpr'
+KW_THREAD_LOCAL = /thread_local|_Thread_local/
 KW_RETURN  = 'return'
 KW_IF      = 'if'
 KW_ELSE    = 'else'
@@ -78,6 +117,8 @@ KW_BREAK   = 'break'
 KW_CONTINUE = 'continue'
 KW_GOTO    = 'goto'
 KW_SIZEOF  = 'sizeof'
+KW_ALIGNOF = /_Alignof|alignof|__alignof__|__alignof/
+KW_ALIGNAS = /_Alignas|alignas/
 KW_STRUCT  = 'struct'
 KW_UNION   = 'union'
 KW_ENUM    = 'enum'
@@ -86,6 +127,13 @@ KW_SWITCH  = 'switch'
 KW_CASE    = 'case'
 KW_DEFAULT = 'default'
 KW_GENERIC = '_Generic'
+KW_STATIC_ASSERT = /_Static_assert|static_assert/
+KW_TYPEOF  = /__typeof__|__typeof|typeof/
+KW_TYPEOF_UNQUAL = 'typeof_unqual'
+KW_NULLPTR = 'nullptr'
+KW_ASM     = /__asm__|__asm|asm/
+KW_REAL    = /__real__|__real/
+KW_IMAG    = /__imag__|__imag/
 
 IDENT      = /[A-Za-z_][A-Za-z0-9_]*/
 
@@ -94,6 +142,13 @@ IDENT      = /[A-Za-z_][A-Za-z0-9_]*/
 # pattern.  The c_subset host runs a token filter (see plox.hooks.TypedefTracker)
 # that rewrites IDENT to TYPEDEF_NAME for identifiers that have been typedef'd.
 TYPEDEF_NAME = /[A-Za-z_][A-Za-z0-9_]*/
+
+# C23 attribute delimiters ``[[`` / ``]]``. Must precede the single
+# bracket tokens so the DFA picks the doubled form when present —
+# attributes appear in declarators / type-specs and the ambiguous
+# context is small enough that no alternative parse uses ``[[``.
+DOUBLE_LBRACKET = '[['
+DOUBLE_RBRACKET = ']]'
 
 # Multi-char operators (each must precede its prefix).
 ARROW      = '->'
