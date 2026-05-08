@@ -186,10 +186,14 @@ DOT        = '.'
 ## Real PL/M-80 allows attribute clauses on either side of a DATA
 ## initializer — `address public data (0)` and `byte data (0c3h) public`
 ## both occur in MP/M sources. The attrs_opt slot wraps the optional
-## DATA(...) so attributes can appear before, after, or both.
+## DATA(...) so attributes can appear before, after, or both. The
+## leading attrs_opt also covers the no-type form `name public data(...)`
+## seen in MP/M status-process declarations whose type comes from a
+## sibling decl_item (`status$pd process$header, ..., bdos$save public
+## data(...)`).
 <decl_tail>   : <type_spec> <attrs_opt>
               | <type_spec> <attrs_opt> DATA '(' <arg_list> ')' <attrs_opt>
-              | DATA '(' <arg_list> ')' <attrs_opt>
+              | <attrs_opt> DATA '(' <arg_list> ')' <attrs_opt>
               | STRUCTURE '(' <struct_member_list> ')' <attrs_opt>
               | STRUCTURE '(' <struct_member_list> ')' <attrs_opt> DATA '(' <arg_list> ')' <attrs_opt>
               ;
