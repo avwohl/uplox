@@ -316,6 +316,7 @@ RPAREN     = ')'
 # (anonymous, used for padding) parse via the explicit struct_declarator
 # non-terminal.
 <struct_decl> : <decl_specs> <struct_declarator_list> SEMI
+              | <decl_specs> SEMI                     # C11+ anonymous struct/union member
               | <static_assert_declaration>           # C11+ allows static_assert inside struct
               ;
 
@@ -646,11 +647,19 @@ RPAREN     = ')'
                | INT_LIT
                | FLOAT_LIT
                | CHAR_LIT
-               | STRING_LIT
+               | <string_literal>
                | KW_NULLPTR
                | LPAREN <expr> RPAREN
                | KW_GENERIC LPAREN <assignment_expr> COMMA <generic_assoc_list> RPAREN
                ;
+
+# Adjacent string literals concatenate per C — ``"abc" "def"`` is one
+# string. Macro expansion routinely produces this shape (``"a" B "c"``
+# where ``B`` is ``"b"``). Modelled as a left-recursive list so the
+# lexer doesn't have to glue tokens together.
+<string_literal> : STRING_LIT
+                 | <string_literal> STRING_LIT
+                 ;
 
 <generic_assoc_list> : <generic_assoc_list> COMMA <generic_association>
                      | <generic_association>
