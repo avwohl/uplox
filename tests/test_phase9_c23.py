@@ -1,8 +1,7 @@
-"""Phase 9: c_subset.plox parses a meaningful subset of C.
+"""Phase 9: c23.plox parses full C23.
 
-The grammar is the start of the uc_core port. Full uc_core (and the
-typedef-name lexer hack, casts, the preprocessor) remains a Phase-9
-follow-up. The tests below pin the size of what we *do* parse and assert
+The grammar is the syntactic base of the uc_core port. The tests
+below pin the size of what we parse and assert
 structural correctness on representative programs.
 """
 
@@ -21,7 +20,7 @@ from plox.parse.runtime import HookRegistry, ParseNode, parse
 from plox.spec.reader import read_file
 
 
-C_SUBSET = Path(__file__).resolve().parents[1] / "examples" / "c_subset.plox"
+C_SUBSET = Path(__file__).resolve().parents[1] / "examples" / "c23.plox"
 
 
 def c_pipeline():
@@ -34,7 +33,7 @@ def c_pipeline():
 
 @pytest.fixture(scope="module")
 def built():
-    """Module-scoped pipeline. Building the LR(1) table for c_subset takes
+    """Module-scoped pipeline. Building the LR(1) table for c23 takes
     several seconds; rebuilding for each test made the file the slowest in
     the suite. The two `_subset_*` tests below still exercise construction
     explicitly."""
@@ -55,12 +54,12 @@ def parse_with_typedef_tracking(scanner, table, src: str) -> tuple[ParseNode, Ty
     return tree, tracker
 
 
-def test_c_subset_no_conflicts(built):
+def test_c23_no_conflicts(built):
     _scanner, table = built
     assert table.conflicts == []
 
 
-def test_c_subset_state_count_in_range(built):
+def test_c23_state_count_in_range(built):
     _scanner, table = built
     # 1649 → 2645 once the C23 type / qualifier / static_assert / typeof
     # / asm / nullptr / alignof / __real__ / __imag__ / FLOAT_LIT
@@ -1021,7 +1020,7 @@ def test_c_sizeof_typedef_name(built):
 # --- real uc80 source files ------------------------------------------------
 # Vendored from /home/wohl/src/uc80/examples — small, hand-written K&R-style
 # C programs the uc80 compiler is supposed to handle. Parsing them here
-# verifies that the c_subset grammar covers idiomatic uc-family C, not just
+# verifies that the c23 grammar covers idiomatic uc-family C, not just
 # our hand-rolled minimal cases. Fixtures are committed snapshots so the
 # tests don't depend on adjacent repos being checked out.
 
@@ -1077,7 +1076,7 @@ def test_uc80_example_parses(built, name):
 def test_uc80_example_parses_with_libc_typedefs(built, name, seeded):
     """Parse uc80 fixtures that use libc-typedef'd names (FILE, jmp_buf)
     as type-specs. The tracker is pre-populated to mirror how a host
-    using c_subset would import typedefs from system headers."""
+    using c23 would import typedefs from system headers."""
     path = UC80_FIXTURES / name
     if not path.exists():
         pytest.skip(f"uc80 fixture {name} missing")

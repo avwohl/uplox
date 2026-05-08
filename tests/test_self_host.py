@@ -166,7 +166,7 @@ EXAMPLES_TO_TEST = [
     "scoped.plox",
     "plm_subset.plox",
     "plm_full.plox",
-    "c_subset.plox",
+    "c23.plox",
     "plox_self.plox",  # The grammar parses *itself*.
 ]
 

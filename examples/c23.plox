@@ -1,40 +1,51 @@
-# C subset grammar — start of the uc_core port.
+# C23 grammar — syntactic base for the uc_core / uc80 / uc386 port.
 #
-# This grammar covers a deliberate subset of C suitable for the small
-# uc_core / uc80 / uc386 source style:
+# Covers full C23 syntax in scope for those compilers:
 #
-#   * Function definitions (return type, name, parameter list, block body)
-#   * Variable declarations: char/int/void/long, pointers, arrays
-#   * Statements: if/else, while, for, return, break, continue,
-#     expression statements, blocks
-#   * Expressions with C operator precedence (assignment, ternary,
-#     logical, bitwise, comparison, shift, additive, multiplicative,
-#     unary, postfix, primary)
-#   * Function calls, array subscripts, member access, increment/decrement
-#   * Storage classes (static, extern, register, auto) and type
-#     qualifiers (const, volatile) — accepted but not validated
-#   * struct / union definitions and references (named, anonymous, forward)
-#   * enum definitions and references with optional explicit values
-#   * switch / case / default
-#   * typedef declarations and the typedef-name lexer hack — the host wires
-#     a token filter that rewrites IDENT to TYPEDEF_NAME based on a name
-#     table the parser maintains via a %hook on the declaration rule.
-#     See `plox.hooks.TypedefTracker` for the runtime piece.
+#   * Function definitions and declarations, variadic parameters,
+#     storage classes (incl. C23 ``constexpr`` / ``thread_local``),
+#     type qualifiers (``const`` / ``volatile`` / ``restrict`` /
+#     ``_Atomic``), the C23 ``_Noreturn``, ``_Static_assert`` /
+#     ``static_assert``, and ``alignas`` / ``alignof``.
+#   * All C23 built-in numeric types: ``char`` / ``short`` / ``int`` /
+#     ``long``, ``signed`` / ``unsigned``, ``float`` / ``double``,
+#     ``bool`` / ``_Bool``, ``_Complex`` / ``_Imaginary``,
+#     ``_Decimal32`` / ``_Decimal64`` / ``_Decimal128``, ``_BitInt(N)``.
+#   * Pointers, arrays (with full abstract declarators for casts /
+#     ``sizeof(type)`` / function-pointer types).
+#   * Statements: ``if`` / ``else``, ``while``, ``do``-``while``,
+#     ``for`` (with declaration init), ``switch`` / ``case`` /
+#     ``default`` (incl. ``default:``), ``return`` / ``break`` /
+#     ``continue`` / ``goto``, labelled statements, file-scope
+#     ``asm("...")``.
+#   * Expressions: full C operator-precedence ladder, assignment ops,
+#     ternary, ``sizeof`` / ``alignof``, ``__real__`` / ``__imag__``,
+#     compound literals, designated and range initializers,
+#     ``_Generic``, ``typeof`` / ``typeof_unqual``.
+#   * struct / union / enum (named, anonymous, forward) with bit-fields
+#     and embedded ``static_assert``. typedef declarations + the
+#     typedef-name lexer hack — the host wires a token filter that
+#     rewrites IDENT to TYPEDEF_NAME based on a name table the parser
+#     maintains via a ``%hook`` on the declaration rule. See
+#     ``plox.hooks.TypedefTracker`` for the runtime piece.
 #
-# Out of scope:
+# Deliberately delegated to the per-compiler preprocessor pass:
 #
-#   * Preprocessor (#include, #define, #if) — must be expanded upstream
-#   * Function-pointer casts `(int (*)(int)) p` — would need full abstract
-#     declarators in type_name. Pointer casts `(MyType *) p` are covered.
-#   * Variadic functions (...)
-#   * Compound literals, designated initializers, _Generic
-#   * Bit-fields
+#   * Preprocessor (``#include``, ``#define``, ``#if``) — expanded
+#     upstream. uc_core ships its own preprocessor that runs ahead of
+#     plox.
+#   * C23 attributes ``[[...]]`` and GCC ``__attribute__((...))`` —
+#     stripped at the same pre-plox layer (the legacy hand-written
+#     uc_core parser had a ``_skip_gcc_attribute`` shim that erased
+#     them).
 #
-# This grammar declares each keyword token explicitly (`KW_VOID = 'void'`)
-# rather than using `%keywords`, so the emitted code-side names retain the
-# C-idiomatic uppercase form.
+# This grammar declares each keyword token explicitly (`KW_VOID =
+# 'void'`) rather than using `%keywords`, so emitted code-side names
+# retain the C-idiomatic uppercase form. GCC ``__keyword`` /
+# ``__keyword__`` aliases collapse into one token per logical keyword
+# via regex alternation (longest-alternative-first).
 
-%grammar c_subset
+%grammar c23
 
 %options
 start = translation_unit
@@ -139,7 +150,7 @@ IDENT      = /[A-Za-z_][A-Za-z0-9_]*/
 
 # TYPEDEF_NAME is reachable only via the typedef-name lexer hack: the lexer
 # never produces it, because IDENT is declared first and wins on the same
-# pattern.  The c_subset host runs a token filter (see plox.hooks.TypedefTracker)
+# pattern.  The c23 host runs a token filter (see plox.hooks.TypedefTracker)
 # that rewrites IDENT to TYPEDEF_NAME for identifiers that have been typedef'd.
 TYPEDEF_NAME = /[A-Za-z_][A-Za-z0-9_]*/
 
