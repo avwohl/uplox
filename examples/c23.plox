@@ -393,7 +393,11 @@ RPAREN     = ')'
                  | <parameter>
                  ;
 
+# A parameter accepts either a regular (named) declarator, an abstract
+# (nameless) declarator — common in prototypes such as
+# ``int strlen(char *);`` — or just a type-spec list with neither.
 <parameter> : <decl_specs> <declarator>
+            | <decl_specs> <abstract_declarator>
             | <decl_specs>
             ;
 
