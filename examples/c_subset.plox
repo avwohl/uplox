@@ -213,7 +213,22 @@ RPAREN     = ')'
 
 <top_item> : <function_definition>
            | <declaration>
+           | <static_assert_declaration>
+           | <asm_declaration>
            ;
+
+# C11+ ``_Static_assert(cond)`` and ``_Static_assert(cond, msg)``,
+# spelled as either ``_Static_assert`` or the C23 ``static_assert``
+# keyword. Lives at top-level and inside structs (added separately
+# below).
+<static_assert_declaration>
+    : KW_STATIC_ASSERT LPAREN <conditional_expr> RPAREN SEMI
+    | KW_STATIC_ASSERT LPAREN <conditional_expr> COMMA STRING_LIT RPAREN SEMI
+    ;
+
+# GCC-style file-scope ``asm("...")``, used by uc80/uc386 corpus
+# headers to hint the assembler. Treated as opaque.
+<asm_declaration> : KW_ASM LPAREN STRING_LIT RPAREN SEMI ;
 
 # --- function definitions --------------------------------------------------
 
@@ -232,14 +247,40 @@ RPAREN     = ')'
             | <type_spec>
             ;
 
+# Storage class includes the C23 additions ``constexpr`` and
+# ``thread_local`` plus ``_Noreturn`` (C23 deprecated but still
+# grammatical) and the new alignment specifier ``_Alignas(...)``.
 <storage_class> : KW_STATIC | KW_EXTERN | KW_REGISTER | KW_AUTO | KW_INLINE
-                | KW_TYPEDEF
+                | KW_TYPEDEF | KW_CONSTEXPR | KW_THREAD_LOCAL | KW_NORETURN
+                | <alignment_specifier>
                 ;
 
-<type_qualifier> : KW_CONST | KW_VOLATILE ;
+<alignment_specifier> : KW_ALIGNAS LPAREN <type_name> RPAREN
+                      | KW_ALIGNAS LPAREN <conditional_expr> RPAREN
+                      ;
 
+# ``_Atomic`` is grammatically a qualifier here (the
+# ``_Atomic ( type-name )`` specifier form would conflict with the
+# qualifier-position form ``_Atomic int`` in LR(1) and is rare enough
+# in practice to defer). ``restrict`` is C99+ but accepted alongside
+# the older two qualifiers.
+<type_qualifier> : KW_CONST | KW_VOLATILE | KW_RESTRICT | KW_ATOMIC ;
+
+# Type specifiers cover all built-in C23 numeric types plus the
+# ``typeof(expr)`` / ``typeof_unqual(expr)`` forms (we always parse
+# the body as ``expr``; the typedef-name hack already resolves a
+# leading type identifier into TYPEDEF_NAME so ``typeof(MyInt)``
+# parses with ``MyInt`` lowering to a typedef reference inside
+# expression context) and ``_BitInt(N)``. struct / union / enum and
+# typedef-names ride through unchanged.
 <type_spec> : KW_VOID | KW_CHAR | KW_SHORT | KW_INT | KW_LONG
             | KW_SIGNED | KW_UNSIGNED
+            | KW_FLOAT | KW_DOUBLE | KW_BOOL
+            | KW_COMPLEX | KW_IMAGINARY
+            | KW_DECIMAL32 | KW_DECIMAL64 | KW_DECIMAL128
+            | KW_BITINT LPAREN <conditional_expr> RPAREN
+            | KW_TYPEOF LPAREN <expr> RPAREN
+            | KW_TYPEOF_UNQUAL LPAREN <expr> RPAREN
             | <struct_or_union_specifier>
             | <enum_specifier>
             | TYPEDEF_NAME
@@ -263,7 +304,9 @@ RPAREN     = ')'
 # init_declarator). Bit-fields written `name : width` (named) or `: width`
 # (anonymous, used for padding) parse via the explicit struct_declarator
 # non-terminal.
-<struct_decl> : <decl_specs> <struct_declarator_list> SEMI ;
+<struct_decl> : <decl_specs> <struct_declarator_list> SEMI
+              | <static_assert_declaration>           # C11+ allows static_assert inside struct
+              ;
 
 <struct_declarator_list> : <struct_declarator_list> COMMA <struct_declarator>
                          | <struct_declarator>
@@ -423,6 +466,8 @@ RPAREN     = ')'
 
 <block_item> : <declaration>
              | <stmt>
+             | <static_assert_declaration>
+             | <asm_declaration>
              ;
 
 <expression_stmt> : SEMI
@@ -565,6 +610,9 @@ RPAREN     = ')'
              | BANG  <cast_expr>
              | KW_SIZEOF <unary_expr>
              | KW_SIZEOF LPAREN <type_name> RPAREN
+             | KW_ALIGNOF LPAREN <type_name> RPAREN
+             | KW_REAL <cast_expr>                  # GCC __real__ x
+             | KW_IMAG <cast_expr>                  # GCC __imag__ x
              ;
 
 <postfix_expr> : <primary_expr>
@@ -581,8 +629,10 @@ RPAREN     = ')'
 
 <primary_expr> : IDENT
                | INT_LIT
+               | FLOAT_LIT
                | CHAR_LIT
                | STRING_LIT
+               | KW_NULLPTR
                | LPAREN <expr> RPAREN
                | KW_GENERIC LPAREN <assignment_expr> COMMA <generic_assoc_list> RPAREN
                ;

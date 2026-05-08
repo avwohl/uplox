@@ -62,10 +62,10 @@ def test_c_subset_no_conflicts(built):
 
 def test_c_subset_state_count_in_range(built):
     _scanner, table = built
-    # 1649 with struct/union/enum + switch + casts + array-size-as-expr +
-    # preproc skip. Allow generous slack so the test stays green through
-    # small grammar tweaks; flag if it explodes.
-    assert 700 <= len(table.states) <= 2600, len(table.states)
+    # 1649 → 2645 once the C23 type / qualifier / static_assert / typeof
+    # / asm / nullptr / alignof / __real__ / __imag__ / FLOAT_LIT
+    # additions land. Slack stays generous; flag if it explodes.
+    assert 700 <= len(table.states) <= 3500, len(table.states)
 
 
 def test_c_simple_function_definition(built):
