@@ -677,8 +677,24 @@ PIPE       = '|'
 # Statements
 # ===========================================================================
 
-<stmt_seq>         : <stmt>
-                   | <stmt_seq> <stmt>
+# A trailing label denotes an implicit null_statement at the end of a
+# sequence_of_statements (RM 5.1(7-8)). Common shape: ``<<Continue>>``
+# right before ``end loop;`` in goto-driven loops. Confining the bare
+# ``<<L>>`` form to a stmt_seq tail (rather than promoting it to <stmt>)
+# avoids the shift/reduce ambiguity with full ``<<L>> <unlabeled_stmt>``.
+# Building stmt_seq from a non-recursive <stmt_list> + optional trailing
+# label keeps follow(trailing_label) = the stmt_seq closer set (KW_end,
+# KW_when, etc.) and avoids LALR state-merging with stmt-starters.
+<stmt_seq>         : <stmt_list>
+                   | <stmt_list> <trailing_label>
+                   | <trailing_label>
+                   ;
+
+<stmt_list>        : <stmt>
+                   | <stmt_list> <stmt>
+                   ;
+
+<trailing_label>   : LSHIFT IDENT RSHIFT
                    ;
 
 # Subprogram bodies, blocks, and package init parts may have an
