@@ -810,10 +810,14 @@ PIPE       = '|'
                        | <discrete_choice_list> PIPE <discrete_choice>
                        ;
 
-<discrete_choice>  : <expr>
+<discrete_choice>  : <simple_expr>
                    | <simple_expr> DOTDOT <simple_expr>
                    | 'others'
                    ;
+# RM 3.8.1 restricts discrete_choice to a static simple expression or
+# range; using <simple_expr> (not <expr>) here keeps PIPE out of
+# followset(<relation>) and lets pipe-separated membership choices
+# (``X in A | B | C``) be parsed unambiguously by <relation> below.
 
 # Loops: plain ``loop ... end loop;``, ``while`` and ``for`` heads.
 <loop_stmt>        : <iteration_scheme> 'loop' <stmt_seq> 'end' 'loop' <opt_loop_label> SEMI ;
@@ -875,22 +879,24 @@ PIPE       = '|'
                    | <simple_expr> LE  <simple_expr>
                    | <simple_expr> GT  <simple_expr>
                    | <simple_expr> GE  <simple_expr>
-                   | <simple_expr> 'in' <simple_expr> DOTDOT <simple_expr>
-                   | <simple_expr> 'not' 'in' <simple_expr> DOTDOT <simple_expr>
-                   | <simple_expr> 'in' <simple_expr>
-                   | <simple_expr> 'not' 'in' <simple_expr>
+                   | <simple_expr> 'in' <membership_choice_list>
+                   | <simple_expr> 'not' 'in' <membership_choice_list>
                    ;
 
-# The bare-``in`` form (``X in T'Range``, ``X in Integer``) is enabled
-# above by the two extra alternatives. It works because every DOTDOT in
-# the grammar takes ``<simple_expr>`` operands (RM 3.6.1: a range bound
-# is a simple_expression, not an expression), keeping DOTDOT out of
-# followset(<relation>) and avoiding a shift/reduce against the
-# range-form ``<simple_expr> 'in' <simple_expr> DOTDOT <simple_expr>``.
-#
-# Pipe-separated membership choices (``X in A | B | C``) are still not
-# modelled — that one needs a real list non-terminal and is the next
-# remaining membership gap (~5 GNAT runtime files).
+# Membership choices (RM 4.5.2): a `|`-separated list of simple
+# expressions or ranges. Subsumes both the bare-``in`` form
+# (``X in T'Range``, ``X in Integer``) and the range form
+# (``X in 1 .. 10``), and adds pipe-separated alternatives
+# (``Cat in Control | Format | Surrogate``). DOTDOT operands are
+# ``<simple_expr>`` per RM 3.6.1, keeping DOTDOT out of
+# followset(<relation>) and the table conflict-free.
+<membership_choice_list> : <membership_choice>
+                         | <membership_choice_list> PIPE <membership_choice>
+                         ;
+
+<membership_choice> : <simple_expr>
+                    | <simple_expr> DOTDOT <simple_expr>
+                    ;
 
 <simple_expr>      : <term>
                    | PLUS  <term>
