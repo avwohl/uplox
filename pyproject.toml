@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 # squat on PyPI. PyPI dist, GitHub repo, Python module, CLI binary,
 # and .uplox grammar file extension all use the new name.
 name = "uplox"
-version = "2.0.0"
+version = "3.0.0"
 description = "Compiler front-end generator: grammar source to canonical JSON tables plus C/C++/Python/Lua drivers"
 readme = "README.md"
 license = "GPL-3.0-or-later"
