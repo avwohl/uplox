@@ -121,7 +121,12 @@ PIPE       = '|'
                    ;
 
 <one_unit>         : <context_clause> <library_unit>
+                   | <pragma>
                    ;
+# A pragma is itself a kind of compilation_unit (RM 10.1.1) — used for
+# configuration pragmas before a library_unit and library-unit pragmas
+# trailing one. Treating pragma as a standalone <one_unit> avoids the
+# context_item-vs-trailing-pragma ambiguity at unit boundaries.
 
 <context_clause>   : <context_clause> <context_item>
                    |
@@ -129,7 +134,6 @@ PIPE       = '|'
 
 <context_item>     : 'with' <ident_list> SEMI
                    | 'use'  <ident_list> SEMI
-                   | <pragma>
                    ;
 
 <library_unit>     : <subprogram_decl>
@@ -1006,6 +1010,7 @@ PIPE       = '|'
 # because the latter also appears as ``<derived_type_def>``'s body
 # (also ``new …``) — sharing the prefix triggers an LALR state-merge.
 <allocator>        : 'new' <name> TICK LPAREN <expr> RPAREN
+                   | 'new' <name> TICK <aggregate>
                    | 'new' <name>
                    ;
 
