@@ -203,7 +203,7 @@ PIPE       = '|'
 # permits ``Pkg.K => V`` and array-index-form named assocs; uada80
 # can post-process the IDENT to a SelectedName when needed.
 <expr_or_assoc>    : <expr>
-                   | <expr> DOTDOT <expr>
+                   | <simple_expr> DOTDOT <simple_expr>
                    | IDENT ARROW <expr>
                    | IDENT ARROW BOX
                    | INT_LIT ARROW <expr>
@@ -400,7 +400,7 @@ PIPE       = '|'
                     ;
 
 # ``component_name at expr range L .. H;``
-<component_clause>  : <name> 'at' <expr> 'range' <expr> DOTDOT <expr> SEMI
+<component_clause>  : <name> 'at' <expr> 'range' <simple_expr> DOTDOT <simple_expr> SEMI
                     ;
 
 # Renaming form ``E : exception renames Other;`` is technically
@@ -491,16 +491,16 @@ PIPE       = '|'
 # Floating-point: ``digits N [range L .. H]``; generic formal:
 # ``digits <>``.
 <float_type_def>   : 'digits' <expr>
-                   | 'digits' <expr> 'range' <expr> DOTDOT <expr>
+                   | 'digits' <expr> 'range' <simple_expr> DOTDOT <simple_expr>
                    | 'digits' BOX
                    ;
 
 # Fixed-point and decimal-fixed-point types. Generic formals use
 # ``<>`` as both the delta and digits placeholders.
 <fixed_type_def>   : 'delta' <expr>
-                   | 'delta' <expr> 'range' <expr> DOTDOT <expr>
+                   | 'delta' <expr> 'range' <simple_expr> DOTDOT <simple_expr>
                    | 'delta' <expr> 'digits' <expr>
-                   | 'delta' <expr> 'digits' <expr> 'range' <expr> DOTDOT <expr>
+                   | 'delta' <expr> 'digits' <expr> 'range' <simple_expr> DOTDOT <simple_expr>
                    | 'delta' BOX
                    | 'delta' BOX 'digits' BOX
                    ;
@@ -612,7 +612,7 @@ PIPE       = '|'
 
 # ``range L .. H`` or ``mod 256`` for plain integer types; ``range <>``
 # is the generic formal "any integer type" placeholder.
-<integer_type_def> : 'range' <expr> DOTDOT <expr>
+<integer_type_def> : 'range' <simple_expr> DOTDOT <simple_expr>
                    | 'range' BOX
                    | 'mod' <expr>
                    | 'mod' BOX
@@ -626,9 +626,9 @@ PIPE       = '|'
                         | <index_constraint_list> COMMA <index_constraint>
                         ;
 
-<index_constraint> : <expr> DOTDOT <expr>
+<index_constraint> : <simple_expr> DOTDOT <simple_expr>
                    | <name> 'range' BOX
-                   | <name> 'range' <expr> DOTDOT <expr>
+                   | <name> 'range' <simple_expr> DOTDOT <simple_expr>
                    | <name>
                    ;
 
@@ -654,9 +654,9 @@ PIPE       = '|'
 # optional explicit ``range L .. H`` tail. The ``not null`` prefix is
 # Ada 2005 — restricts an access subtype to never alias null.
 <subtype_indication> : <name>
-                     | <name> 'range' <expr> DOTDOT <expr>
+                     | <name> 'range' <simple_expr> DOTDOT <simple_expr>
                      | 'not' 'null' <name>
-                     | 'not' 'null' <name> 'range' <expr> DOTDOT <expr>
+                     | 'not' 'null' <name> 'range' <simple_expr> DOTDOT <simple_expr>
                      | 'not' 'null' 'access' <subtype_indication>
                      | 'not' 'null' 'access' 'all' <subtype_indication>
                      | 'not' 'null' 'access' 'constant' <subtype_indication>
@@ -811,7 +811,7 @@ PIPE       = '|'
                        ;
 
 <discrete_choice>  : <expr>
-                   | <expr> DOTDOT <expr>
+                   | <simple_expr> DOTDOT <simple_expr>
                    | 'others'
                    ;
 
@@ -830,9 +830,9 @@ PIPE       = '|'
                    |
                    ;
 
-<discrete_range>   : <expr> DOTDOT <expr>
+<discrete_range>   : <simple_expr> DOTDOT <simple_expr>
                    | <name>
-                   | <name> 'range' <expr> DOTDOT <expr>
+                   | <name> 'range' <simple_expr> DOTDOT <simple_expr>
                    ;
 
 <opt_loop_label>   : IDENT
@@ -877,12 +877,20 @@ PIPE       = '|'
                    | <simple_expr> GE  <simple_expr>
                    | <simple_expr> 'in' <simple_expr> DOTDOT <simple_expr>
                    | <simple_expr> 'not' 'in' <simple_expr> DOTDOT <simple_expr>
+                   | <simple_expr> 'in' <simple_expr>
+                   | <simple_expr> 'not' 'in' <simple_expr>
                    ;
 
-# Pipe-separated membership choices (``X in A | B | C``) are not
-# modelled — the LR(1) machinery can't keep the bare-``in`` form
-# disjoint from the pipe-form when both share the same simple_expr
-# right-hand side. Affects ~5 GNAT runtime files.
+# The bare-``in`` form (``X in T'Range``, ``X in Integer``) is enabled
+# above by the two extra alternatives. It works because every DOTDOT in
+# the grammar takes ``<simple_expr>`` operands (RM 3.6.1: a range bound
+# is a simple_expression, not an expression), keeping DOTDOT out of
+# followset(<relation>) and avoiding a shift/reduce against the
+# range-form ``<simple_expr> 'in' <simple_expr> DOTDOT <simple_expr>``.
+#
+# Pipe-separated membership choices (``X in A | B | C``) are still not
+# modelled — that one needs a real list non-terminal and is the next
+# remaining membership gap (~5 GNAT runtime files).
 
 <simple_expr>      : <term>
                    | PLUS  <term>
