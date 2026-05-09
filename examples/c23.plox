@@ -67,7 +67,7 @@ PREPROC    = /#([^\n\\]|\\\n|\\.)*/              %skip
 # a fractional part or exponent fall through to INT_LIT.  Suffixes:
 # ``f``/``F``/``l``/``L`` and the C23 decimal-float pairs
 # ``df``/``dd``/``dl`` / ``DF``/``DD``/``DL``.
-FLOAT_LIT  = /(0[xX]([0-9A-Fa-f]+\.[0-9A-Fa-f]*|\.[0-9A-Fa-f]+|[0-9A-Fa-f]+)[pP][+-]?[0-9]+|[0-9]+\.[0-9]*([eE][+-]?[0-9]+)?|\.[0-9]+([eE][+-]?[0-9]+)?|[0-9]+[eE][+-]?[0-9]+)([fFlL]|[dD][fFdDlL])?/
+FLOAT_LIT  = /(0[xX]([0-9A-Fa-f]+\.[0-9A-Fa-f]*|\.[0-9A-Fa-f]+|[0-9A-Fa-f]+)[pP][+-]?[0-9]+|[0-9]+\.[0-9]*([eE][+-]?[0-9]+)?|\.[0-9]+([eE][+-]?[0-9]+)?|[0-9]+[eE][+-]?[0-9]+)([fFlL]|[dD][fFdDlL])?[iIjJ]?/
 
 # Integer literals: decimal / hex / octal / binary. C23 added ``0b``
 # binary literals and the ``wb``/``uwb`` BitInt suffixes; the ``'``
@@ -145,6 +145,9 @@ KW_NULLPTR = 'nullptr'
 KW_ASM     = /__asm__|__asm|asm/
 KW_REAL    = /__real__|__real/
 KW_IMAG    = /__imag__|__imag/
+KW_VA_ARG  = /__builtin_va_arg|va_arg/
+KW_OFFSETOF = '__builtin_offsetof'
+KW_INT128  = /__int128_t|__int128|__uint128_t/
 
 IDENT      = /[A-Za-z_][A-Za-z0-9_]*/
 
@@ -289,6 +292,7 @@ RPAREN     = ')'
             | KW_FLOAT | KW_DOUBLE | KW_BOOL
             | KW_COMPLEX | KW_IMAGINARY
             | KW_DECIMAL32 | KW_DECIMAL64 | KW_DECIMAL128
+            | KW_INT128
             | KW_BITINT LPAREN <conditional_expr> RPAREN
             | KW_TYPEOF LPAREN <expr> RPAREN
             | KW_TYPEOF_UNQUAL LPAREN <expr> RPAREN
@@ -451,6 +455,7 @@ RPAREN     = ')'
                | <matched_iteration_stmt>
                | <matched_switch_stmt>
                | IDENT COLON <matched_stmt>
+               | IDENT COLON <declaration>
                | KW_CASE <conditional_expr> COLON <matched_stmt>
                | KW_DEFAULT COLON <matched_stmt>
                ;
@@ -666,7 +671,16 @@ RPAREN     = ')'
                | LPAREN <expr> RPAREN
                | LPAREN <compound_stmt> RPAREN
                | KW_GENERIC LPAREN <assignment_expr> COMMA <generic_assoc_list> RPAREN
+               | KW_VA_ARG LPAREN <assignment_expr> COMMA <type_name> RPAREN
+               | KW_OFFSETOF LPAREN <type_name> COMMA <offsetof_designator> RPAREN
                ;
+
+# offsetof's second argument is a member designator: an IDENT
+# optionally followed by a chain of ``.field`` and ``[expr]`` accesses.
+<offsetof_designator> : IDENT
+                      | <offsetof_designator> DOT IDENT
+                      | <offsetof_designator> LBRACKET <expr> RBRACKET
+                      ;
 
 # Adjacent string literals concatenate per C — ``"abc" "def"`` is one
 # string. Macro expansion routinely produces this shape (``"a" B "c"``
