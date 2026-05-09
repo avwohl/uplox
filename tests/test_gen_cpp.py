@@ -14,12 +14,12 @@ from pathlib import Path
 
 import pytest
 
-from plox.gen.cpp import emit_cpp
-from plox.lex.build import lex_from_ir
-from plox.parse.grammar import compile_grammar
-from plox.parse.lr1 import build_lr1
-from plox.spec.reader import read_source
-from plox.tables import dfa_to_json, empty_bundle, table_to_json
+from uplox.gen.cpp import emit_cpp
+from uplox.lex.build import lex_from_ir
+from uplox.parse.grammar import compile_grammar
+from uplox.parse.lr1 import build_lr1
+from uplox.spec.reader import read_source
+from uplox.tables import dfa_to_json, empty_bundle, table_to_json
 
 
 CXX = shutil.which("c++") or shutil.which("g++")
@@ -71,8 +71,8 @@ def build_bundle(src: str) -> dict:
 def emit_to_cpp(tmp_path: Path, bundle: dict, prefix: str | None = None) -> tuple[Path, Path]:
     header, impl = emit_cpp(bundle, prefix=prefix)
     name = (prefix or bundle["meta"]["grammar"]).lower()
-    h = tmp_path / f"plox_{name}.hpp"
-    c = tmp_path / f"plox_{name}.cpp"
+    h = tmp_path / f"uplox_{name}.hpp"
+    c = tmp_path / f"uplox_{name}.cpp"
     h.write_text(header)
     c.write_text(impl)
     return h, c
@@ -99,7 +99,7 @@ def cxx_compile(*sources: Path, out: Path, include: Path) -> None:
 
 def test_cpp_compiles_clean(tmp_path):
     _h, c = emit_to_cpp(tmp_path, build_bundle(CALC))
-    obj = tmp_path / "plox_calc.o"
+    obj = tmp_path / "uplox_calc.o"
     cxx_compile_object(c, obj, include=tmp_path)
     assert obj.exists()
 
@@ -132,14 +132,14 @@ NAME  = /[A-Za-z_][A-Za-z0-9_]*/
 
     driver = tmp_path / "driver.cpp"
     driver.write_text(r"""
-#include "plox_tf.hpp"
+#include "uplox_tf.hpp"
 #include <cstdio>
 #include <string>
 
 int main(int argc, char** argv) {
     std::string src = (argc > 1) ? argv[1] : "Tx;";
-    plox::tf::Parser p(src);
-    p.set_token_filter([](plox::tf::Parser&, int la_kind, std::string_view la_text) {
+    uplox::tf::Parser p(src);
+    p.set_token_filter([](uplox::tf::Parser&, int la_kind, std::string_view la_text) {
         if (la_kind == 3 /* IDENT */ && !la_text.empty() && la_text[0] == 'T') {
             return 4; /* NAME */
         }
@@ -152,7 +152,7 @@ int main(int argc, char** argv) {
     auto* root = p.root();
     auto* item = root->children[0];
     auto* first = item->children[0];
-    printf("%s\n", plox::tf::Parser::token_name(first->kind));
+    printf("%s\n", uplox::tf::Parser::token_name(first->kind));
     return 0;
 }
 """)
@@ -192,18 +192,18 @@ TNAME      = /[A-Za-z_][A-Za-z0-9_]*/
 
     driver = tmp_path / "driver.cpp"
     driver.write_text(r"""
-#include "plox_tnh.hpp"
+#include "uplox_tnh.hpp"
 #include <cstdio>
 #include <set>
 #include <string>
 
 int main(int argc, char** argv) {
     std::string src = (argc > 1) ? argv[1] : "typedef Foo; Foo;";
-    plox::tnh::Parser p(src);
+    uplox::tnh::Parser p(src);
     auto typedefs = std::make_shared<std::set<std::string>>();
 
-    p.set_token_filter([typedefs](plox::tnh::Parser&, int kind, std::string_view text) {
-        // PLOX_TNH_TOK_IDENT and TNAME aren't exposed as constants, but the
+    p.set_token_filter([typedefs](uplox::tnh::Parser&, int kind, std::string_view text) {
+        // UPLOX_TNH_TOK_IDENT and TNAME aren't exposed as constants, but the
         // alphabetical / declaration order makes their indices known: $=0, WS=1,
         // KW_TYPEDEF=2, SEMI=3, IDENT=4, TNAME=5.
         if (kind == 4 /* IDENT */ && typedefs->count(std::string(text))) {
@@ -211,7 +211,7 @@ int main(int argc, char** argv) {
         }
         return kind;
     });
-    p.set_post_reduce([typedefs](plox::tnh::Parser&, int prod, plox::tnh::Node* node) {
+    p.set_post_reduce([typedefs](uplox::tnh::Parser&, int prod, uplox::tnh::Node* node) {
         // Production 4: `decl : KW_TYPEDEF IDENT SEMI`.
         if (prod == 4 && node->children.size() >= 2) {
             typedefs->insert(std::string(node->children[1]->text));
@@ -225,8 +225,8 @@ int main(int argc, char** argv) {
     auto* root = p.root();
     auto* decls = root->children[0];
     // Linearise left-recursive `decls : decls decl | decl`.
-    std::vector<plox::tnh::Node*> items;
-    plox::tnh::Node* cur = decls;
+    std::vector<uplox::tnh::Node*> items;
+    uplox::tnh::Node* cur = decls;
     while (cur && !cur->is_terminal) {
         if (cur->children.size() == 2) {
             items.push_back(cur->children[1]);
@@ -263,8 +263,8 @@ CPP_CALC_DRIVER = """
 #include <iostream>
 #include <sstream>
 #include <string>
-#include "plox_calc.hpp"
-using namespace plox::calc;
+#include "uplox_calc.hpp"
+using namespace uplox::calc;
 
 static int evaluate(const Node *n) {
     if (n->is_terminal) {
@@ -312,7 +312,7 @@ def build_cpp_evaluator(tmp_path: Path) -> Path:
     driver = tmp_path / "main.cpp"
     driver.write_text(CPP_CALC_DRIVER)
     binary = tmp_path / "calc_cpp"
-    cxx_compile(driver, tmp_path / "plox_calc.cpp", out=binary, include=tmp_path)
+    cxx_compile(driver, tmp_path / "uplox_calc.cpp", out=binary, include=tmp_path)
     return binary
 
 
@@ -361,16 +361,16 @@ def test_cpp_syntax_error_lists_expected_tokens(tmp_path):
 CPP_TWO_DRIVER = """
 #include <cstring>
 #include <cstdio>
-#include "plox_calc.hpp"
-#include "plox_tiny.hpp"
+#include "uplox_calc.hpp"
+#include "uplox_tiny.hpp"
 
 int main() {
-    plox::calc::Parser calc("1 + 2");
-    plox::tiny::Parser tiny("aabb");
+    uplox::calc::Parser calc("1 + 2");
+    uplox::tiny::Parser tiny("aabb");
     bool calc_ok = calc.parse();
     bool tiny_ok = tiny.parse();
-    std::printf("calc rc=%d nt=%s\\n", calc_ok ? 0 : 1, calc_ok ? plox::calc::Parser::nt_name(calc.root()->kind) : "");
-    std::printf("tiny rc=%d nt=%s\\n", tiny_ok ? 0 : 1, tiny_ok ? plox::tiny::Parser::nt_name(tiny.root()->kind) : "");
+    std::printf("calc rc=%d nt=%s\\n", calc_ok ? 0 : 1, calc_ok ? uplox::calc::Parser::nt_name(calc.root()->kind) : "");
+    std::printf("tiny rc=%d nt=%s\\n", tiny_ok ? 0 : 1, tiny_ok ? uplox::tiny::Parser::nt_name(tiny.root()->kind) : "");
     return (calc_ok && tiny_ok) ? 0 : 1;
 }
 """
@@ -386,8 +386,8 @@ def test_cpp_two_grammars_link_together(tmp_path):
     binary = tmp_path / "two"
     cxx_compile(
         driver,
-        tmp_path / "plox_calc.cpp",
-        tmp_path / "plox_tiny.cpp",
+        tmp_path / "uplox_calc.cpp",
+        tmp_path / "uplox_tiny.cpp",
         out=binary, include=tmp_path,
     )
     r = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
@@ -405,7 +405,7 @@ def test_cpp_invalid_prefix_rejected():
 def test_cpp_header_uses_namespace(tmp_path):
     h, _c = emit_to_cpp(tmp_path, build_bundle(CALC))
     text = h.read_text()
-    assert "namespace plox::calc" in text
+    assert "namespace uplox::calc" in text
     assert "class Parser" in text
     assert "enum class Token" in text
     assert "enum class NonTerminal" in text
@@ -429,7 +429,7 @@ ACTION = '{' %balanced='}'
 
 
 def build_bal_bundle_cpp() -> dict:
-    from plox.lex.build import balanced_tokens
+    from uplox.lex.build import balanced_tokens
 
     ir = read_source(BAL_GRAMMAR_CPP)
     dfa, tokens, skip = lex_from_ir(ir)
@@ -454,9 +454,9 @@ def test_cpp_supports_balanced_token(tmp_path):
     driver.write_text(r"""
 #include <cstdio>
 #include <cstring>
-#include "plox_bal.hpp"
+#include "uplox_bal.hpp"
 
-using namespace plox::bal;
+using namespace uplox::bal;
 
 static void count_actions(const Node* n, int* lens, int cap, int& cnt) {
     if (!n) return;
@@ -501,10 +501,10 @@ def test_cpp_balanced_unterminated_returns_error(tmp_path):
     driver = tmp_path / "main.cpp"
     driver.write_text(r"""
 #include <cstdio>
-#include "plox_bal.hpp"
+#include "uplox_bal.hpp"
 int main(int argc, char** argv) {
     const char* src = (argc > 1) ? argv[1] : "x { unterminated";
-    plox::bal::Parser p(src);
+    uplox::bal::Parser p(src);
     bool ok = p.parse();
     if (!ok) std::fprintf(stderr, "%s\n", p.error().c_str());
     return ok ? 0 : 1;

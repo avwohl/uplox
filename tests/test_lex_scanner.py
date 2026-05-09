@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from plox.lex.dfa import from_nfa, minimise
-from plox.lex.nfa import build, combine
-from plox.lex.regex import parse as re_parse
-from plox.lex.scanner import ScanError, Scanner
+from uplox.lex.dfa import from_nfa, minimise
+from uplox.lex.nfa import build, combine
+from uplox.lex.regex import parse as re_parse
+from uplox.lex.scanner import ScanError, Scanner
 
 
 def make_scanner(specs: list[tuple[str, str]], skip: set[str] | None = None, minimised: bool = True) -> Scanner:
@@ -115,7 +115,7 @@ def test_scanner_round_trips_minimised_and_unminimised():
 
 
 def test_utf8_input_passes_through_byte_classes():
-    # plox lexer is byte-oriented, so we can match any byte sequence as raw bytes.
+    # uplox lexer is byte-oriented, so we can match any byte sequence as raw bytes.
     sc = make_scanner([
         ("LATIN", "[a-z]+"),
         ("OTHER", "[\\x80-\\xff]+"),

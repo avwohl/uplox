@@ -1,0 +1,23 @@
+# Demonstration of scope hooks. Pair with uplox.hooks.scoped_table_hooks
+# at the host driver level — register `block_scope` to push at pre_reduce
+# and pop at post_reduce.
+
+%grammar scoped
+
+%tokens
+LBRACE = '{'
+RBRACE = '}'
+ID     = /[a-z_][a-z0-9_]*/
+SEMI   = ';'
+WS     = /[ \t\n]+/   %skip
+
+%rules
+<prog>  : <block> ;
+
+<block> : '{' <stmts> '}'  %hook=block_scope ;
+
+<stmts> : <stmts> <stmt>
+        | ;
+
+<stmt>  : ID ';'
+        | <block> ;

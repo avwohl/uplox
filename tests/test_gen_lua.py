@@ -8,12 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from plox.gen.lua import emit_lua
-from plox.lex.build import lex_from_ir
-from plox.parse.grammar import compile_grammar
-from plox.parse.lr1 import build_lr1
-from plox.spec.reader import read_source
-from plox.tables import dfa_to_json, empty_bundle, table_to_json
+from uplox.gen.lua import emit_lua
+from uplox.lex.build import lex_from_ir
+from uplox.parse.grammar import compile_grammar
+from uplox.parse.lr1 import build_lr1
+from uplox.spec.reader import read_source
+from uplox.tables import dfa_to_json, empty_bundle, table_to_json
 
 
 # Lua may live in unusual paths; widen the search a bit.
@@ -65,7 +65,7 @@ def build_bundle() -> dict:
 
 LUA_DRIVER = """
 package.path = '%s/?.lua;' .. package.path
-local M = require('plox_calc')
+local M = require('uplox_calc')
 
 local input = io.read('*a')
 local p = M.new(input)
@@ -109,7 +109,7 @@ print(evaluate(p.root))
 def write_calc_module(tmp_path: Path) -> Path:
     bundle = build_bundle()
     text = emit_lua(bundle)
-    module_path = tmp_path / "plox_calc.lua"
+    module_path = tmp_path / "uplox_calc.lua"
     module_path.write_text(text)
     return module_path
 
@@ -173,7 +173,7 @@ def test_lua_module_loads_without_globals(tmp_path):
     driver.write_text(
         f"""
 package.path = '{tmp_path}/?.lua;' .. package.path
-local M = require('plox_calc')
+local M = require('uplox_calc')
 local p1 = M.new('1 + 2')
 local p2 = M.new('3 + 4')
 assert(p1 ~= p2, 'M.new should return distinct instances')
@@ -223,13 +223,13 @@ NAME  = /[A-Za-z_][A-Za-z0-9_]*/
     bundle["parse"] = table_to_json(table)
     text = emit_lua(bundle)
     assert "set_token_filter" in text
-    module_path = tmp_path / "plox_tf.lua"
+    module_path = tmp_path / "uplox_tf.lua"
     module_path.write_text(text)
 
     driver = tmp_path / "driver.lua"
     driver.write_text(rf"""
 package.path = '{tmp_path}/?.lua;' .. package.path
-local M = require('plox_tf')
+local M = require('uplox_tf')
 
 local p = M.new(arg[1] or "Tx;")
 -- IDENT is the third declared token (kind=3 in the 0-indexed enum: $, WS, SEMI, IDENT, NAME).
@@ -283,13 +283,13 @@ TNAME      = /[A-Za-z_][A-Za-z0-9_]*/
     bundle["parse"] = table_to_json(table)
     text = emit_lua(bundle)
     assert "set_post_reduce" in text
-    module_path = tmp_path / "plox_tnh.lua"
+    module_path = tmp_path / "uplox_tnh.lua"
     module_path.write_text(text)
 
     driver = tmp_path / "driver.lua"
     driver.write_text(rf"""
 package.path = '{tmp_path}/?.lua;' .. package.path
-local M = require('plox_tnh')
+local M = require('uplox_tnh')
 
 local p = M.new(arg[1] or "typedef Foo; Foo;")
 local typedefs = {{}}
@@ -359,7 +359,7 @@ ACTION = '{' %balanced='}'
 
 
 def build_bal_bundle_lua() -> dict:
-    from plox.lex.build import balanced_tokens
+    from uplox.lex.build import balanced_tokens
 
     ir = read_source(BAL_GRAMMAR_LUA)
     dfa, tokens, skip = lex_from_ir(ir)
@@ -379,13 +379,13 @@ def test_lua_supports_balanced_token(tmp_path):
     spans the full body, including the outer braces."""
     bundle = build_bal_bundle_lua()
     text = emit_lua(bundle)
-    (tmp_path / "plox_bal.lua").write_text(text)
+    (tmp_path / "uplox_bal.lua").write_text(text)
     assert "token_balanced" in text
 
     driver = tmp_path / "main.lua"
     driver.write_text(f"""
 package.path = '{tmp_path}/?.lua;' .. package.path
-local M = require('plox_bal')
+local M = require('uplox_bal')
 local p = M.new(arg[1])
 if not p:parse() then
     io.stderr:write('parse error: ' .. (p.error or '?') .. '\\n')
@@ -417,11 +417,11 @@ io.write('\\n')
 
 def test_lua_balanced_unterminated_returns_error(tmp_path):
     bundle = build_bal_bundle_lua()
-    (tmp_path / "plox_bal.lua").write_text(emit_lua(bundle))
+    (tmp_path / "uplox_bal.lua").write_text(emit_lua(bundle))
     driver = tmp_path / "main.lua"
     driver.write_text(f"""
 package.path = '{tmp_path}/?.lua;' .. package.path
-local M = require('plox_bal')
+local M = require('uplox_bal')
 local p = M.new('x {{ unterminated')
 local ok = p:parse()
 if not ok then io.stderr:write((p.error or '?') .. '\\n') end

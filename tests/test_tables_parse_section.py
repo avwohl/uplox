@@ -6,15 +6,15 @@ import json
 
 import pytest
 
-from plox.parse.grammar import compile_grammar
-from plox.parse.lr1 import (
+from uplox.parse.grammar import compile_grammar
+from uplox.parse.lr1 import (
     AcceptAction,
     ReduceAction,
     ShiftAction,
     build_lr1,
 )
-from plox.spec.reader import read_source
-from plox.tables import (
+from uplox.spec.reader import read_source
+from uplox.tables import (
     dump_bundle,
     empty_bundle,
     table_from_json,

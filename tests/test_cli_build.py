@@ -1,17 +1,17 @@
-"""End-to-end CLI tests: ``plox build`` produces a loadable bundle."""
+"""End-to-end CLI tests: ``uplox build`` produces a loadable bundle."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from plox.cli.main import main
-from plox.lex.scanner import Scanner
-from plox.tables import dfa_from_json
+from uplox.cli.main import main
+from uplox.lex.scanner import Scanner
+from uplox.tables import dfa_from_json
 
 
 def write_calc_grammar(tmp_path: Path) -> Path:
-    src = tmp_path / "calc.plox"
+    src = tmp_path / "calc.uplox"
     src.write_text(
         "%grammar calc\n"
         "%options\n"
@@ -33,7 +33,7 @@ def test_build_writes_bundle(tmp_path, capsys):
     rc = main(["build", str(src), "-o", str(out)])
     assert rc == 0
     bundle = json.loads(out.read_text())
-    assert bundle["plox_schema"] == "1"
+    assert bundle["uplox_schema"] == "1"
     assert bundle["meta"]["grammar"] == "calc"
     assert bundle["lex"]["tokens"] == ["NUMBER", "PLUS", "MINUS", "WS"]
     assert bundle["lex"]["skip"] == ["WS"]
@@ -69,7 +69,7 @@ def test_check_passes(tmp_path, capsys):
 
 
 def test_check_reports_reader_error(tmp_path, capsys):
-    src = tmp_path / "bad.plox"
+    src = tmp_path / "bad.uplox"
     src.write_text("not a grammar directive\n")
     rc = main(["check", str(src)])
     assert rc == 1
@@ -84,8 +84,8 @@ def test_emit_target_c_writes_files(tmp_path):
     out = tmp_path / "gen"
     rc = main(["emit", str(bundle), "--target", "c", "--out", str(out)])
     assert rc == 0
-    assert (out / "plox_calc.h").exists()
-    assert (out / "plox_calc.c").exists()
+    assert (out / "uplox_calc.h").exists()
+    assert (out / "uplox_calc.c").exists()
 
 
 def test_emit_target_cpp_writes_files(tmp_path):
@@ -95,8 +95,8 @@ def test_emit_target_cpp_writes_files(tmp_path):
     out = tmp_path / "gen"
     rc = main(["emit", str(bundle), "--target", "cpp", "--out", str(out)])
     assert rc == 0
-    assert (out / "plox_calc.hpp").exists()
-    assert (out / "plox_calc.cpp").exists()
+    assert (out / "uplox_calc.hpp").exists()
+    assert (out / "uplox_calc.cpp").exists()
 
 
 def test_emit_target_lua_writes_module(tmp_path):
@@ -106,7 +106,7 @@ def test_emit_target_lua_writes_module(tmp_path):
     out = tmp_path / "gen"
     rc = main(["emit", str(bundle), "--target", "lua", "--out", str(out)])
     assert rc == 0
-    assert (out / "plox_calc.lua").exists()
+    assert (out / "uplox_calc.lua").exists()
 
 
 def test_emit_target_py_writes_module(tmp_path):
@@ -116,7 +116,7 @@ def test_emit_target_py_writes_module(tmp_path):
     out = tmp_path / "gen"
     rc = main(["emit", str(bundle), "--target", "py", "--out", str(out)])
     assert rc == 0
-    assert (out / "plox_calc.py").exists()
+    assert (out / "uplox_calc.py").exists()
 
 
 def test_build_emits_parse_section(tmp_path):
@@ -141,7 +141,7 @@ def test_lex_only_skips_parse_section(tmp_path):
 
 
 def test_build_refuses_conflicts(tmp_path, capsys):
-    src = tmp_path / "amb.plox"
+    src = tmp_path / "amb.uplox"
     src.write_text(
         "%grammar amb\n"
         "%tokens\n"
@@ -205,7 +205,7 @@ def test_parse_command_rejects_lex_only_bundle(tmp_path, capsys):
 
 
 def test_check_reports_conflicts(tmp_path, capsys):
-    src = tmp_path / "amb.plox"
+    src = tmp_path / "amb.uplox"
     src.write_text(
         "%grammar amb\n"
         "%tokens\n"

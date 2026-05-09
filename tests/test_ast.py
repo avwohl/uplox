@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import json
 
-from plox.ast import AstNode, ast_from_json, ast_to_json, build_ast
-from plox.lex.build import lex_from_ir
-from plox.lex.scanner import Scanner, Token
-from plox.parse.grammar import compile_grammar
-from plox.parse.lr1 import build_lr1
-from plox.parse.runtime import ParseNode, parse
-from plox.spec.reader import read_source
+from uplox.ast import AstNode, ast_from_json, ast_to_json, build_ast
+from uplox.lex.build import lex_from_ir
+from uplox.lex.scanner import Scanner, Token
+from uplox.parse.grammar import compile_grammar
+from uplox.parse.lr1 import build_lr1
+from uplox.parse.runtime import ParseNode, parse
+from uplox.spec.reader import read_source
 
 
 CALC = """

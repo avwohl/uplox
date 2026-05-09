@@ -18,17 +18,17 @@ from pathlib import Path
 
 import pytest
 
-from plox.lex.build import lex_from_ir
-from plox.lex.scanner import Scanner
-from plox.parse.grammar import compile_grammar
-from plox.parse.lr1 import build_lr1
-from plox.parse.runtime import HookRegistry, ParseNode, parse
-from plox.spec.reader import read_file
+from uplox.lex.build import lex_from_ir
+from uplox.lex.scanner import Scanner
+from uplox.parse.grammar import compile_grammar
+from uplox.parse.lr1 import build_lr1
+from uplox.parse.runtime import HookRegistry, ParseNode, parse
+from uplox.spec.reader import read_file
 
 
-PLOX_REPO = Path(__file__).resolve().parents[1]
-PLM_FULL = PLOX_REPO / "examples" / "plm_full.plox"
-BDOS_PREFIX = PLOX_REPO / "tests" / "fixtures" / "bdos_prefix.plm"
+UPLOX_REPO = Path(__file__).resolve().parents[1]
+PLM_FULL = UPLOX_REPO / "examples" / "plm_full.uplox"
+BDOS_PREFIX = UPLOX_REPO / "tests" / "fixtures" / "bdos_prefix.plm"
 
 
 def plm_full_pipeline():

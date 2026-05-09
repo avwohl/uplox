@@ -1,5 +1,5 @@
-"""End-to-end tests for the PL/M preprocessor (`plox.preprocess.plm`)
-and its grammar (`examples/plm_pre.plox`).
+"""End-to-end tests for the PL/M preprocessor (`uplox.preprocess.plm`)
+and its grammar (`examples/plm_pre.uplox`).
 
 The preprocessor handles the parts of PL/M-80 that don't fit an LR core:
 LITERALLY macro substitution (including the EQU-as-LITERALLY-alias
@@ -14,16 +14,16 @@ from pathlib import Path
 
 import pytest
 
-from plox.lex.build import balanced_tokens, lex_from_ir
-from plox.lex.scanner import Scanner
-from plox.parse.grammar import compile_grammar
-from plox.parse.lr1 import build_lr1
-from plox.parse.runtime import HookRegistry, ParseNode, parse
-from plox.preprocess.plm import preprocess
-from plox.spec.reader import read_file
+from uplox.lex.build import balanced_tokens, lex_from_ir
+from uplox.lex.scanner import Scanner
+from uplox.parse.grammar import compile_grammar
+from uplox.parse.lr1 import build_lr1
+from uplox.parse.runtime import HookRegistry, ParseNode, parse
+from uplox.preprocess.plm import preprocess
+from uplox.spec.reader import read_file
 
-PLOX_REPO = Path(__file__).resolve().parents[1]
-PLM_FULL = PLOX_REPO / "examples" / "plm_full.plox"
+UPLOX_REPO = Path(__file__).resolve().parents[1]
+PLM_FULL = UPLOX_REPO / "examples" / "plm_full.uplox"
 
 
 @pytest.fixture(scope="module")
@@ -217,7 +217,7 @@ DECLARE X BYTE;
 
 # --- Real-corpus acceptance test --------------------------------------------
 #
-# The pipeline is the front-end for `uplm80`'s rewrite onto plox; the
+# The pipeline is the front-end for `uplm80`'s rewrite onto uplox; the
 # bar is "parses the .plm files that uplm80's existing test suite
 # parses, plus the MP/M-II source archive (`mpm2`)." This test runs
 # against the local `mpm2` checkout if present, skipping otherwise.
@@ -225,8 +225,8 @@ DECLARE X BYTE;
 # than in `uplm80`'s integration suite.
 
 import glob
-from plox.lex.scanner import ScanError
-from plox.parse.runtime import ParseError
+from uplox.lex.scanner import ScanError
+from uplox.parse.runtime import ParseError
 
 MPM2_DIR = Path("/home/wohl/src/mpm2")
 

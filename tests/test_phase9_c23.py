@@ -1,4 +1,4 @@
-"""Phase 9: c23.plox parses full C23.
+"""Phase 9: c23.uplox parses full C23.
 
 The grammar is the syntactic base of the uc_core port. The tests
 below pin the size of what we parse and assert
@@ -11,16 +11,16 @@ from pathlib import Path
 
 import pytest
 
-from plox.hooks import TypedefTracker
-from plox.lex.build import lex_from_ir
-from plox.lex.scanner import Scanner
-from plox.parse.grammar import compile_grammar
-from plox.parse.lr1 import build_lr1
-from plox.parse.runtime import HookRegistry, ParseNode, parse
-from plox.spec.reader import read_file
+from uplox.hooks import TypedefTracker
+from uplox.lex.build import lex_from_ir
+from uplox.lex.scanner import Scanner
+from uplox.parse.grammar import compile_grammar
+from uplox.parse.lr1 import build_lr1
+from uplox.parse.runtime import HookRegistry, ParseNode, parse
+from uplox.spec.reader import read_file
 
 
-C_SUBSET = Path(__file__).resolve().parents[1] / "examples" / "c23.plox"
+C_SUBSET = Path(__file__).resolve().parents[1] / "examples" / "c23.uplox"
 
 
 def c_pipeline():
@@ -714,7 +714,7 @@ def test_c_variadic_requires_one_named_param(built):
     ELLIPSIS."""
     scanner, table = built
     src = "int bad(...);\n"
-    from plox.parse.runtime import ParseError
+    from uplox.parse.runtime import ParseError
 
     with pytest.raises(ParseError):
         parse_str(scanner, table, src)

@@ -1,6 +1,6 @@
-# plox Lua backend
+# uplox Lua backend
 
-The Lua backend emits a single `plox_<grammar>.lua` module per grammar.
+The Lua backend emits a single `uplox_<grammar>.lua` module per grammar.
 Targets Lua 5.3 and later (uses integer division and bitops where useful;
 no LuaJIT-specific syntax).
 
@@ -9,7 +9,7 @@ no LuaJIT-specific syntax).
 For a grammar named `calc`:
 
 ```lua
-local M = require('plox_calc')
+local M = require('uplox_calc')
 
 -- Construct a parser over an input string.
 local parser = M.new(input)

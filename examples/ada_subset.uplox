@@ -1,0 +1,564 @@
+# Ada subset grammar — first uplox cut at Ada 2012.
+#
+# Targets the constructs used by Ada Conformity Assessment (ACATS)
+# helper packages such as ``acats/report.ada`` in the uada80 repo:
+# top-level packages, procedure / function declarations and bodies,
+# basic types (Integer / Boolean / Character / String + user enums and
+# integer ranges), variable / constant declarations, IF / CASE / LOOP /
+# FOR / WHILE / RETURN / EXIT / GOTO statements, attribute references
+# (``X'First``, ``X'Length``), aggregates, and ``with`` / ``use``
+# context clauses.
+#
+# Out of scope (defer to a future ada_full.uplox):
+#
+#   * Generics (generic_declaration, generic_instantiation).
+#   * Tasks and protected types.
+#   * Discriminated records, tagged types, interfaces, abstract types.
+#   * Access types.
+#   * Aspect specifications (``with Pre => P, Post => Q``).
+#   * Exceptions (raise, exception handlers).
+#   * Renamings, separate clauses.
+#
+# Lexer assumptions:
+#
+#   * The host (uada80 or similar) **uppercases reserved words** before
+#     handing the source to uplox. uplox's regex engine has no case-
+#     insensitive flag, and Ada keywords are case-insensitive — folding
+#     in the host keeps the grammar readable. Identifiers are *not*
+#     uppercased; their original casing flows through as token text.
+#     ACATS test sources happen to already be all-uppercase so they
+#     pass through unchanged.
+#
+#   * The host **expands character / string literal escapes** if any
+#     (Ada uses doubled quote ``""`` inside strings; the regex below
+#     recognises that).
+#
+#   * Comments (``-- ...`` to end of line) and whitespace are stripped
+#     by the WS / COMMENT token rules.
+
+%grammar ada_subset
+
+%options
+start = compilation_unit
+
+%keyword_prefix KW_
+%keywords
+ABORT ABS ABSTRACT ACCEPT ACCESS ALIASED ALL AND ARRAY AT
+BEGIN BODY CASE CONSTANT DECLARE DELAY DELTA DIGITS DO
+ELSE ELSIF END ENTRY EXCEPTION EXIT
+FOR FUNCTION GENERIC GOTO IF IN INTERFACE IS
+LIMITED LOOP MOD NEW NOT NULL OF OR OTHERS OUT OVERRIDING
+PACKAGE PARALLEL PRAGMA PRIVATE PROCEDURE PROTECTED
+RAISE RANGE RECORD REM RENAMES REQUEUE RETURN REVERSE
+SELECT SEPARATE SOME SUBTYPE SYNCHRONIZED
+TAGGED TASK TERMINATE THEN TYPE
+UNTIL USE WHEN WHILE WITH XOR
+TRUE FALSE
+
+%tokens
+WS         = /[ \t\r\n]+/                            %skip
+COMMENT    = /--[^\n]*/                              %skip
+
+# Character literal: a single character (or doubled quote ``''``) wrapped
+# in apostrophes. Matched before TICK so ``'A'`` reads as one token; a
+# bare ``'`` (in attribute references like ``X'First``) falls back to
+# the 1-char TICK token via uplox's longest-match rule.
+CHAR_LIT   = /'([^'\n]|'')'/
+
+# String literal: doubled quote escape, no newlines.
+STRING_LIT = /"([^"\n]|"")*"/
+
+# Numeric literals. Ada has decimal and based forms (``2#1010#``,
+# ``16#FF#``). Underscores can appear inside integers as digit
+# separators. Real literals are decimal-only here; based reals are
+# rare and deferred.
+INT_LIT    = /[0-9][0-9_]*([eE][+-]?[0-9_]+)?|[0-9]+#[0-9A-Fa-f][0-9A-Fa-f_]*#([eE][+-]?[0-9_]+)?/
+REAL_LIT   = /[0-9][0-9_]*\.[0-9][0-9_]*([eE][+-]?[0-9_]+)?/
+
+# Identifiers — letters, digits, underscores; must start with a letter.
+IDENT      = /[A-Za-z][A-Za-z0-9_]*/
+
+# Multi-char operators before single-char ones.
+ARROW      = '=>'
+DOTDOT     = '..'
+STARSTAR   = '**'
+ASSIGN     = ':='
+NEQ        = '/='
+LE         = '<='
+GE         = '>='
+LSHIFT     = '<<'
+RSHIFT     = '>>'
+BOX        = '<>'
+
+EQ         = '='
+LT         = '<'
+GT         = '>'
+PLUS       = '+'
+MINUS      = '-'
+STAR       = '*'
+SLASH      = '/'
+AMP        = '&'
+TICK       = /'/
+LPAREN     = '('
+RPAREN     = ')'
+COMMA      = ','
+SEMI       = ';'
+COLON      = ':'
+DOT        = '.'
+PIPE       = '|'
+
+%rules
+
+# ===========================================================================
+# Compilation unit
+# ===========================================================================
+#
+# A compilation unit is a sequence of context items (``with`` / ``use``)
+# followed by one library unit. Subunits and child units are deferred.
+
+# A source file may contain a sequence of compilation units (e.g.
+# package spec immediately followed by its body) — Ada doesn't require
+# them in separate files.
+<compilation_unit> : <unit_seq>
+                   ;
+
+<unit_seq>         : <one_unit>
+                   | <unit_seq> <one_unit>
+                   ;
+
+<one_unit>         : <context_clause> <library_unit>
+                   ;
+
+<context_clause>   : <context_clause> <context_item>
+                   |
+                   ;
+
+<context_item>     : KW_WITH <name_list> SEMI
+                   | KW_USE  <name_list> SEMI
+                   | <pragma>
+                   ;
+
+<library_unit>     : <subprogram_decl>
+                   | <subprogram_body>
+                   | <package_decl>
+                   | <package_body>
+                   ;
+
+# ===========================================================================
+# Pragmas
+# ===========================================================================
+
+<pragma>           : KW_PRAGMA IDENT SEMI
+                   | KW_PRAGMA IDENT LPAREN <pragma_args> RPAREN SEMI
+                   ;
+
+<pragma_args>      : <pragma_arg>
+                   | <pragma_args> COMMA <pragma_arg>
+                   ;
+
+<pragma_arg>       : <expr>
+                   | IDENT ARROW <expr>
+                   ;
+
+# ===========================================================================
+# Names — the universal "identifier chain with parens, dots, and ticks"
+#
+# In Ada, ``Name(Args)`` is syntactically the same shape regardless of
+# whether the name designates a function, an array, a type
+# (conversion), or a slice. Disambiguation belongs in the AST builder
+# / semantic phase, not here. Keeping it as a single non-terminal also
+# avoids the LALR conflicts that two parallel name forms would create.
+# ===========================================================================
+
+<name>             : IDENT
+                   | <name> DOT IDENT
+                   | <name> DOT KW_ALL
+                   | <name> LPAREN <expr_or_assoc_list> RPAREN
+                   | <name> TICK IDENT
+                   ;
+
+<name_list>        : <name>
+                   | <name_list> COMMA <name>
+                   ;
+
+# ``X(Y, Z)`` may be a function call, a positional aggregate-call,
+# an indexed component, or a type conversion. ``X(K => V)`` is a named
+# parameter association. Mixing positional and named is allowed.
+<expr_or_assoc_list> : <expr_or_assoc>
+                     | <expr_or_assoc_list> COMMA <expr_or_assoc>
+                     ;
+
+<expr_or_assoc>    : <expr>
+                   | <expr> DOTDOT <expr>
+                   | <name> ARROW <expr>
+                   | KW_OTHERS ARROW <expr>
+                   ;
+
+# ===========================================================================
+# Subprograms
+# ===========================================================================
+
+<subprogram_decl>  : <subprogram_spec> SEMI ;
+
+<subprogram_body>  : <subprogram_spec> KW_IS <decl_part> KW_BEGIN <stmt_seq> KW_END <opt_designator> SEMI ;
+
+<subprogram_spec>  : KW_PROCEDURE <designator> <formal_part_opt>
+                   | KW_FUNCTION  <designator> <formal_part_opt> KW_RETURN <name>
+                   ;
+
+<designator>       : IDENT
+                   | STRING_LIT
+                   ;
+
+<opt_designator>   : <designator>
+                   |
+                   ;
+
+<formal_part_opt>  : LPAREN <formal_param_list> RPAREN
+                   |
+                   ;
+
+<formal_param_list> : <formal_param>
+                    | <formal_param_list> SEMI <formal_param>
+                    ;
+
+# ``Name [, Name ...] : [in] [out] subtype [:= default]``
+<formal_param>     : <ident_list> COLON <mode> <name> <default_expr_opt>
+                   ;
+
+<mode>             : KW_IN
+                   | KW_OUT
+                   | KW_IN KW_OUT
+                   |
+                   ;
+
+<default_expr_opt> : ASSIGN <expr>
+                   |
+                   ;
+
+<ident_list>       : IDENT
+                   | <ident_list> COMMA IDENT
+                   ;
+
+# ===========================================================================
+# Packages
+# ===========================================================================
+
+<package_decl>     : KW_PACKAGE IDENT KW_IS <decl_part> <private_part_opt> KW_END <opt_designator> SEMI ;
+
+<private_part_opt> : KW_PRIVATE <decl_part>
+                   |
+                   ;
+
+<package_body>     : KW_PACKAGE KW_BODY IDENT KW_IS <decl_part> <init_part_opt> KW_END <opt_designator> SEMI ;
+
+<init_part_opt>    : KW_BEGIN <stmt_seq>
+                   |
+                   ;
+
+# ===========================================================================
+# Declarative parts
+# ===========================================================================
+#
+# Ada admits any mix of declarations in a declarative part — variable,
+# type, subtype, subprogram (decl or body), package, pragma, use clause.
+
+<decl_part>        : <decl_part> <decl_item>
+                   |
+                   ;
+
+<decl_item>        : <object_decl>
+                   | <type_decl>
+                   | <subtype_decl>
+                   | <subprogram_decl>
+                   | <subprogram_body>
+                   | <package_decl>
+                   | <package_body>
+                   | <use_clause>
+                   | <pragma>
+                   | <number_decl>
+                   ;
+
+<use_clause>       : KW_USE <name_list> SEMI
+                   | KW_USE KW_TYPE <name_list> SEMI
+                   ;
+
+# ``Pi : constant := 3.14;`` — number declaration without explicit type.
+<number_decl>      : <ident_list> COLON KW_CONSTANT ASSIGN <expr> SEMI ;
+
+# ``X, Y : [aliased] [constant] T [:= expr];``
+<object_decl>      : <ident_list> COLON <object_qualifiers> <subtype_indication> <init_opt> SEMI
+                   | <ident_list> COLON <object_qualifiers> <array_type_def> <init_opt> SEMI
+                   ;
+
+<object_qualifiers> : KW_ALIASED KW_CONSTANT
+                    | KW_ALIASED
+                    | KW_CONSTANT
+                    |
+                    ;
+
+<init_opt>         : ASSIGN <expr>
+                   |
+                   ;
+
+# ===========================================================================
+# Type & subtype declarations
+# ===========================================================================
+
+<subtype_decl>     : KW_SUBTYPE IDENT KW_IS <subtype_indication> SEMI ;
+
+<type_decl>        : KW_TYPE IDENT KW_IS <type_definition> SEMI
+                   | KW_TYPE IDENT SEMI                              # incomplete type
+                   ;
+
+<type_definition>  : <enum_type_def>
+                   | <integer_type_def>
+                   | <array_type_def>
+                   | <record_type_def>
+                   | KW_NEW <subtype_indication>                     # derived type
+                   ;
+
+<enum_type_def>    : LPAREN <enum_literal_list> RPAREN ;
+
+<enum_literal_list> : <enum_literal>
+                    | <enum_literal_list> COMMA <enum_literal>
+                    ;
+
+<enum_literal>     : IDENT
+                   | CHAR_LIT
+                   ;
+
+# ``range L .. H`` or ``mod 256``.
+<integer_type_def> : KW_RANGE <expr> DOTDOT <expr>
+                   | KW_MOD <expr>
+                   ;
+
+<array_type_def>   : KW_ARRAY LPAREN <index_constraint_list> RPAREN KW_OF <subtype_indication>
+                   ;
+
+<index_constraint_list> : <index_constraint>
+                        | <index_constraint_list> COMMA <index_constraint>
+                        ;
+
+<index_constraint> : <expr> DOTDOT <expr>
+                   | <name> KW_RANGE BOX
+                   | <name>
+                   ;
+
+<record_type_def>  : KW_RECORD <component_list> KW_END KW_RECORD
+                   | KW_NULL KW_RECORD
+                   ;
+
+<component_list>   : <component_list> <component_decl>
+                   |
+                   ;
+
+<component_decl>   : <ident_list> COLON <subtype_indication> <init_opt> SEMI
+                   ;
+
+# ===========================================================================
+# Subtype indications
+# ===========================================================================
+#
+# ``T``, ``T range L .. H``, ``T(L .. H)``.
+
+# A subtype indication is just a name (possibly with index / range
+# constraint parens) with an optional explicit ``range L .. H`` tail.
+# Index constraints like ``String(1..15)`` parse via the ``name``
+# alternative — the parens with a DOTDOT-form ``expr_or_assoc`` inside
+# are captured by the unified ``name LPAREN expr_or_assoc_list RPAREN``
+# rule. The semantic phase decides whether those parens are a call,
+# an index, or a constraint based on what the leading name resolves to.
+<subtype_indication> : <name>
+                     | <name> KW_RANGE <expr> DOTDOT <expr>
+                     ;
+
+# ===========================================================================
+# Statements
+# ===========================================================================
+
+<stmt_seq>         : <stmt>
+                   | <stmt_seq> <stmt>
+                   ;
+
+<stmt>             : <labeled_stmt>
+                   | <unlabeled_stmt>
+                   ;
+
+<labeled_stmt>     : LSHIFT IDENT RSHIFT <unlabeled_stmt>
+                   ;
+
+<unlabeled_stmt>   : <null_stmt>
+                   | <assignment_stmt>
+                   | <call_stmt>
+                   | <return_stmt>
+                   | <if_stmt>
+                   | <case_stmt>
+                   | <loop_stmt>
+                   | <exit_stmt>
+                   | <goto_stmt>
+                   | <block_stmt>
+                   | <pragma>
+                   ;
+
+<null_stmt>        : KW_NULL SEMI ;
+
+<assignment_stmt>  : <name> ASSIGN <expr> SEMI ;
+
+# ``Name;`` and ``Name(args);`` — both shapes are call statements.
+# Sharing ``<name>`` keeps this conflict-free.
+<call_stmt>        : <name> SEMI ;
+
+<return_stmt>      : KW_RETURN SEMI
+                   | KW_RETURN <expr> SEMI
+                   ;
+
+<if_stmt>          : KW_IF <expr> KW_THEN <stmt_seq> <elsif_part> <else_part> KW_END KW_IF SEMI ;
+
+<elsif_part>       : <elsif_part> KW_ELSIF <expr> KW_THEN <stmt_seq>
+                   |
+                   ;
+
+<else_part>        : KW_ELSE <stmt_seq>
+                   |
+                   ;
+
+<case_stmt>        : KW_CASE <expr> KW_IS <case_alternatives> KW_END KW_CASE SEMI ;
+
+<case_alternatives> : <case_alternatives> <case_alternative>
+                    | <case_alternative>
+                    ;
+
+<case_alternative> : KW_WHEN <discrete_choice_list> ARROW <stmt_seq>
+                   ;
+
+<discrete_choice_list> : <discrete_choice>
+                       | <discrete_choice_list> PIPE <discrete_choice>
+                       ;
+
+<discrete_choice>  : <expr>
+                   | <expr> DOTDOT <expr>
+                   | KW_OTHERS
+                   ;
+
+# Loops: plain ``loop ... end loop;``, ``while`` and ``for`` heads.
+<loop_stmt>        : <iteration_scheme> KW_LOOP <stmt_seq> KW_END KW_LOOP <opt_loop_label> SEMI ;
+
+<iteration_scheme> : KW_WHILE <expr>
+                   | KW_FOR IDENT KW_IN <reverse_opt> <discrete_range>
+                   |
+                   ;
+
+<reverse_opt>      : KW_REVERSE
+                   |
+                   ;
+
+<discrete_range>   : <expr> DOTDOT <expr>
+                   | <name>
+                   | <name> KW_RANGE <expr> DOTDOT <expr>
+                   ;
+
+<opt_loop_label>   : IDENT
+                   |
+                   ;
+
+<exit_stmt>        : KW_EXIT SEMI
+                   | KW_EXIT IDENT SEMI
+                   | KW_EXIT KW_WHEN <expr> SEMI
+                   | KW_EXIT IDENT KW_WHEN <expr> SEMI
+                   ;
+
+<goto_stmt>        : KW_GOTO IDENT SEMI ;
+
+<block_stmt>       : KW_DECLARE <decl_part> KW_BEGIN <stmt_seq> KW_END SEMI
+                   | KW_BEGIN <stmt_seq> KW_END SEMI
+                   ;
+
+# ===========================================================================
+# Expressions
+# ===========================================================================
+#
+# Ada's expression grammar is a flat 5-level ladder: relation, simple
+# expression, term, factor, primary. Boolean operators (``and``, ``or``,
+# ``and then``, ``or else``, ``xor``) sit above relations.
+# Short-circuit is two tokens, modelled as a separate alternative.
+
+<expr>             : <relation>
+                   | <expr> KW_AND <relation>
+                   | <expr> KW_AND KW_THEN <relation>
+                   | <expr> KW_OR <relation>
+                   | <expr> KW_OR KW_ELSE <relation>
+                   | <expr> KW_XOR <relation>
+                   ;
+
+<relation>         : <simple_expr>
+                   | <simple_expr> EQ  <simple_expr>
+                   | <simple_expr> NEQ <simple_expr>
+                   | <simple_expr> LT  <simple_expr>
+                   | <simple_expr> LE  <simple_expr>
+                   | <simple_expr> GT  <simple_expr>
+                   | <simple_expr> GE  <simple_expr>
+                   | <simple_expr> KW_IN <simple_expr> DOTDOT <simple_expr>
+                   | <simple_expr> KW_NOT KW_IN <simple_expr> DOTDOT <simple_expr>
+                   ;
+
+<simple_expr>      : <term>
+                   | PLUS  <term>
+                   | MINUS <term>
+                   | <simple_expr> PLUS  <term>
+                   | <simple_expr> MINUS <term>
+                   | <simple_expr> AMP   <term>
+                   ;
+
+<term>             : <factor>
+                   | <term> STAR  <factor>
+                   | <term> SLASH <factor>
+                   | <term> KW_MOD <factor>
+                   | <term> KW_REM <factor>
+                   ;
+
+<factor>           : <primary>
+                   | <primary> STARSTAR <primary>
+                   | KW_NOT <primary>
+                   | KW_ABS <primary>
+                   ;
+
+<primary>          : <name>
+                   | INT_LIT
+                   | REAL_LIT
+                   | CHAR_LIT
+                   | STRING_LIT
+                   | KW_NULL
+                   | KW_TRUE
+                   | KW_FALSE
+                   | LPAREN <expr> RPAREN
+                   | <aggregate>
+                   | <qualified_expr>
+                   ;
+
+# ``T'(expr)`` qualified expression / type conversion.
+<qualified_expr>   : <name> TICK LPAREN <expr> RPAREN
+                   ;
+
+# Aggregates: positional ``(a, b, c)`` (must have at least 2 elements
+# to disambiguate from parenthesised expression), or named
+# ``(Field => v, ...)`` / array-style ``(1 => v, 2..5 => w, others => x)``.
+# Single-element named aggregates need at least one ``ARROW`` to
+# disambiguate; that's enforced by the choice list rule.
+<aggregate>        : LPAREN <agg_positional_two_plus> RPAREN
+                   | LPAREN <agg_named_list> RPAREN
+                   ;
+
+<agg_positional_two_plus> : <expr> COMMA <agg_positional_tail>
+                          ;
+
+<agg_positional_tail> : <expr>
+                      | <expr> COMMA <agg_positional_tail>
+                      ;
+
+<agg_named_list>   : <agg_named_assoc>
+                   | <agg_named_list> COMMA <agg_named_assoc>
+                   ;
+
+<agg_named_assoc>  : <discrete_choice_list> ARROW <expr>
+                   ;

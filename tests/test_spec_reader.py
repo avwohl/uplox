@@ -1,10 +1,10 @@
-"""Bootstrap reader tests for the ``.plox`` DSL."""
+"""Bootstrap reader tests for the ``.uplox`` DSL."""
 
 from __future__ import annotations
 
 import pytest
 
-from plox.spec.reader import ReaderError, read_source
+from uplox.spec.reader import ReaderError, read_source
 
 CALC_SRC = """
 %grammar calc
@@ -28,7 +28,7 @@ recover    on_error
 
 
 def test_basic_parse():
-    ir = read_source(CALC_SRC, "calc.plox")
+    ir = read_source(CALC_SRC, "calc.uplox")
     assert ir.name == "calc"
     assert ir.start_symbol == "expr"
     assert ir.options["start"] == "expr"
@@ -102,10 +102,10 @@ TAB = '\\t'
 
 def test_lex_pipeline_from_ir():
     """Reader output feeds the lexer end-to-end."""
-    from plox.lex.build import lex_from_ir
-    from plox.lex.scanner import Scanner
+    from uplox.lex.build import lex_from_ir
+    from uplox.lex.scanner import Scanner
 
-    ir = read_source(CALC_SRC, "calc.plox")
+    ir = read_source(CALC_SRC, "calc.uplox")
     dfa, tokens, skip = lex_from_ir(ir)
     assert tokens == ["NUMBER", "PLUS", "MINUS", "WS"]
     assert skip == ["WS"]

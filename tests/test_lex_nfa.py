@@ -6,8 +6,8 @@ We don't yet have a DFA stage, so these tests verify the NFA structurally
 
 from __future__ import annotations
 
-from plox.lex.nfa import EPSILON, NFA, build, combine
-from plox.lex.regex import parse
+from uplox.lex.nfa import EPSILON, NFA, build, combine
+from uplox.lex.regex import parse
 
 
 def reachable(nfa: NFA, start: int) -> set[int]:

@@ -1,0 +1,25 @@
+# Deliberately ambiguous expression grammar for demonstrating the GLR runtime.
+# Plain `e : e '+' e | e '*' e | NUMBER` has shift/reduce on every binary op
+# — LR refuses, GLR enumerates both interpretations of `1 + 2 * 3`.
+#
+#     uplox build examples/ambig_expr.uplox -o /tmp/ambig.json   # fails (LR)
+#
+# To exercise this, build it manually in Python or rely on the GLR test suite —
+# the CLI build path requires conflict-free grammars.
+
+%grammar ambig_expr
+
+%tokens
+NUMBER = /[0-9]+/
+PLUS   = '+'
+STAR   = '*'
+LPAREN = '('
+RPAREN = ')'
+WS     = /[ \t\n]+/   %skip
+
+%rules
+<e> : <e> '+' <e>
+    | <e> '*' <e>
+    | '(' <e> ')'
+    | NUMBER
+    ;

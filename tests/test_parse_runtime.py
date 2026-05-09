@@ -4,18 +4,18 @@ from __future__ import annotations
 
 import pytest
 
-from plox.lex.build import lex_from_ir
-from plox.lex.scanner import Scanner
-from plox.parse.grammar import compile_grammar
-from plox.parse.lr1 import build_lr1
-from plox.parse.runtime import (
+from uplox.lex.build import lex_from_ir
+from uplox.lex.scanner import Scanner
+from uplox.parse.grammar import compile_grammar
+from uplox.parse.lr1 import build_lr1
+from uplox.parse.runtime import (
     HookRegistry,
     ParseContext,
     ParseError,
     ParseNode,
     parse,
 )
-from plox.spec.reader import read_source
+from uplox.spec.reader import read_source
 
 
 CALC = """

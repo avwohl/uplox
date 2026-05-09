@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from plox.parse.grammar import (
+from uplox.parse.grammar import (
     AUGMENTED_START,
     END_MARKER,
     EPSILON,
     GrammarError,
     compile_grammar,
 )
-from plox.spec.reader import read_source
+from uplox.spec.reader import read_source
 
 
 CALC = """

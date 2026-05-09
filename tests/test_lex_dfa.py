@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from plox.lex.dfa import DEAD, DFA, from_nfa, minimise
-from plox.lex.nfa import build, combine
-from plox.lex.regex import parse
+from uplox.lex.dfa import DEAD, DFA, from_nfa, minimise
+from uplox.lex.nfa import build, combine
+from uplox.lex.regex import parse
 
 
 def run(dfa: DFA, text: str) -> tuple[bool, str]:
@@ -12,7 +12,7 @@ def run(dfa: DFA, text: str) -> tuple[bool, str]:
 
     Used as a tiny end-to-end check that the DFA tables actually recognise what
     the regex was supposed to accept. The real scanner with longest-match
-    backtracking lives in :mod:`plox.lex.scanner`.
+    backtracking lives in :mod:`uplox.lex.scanner`.
     """
     state = dfa.start
     last_accept_name = ""

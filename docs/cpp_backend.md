@@ -1,7 +1,7 @@
-# plox C++ backend
+# uplox C++ backend
 
 The C++ backend emits a `.hpp` / `.cpp` pair per grammar in a per-grammar
-namespace `plox::<grammar>`. The mechanics mirror the C backend (see
+namespace `uplox::<grammar>`. The mechanics mirror the C backend (see
 [`c_backend.md`](c_backend.md)) but the surface is idiomatic C++17:
 RAII lifetimes, `std::function` callbacks, `std::string_view` lexemes.
 
@@ -10,7 +10,7 @@ RAII lifetimes, `std::function` callbacks, `std::string_view` lexemes.
 For a grammar named `calc`:
 
 ```cpp
-namespace plox::calc {
+namespace uplox::calc {
 
 struct Node {
     bool             is_terminal = false;
@@ -51,14 +51,14 @@ public:
     void set_post_reduce(PostReduce f);
 };
 
-}  // namespace plox::calc
+}  // namespace uplox::calc
 ```
 
 ## Re-entrancy
 
 Same guarantee as the C backend: every parser instance keeps state on
 its own object, generated names are namespaced. Two grammars built with
-plox link into the same binary cleanly. The pImpl pattern hides table
+uplox link into the same binary cleanly. The pImpl pattern hides table
 storage and helper types from the public header so two grammars with
 overlapping internal names don't collide at the linker.
 
@@ -77,7 +77,7 @@ or 0). After the DFA matches a balanced token, `next_token()` extends
 the match by counting nested open/close pairs in the input until depth
 returns to zero. An unmatched close surfaces as a parse error through
 the same path as a lexical error. Same shape as the C backend's
-`plox_<g>_token_balanced[]`.
+`uplox_<g>_token_balanced[]`.
 
 ## Worked example
 

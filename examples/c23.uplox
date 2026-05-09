@@ -1,0 +1,706 @@
+# C23 grammar — syntactic base for the uc_core / uc80 / uc386 port.
+#
+# Covers full C23 syntax in scope for those compilers:
+#
+#   * Function definitions and declarations, variadic parameters,
+#     storage classes (incl. C23 ``constexpr`` / ``thread_local``),
+#     type qualifiers (``const`` / ``volatile`` / ``restrict`` /
+#     ``_Atomic``), the C23 ``_Noreturn``, ``_Static_assert`` /
+#     ``static_assert``, and ``alignas`` / ``alignof``.
+#   * All C23 built-in numeric types: ``char`` / ``short`` / ``int`` /
+#     ``long``, ``signed`` / ``unsigned``, ``float`` / ``double``,
+#     ``bool`` / ``_Bool``, ``_Complex`` / ``_Imaginary``,
+#     ``_Decimal32`` / ``_Decimal64`` / ``_Decimal128``, ``_BitInt(N)``.
+#   * Pointers, arrays (with full abstract declarators for casts /
+#     ``sizeof(type)`` / function-pointer types).
+#   * Statements: ``if`` / ``else``, ``while``, ``do``-``while``,
+#     ``for`` (with declaration init), ``switch`` / ``case`` /
+#     ``default`` (incl. ``default:``), ``return`` / ``break`` /
+#     ``continue`` / ``goto``, labelled statements, file-scope
+#     ``asm("...")``.
+#   * Expressions: full C operator-precedence ladder, assignment ops,
+#     ternary, ``sizeof`` / ``alignof``, ``__real__`` / ``__imag__``,
+#     compound literals, designated and range initializers,
+#     ``_Generic``, ``typeof`` / ``typeof_unqual``.
+#   * struct / union / enum (named, anonymous, forward) with bit-fields
+#     and embedded ``static_assert``. typedef declarations + the
+#     typedef-name lexer hack — the host wires a token filter that
+#     rewrites IDENT to TYPEDEF_NAME based on a name table the parser
+#     maintains via a ``%hook`` on the declaration rule. See
+#     ``uplox.hooks.TypedefTracker`` for the runtime piece.
+#
+# Deliberately delegated to the per-compiler preprocessor pass:
+#
+#   * Preprocessor (``#include``, ``#define``, ``#if``) — expanded
+#     upstream. uc_core ships its own preprocessor that runs ahead of
+#     uplox.
+#   * C23 attributes ``[[...]]`` and GCC ``__attribute__((...))`` —
+#     stripped at the same pre-uplox layer (the legacy hand-written
+#     uc_core parser had a ``_skip_gcc_attribute`` shim that erased
+#     them).
+#
+# This grammar declares each keyword token explicitly (`KW_VOID =
+# 'void'`) rather than using `%keywords`, so emitted code-side names
+# retain the C-idiomatic uppercase form. GCC ``__keyword`` /
+# ``__keyword__`` aliases collapse into one token per logical keyword
+# via regex alternation (longest-alternative-first).
+
+%grammar c23
+
+%options
+start = translation_unit
+
+%tokens
+WS         = /[ \t\r\n\x0c\x0b]+/                %skip
+LINE_COMMENT = /\/\/[^\n]*/                      %skip
+BLOCK_COMMENT = /\/\*([^*]|\*+[^*\/])*\*+\//     %skip
+
+# Preprocessor lines are dropped by the lexer — they belong to a separate
+# pass that hosts run before uplox sees the input.
+PREPROC    = /#([^\n\\]|\\\n|\\.)*/              %skip
+
+# Numeric and string literals.
+#
+# Floating literals — declared before INT_LIT so the digit-leading
+# overlap resolves to FLOAT_LIT only when at least one of ``.`` /
+# exponent / hex-float ``p`` is present. Plain integer digits without
+# a fractional part or exponent fall through to INT_LIT.  Suffixes:
+# ``f``/``F``/``l``/``L`` and the C23 decimal-float pairs
+# ``df``/``dd``/``dl`` / ``DF``/``DD``/``DL``.
+FLOAT_LIT  = /(0[xX]([0-9A-Fa-f]+\.[0-9A-Fa-f]*|\.[0-9A-Fa-f]+|[0-9A-Fa-f]+)[pP][+-]?[0-9]+|[0-9]+\.[0-9]*([eE][+-]?[0-9]+)?|\.[0-9]+([eE][+-]?[0-9]+)?|[0-9]+[eE][+-]?[0-9]+)([fFlL]|[dD][fFdDlL])?[iIjJ]?/
+
+# Integer literals: decimal / hex / octal / binary. C23 added ``0b``
+# binary literals and the ``wb``/``uwb`` BitInt suffixes; the ``'``
+# digit separator is also C23 (e.g. ``1'000'000``). All standard
+# integer suffixes (``u``/``l``/``ll`` and any case mix) are accepted.
+INT_LIT    = /(0[xX][0-9A-Fa-f]+('[0-9A-Fa-f]+)*|0[bB][01]+('[01]+)*|0[0-7]*('[0-7]+)*|[1-9][0-9]*('[0-9]+)*)([uU]?(ll|LL|[lL])?|(ll|LL|[lL])[uU]?|[uU]?wb|[uU]?WB|wb[uU]?|WB[uU]?)/
+
+# Char literals. Optional encoding prefix ``u8``/``u``/``U``/``L``
+# (C23 explicitly added ``u8`` for char literals; the others were
+# already in C11).
+CHAR_LIT   = /(u8|u|U|L)?'([^'\\\n]|\\.)+'/
+
+# String literals. Same encoding-prefix set as char literals.
+STRING_LIT = /(u8|u|U|L)?"([^"\\\n]|\\.)*"/
+
+# Keywords. Must come before IDENT.
+#
+# Many keywords here have GCC ``__keyword__`` / ``__keyword`` aliases that
+# real-world C source uses (typically inside system headers). uc_core's
+# legacy lexer mapped them to the same token; we do the same with a regex
+# alternation. Longest alternatives go first so the DFA resolves
+# ``__const__`` to KW_CONST rather than IDENT.
+KW_VOID    = 'void'
+KW_CHAR    = 'char'
+KW_SHORT   = 'short'
+KW_INT     = 'int'
+KW_LONG    = 'long'
+KW_SIGNED  = /__signed__|__signed|signed/
+KW_UNSIGNED = 'unsigned'
+KW_FLOAT   = 'float'
+KW_DOUBLE  = 'double'
+KW_BOOL    = /_Bool|bool/
+KW_COMPLEX = /__complex__|__complex|_Complex/
+KW_IMAGINARY = '_Imaginary'
+KW_DECIMAL32 = '_Decimal32'
+KW_DECIMAL64 = '_Decimal64'
+KW_DECIMAL128 = '_Decimal128'
+KW_BITINT  = '_BitInt'
+KW_CONST   = /__const__|__const|const/
+KW_VOLATILE = /__volatile__|__volatile|volatile/
+KW_RESTRICT = /__restrict__|__restrict|restrict/
+KW_ATOMIC  = '_Atomic'
+KW_STATIC  = 'static'
+KW_EXTERN  = 'extern'
+KW_REGISTER = 'register'
+KW_AUTO    = 'auto'
+KW_INLINE  = /__inline__|__inline|inline/
+KW_NORETURN = '_Noreturn'
+KW_CONSTEXPR = 'constexpr'
+KW_THREAD_LOCAL = /thread_local|_Thread_local/
+KW_RETURN  = 'return'
+KW_IF      = 'if'
+KW_ELSE    = 'else'
+KW_WHILE   = 'while'
+KW_DO      = 'do'
+KW_FOR     = 'for'
+KW_BREAK   = 'break'
+KW_CONTINUE = 'continue'
+KW_GOTO    = 'goto'
+KW_SIZEOF  = 'sizeof'
+KW_ALIGNOF = /_Alignof|alignof|__alignof__|__alignof/
+KW_ALIGNAS = /_Alignas|alignas/
+KW_STRUCT  = 'struct'
+KW_UNION   = 'union'
+KW_ENUM    = 'enum'
+KW_TYPEDEF = 'typedef'
+KW_SWITCH  = 'switch'
+KW_CASE    = 'case'
+KW_DEFAULT = 'default'
+KW_GENERIC = '_Generic'
+KW_STATIC_ASSERT = /_Static_assert|static_assert/
+KW_TYPEOF  = /__typeof__|__typeof|typeof/
+KW_TYPEOF_UNQUAL = 'typeof_unqual'
+KW_NULLPTR = 'nullptr'
+KW_ASM     = /__asm__|__asm|asm/
+KW_REAL    = /__real__|__real/
+KW_IMAG    = /__imag__|__imag/
+KW_VA_ARG  = /__builtin_va_arg|va_arg/
+KW_OFFSETOF = '__builtin_offsetof'
+KW_INT128  = /__int128_t|__int128|__uint128_t/
+
+IDENT      = /[A-Za-z_][A-Za-z0-9_]*/
+
+# TYPEDEF_NAME is reachable only via the typedef-name lexer hack: the lexer
+# never produces it, because IDENT is declared first and wins on the same
+# pattern.  The c23 host runs a token filter (see uplox.hooks.TypedefTracker)
+# that rewrites IDENT to TYPEDEF_NAME for identifiers that have been typedef'd.
+TYPEDEF_NAME = /[A-Za-z_][A-Za-z0-9_]*/
+
+# C23 attribute delimiters ``[[`` / ``]]``. Must precede the single
+# bracket tokens so the DFA picks the doubled form when present —
+# attributes appear in declarators / type-specs and the ambiguous
+# context is small enough that no alternative parse uses ``[[``.
+DOUBLE_LBRACKET = '[['
+DOUBLE_RBRACKET = ']]'
+
+# Multi-char operators (each must precede its prefix).
+ARROW      = '->'
+INC        = '++'
+DEC        = '--'
+LSHIFT     = '<<'
+RSHIFT     = '>>'
+LE         = '<='
+GE         = '>='
+EQ         = '=='
+NE         = '!='
+LAND       = '&&'
+LOR        = '||'
+ELLIPSIS   = '...'
+PLUS_EQ    = '+='
+MINUS_EQ   = '-='
+STAR_EQ    = '*='
+SLASH_EQ   = '/='
+PERCENT_EQ = '%='
+AMP_EQ     = '&='
+PIPE_EQ    = '|='
+CARET_EQ   = '^='
+LSHIFT_EQ  = '<<='
+RSHIFT_EQ  = '>>='
+
+# Single-char operators / delimiters.
+ASSIGN     = '='
+LT         = '<'
+GT         = '>'
+PLUS       = '+'
+MINUS      = '-'
+STAR       = '*'
+SLASH      = '/'
+PERCENT    = '%'
+AMP        = '&'
+PIPE       = '|'
+CARET      = '^'
+TILDE      = '~'
+BANG       = '!'
+QUESTION   = '?'
+COLON      = ':'
+SEMI       = ';'
+COMMA      = ','
+DOT        = '.'
+LBRACE     = '{'
+RBRACE     = '}'
+LBRACKET   = '['
+RBRACKET   = ']'
+LPAREN     = '('
+RPAREN     = ')'
+
+%rules
+
+# A C translation unit is a sequence of top-level declarations and
+# function definitions.
+<translation_unit> : <top_items>
+                   ;
+
+<top_items> : <top_items> <top_item>
+            | <top_item>
+            ;
+
+<top_item> : <function_definition>
+           | <declaration>
+           | <static_assert_declaration>
+           | <asm_declaration>
+           ;
+
+# C11+ ``_Static_assert(cond)`` and ``_Static_assert(cond, msg)``,
+# spelled as either ``_Static_assert`` or the C23 ``static_assert``
+# keyword. Lives at top-level and inside structs (added separately
+# below).
+<static_assert_declaration>
+    : KW_STATIC_ASSERT LPAREN <conditional_expr> RPAREN SEMI
+    | KW_STATIC_ASSERT LPAREN <conditional_expr> COMMA STRING_LIT RPAREN SEMI
+    ;
+
+# GCC-style file-scope ``asm("...")``, used by uc80/uc386 corpus
+# headers to hint the assembler. Treated as opaque.
+<asm_declaration> : KW_ASM LPAREN STRING_LIT RPAREN SEMI ;
+
+# --- function definitions --------------------------------------------------
+
+<function_definition> : <decl_specs> <declarator> <compound_stmt> ;
+
+# --- declarations ----------------------------------------------------------
+
+<declaration> : <decl_specs> <init_declarator_list_opt> SEMI %hook=record_typedef ;
+
+<decl_specs> : <decl_specs> <decl_spec>
+             | <decl_spec>
+             ;
+
+<decl_spec> : <storage_class>
+            | <type_qualifier>
+            | <type_spec>
+            ;
+
+# Storage class includes the C23 additions ``constexpr`` and
+# ``thread_local`` plus ``_Noreturn`` (C23 deprecated but still
+# grammatical) and the new alignment specifier ``_Alignas(...)``.
+<storage_class> : KW_STATIC | KW_EXTERN | KW_REGISTER | KW_AUTO | KW_INLINE
+                | KW_TYPEDEF | KW_CONSTEXPR | KW_THREAD_LOCAL | KW_NORETURN
+                | <alignment_specifier>
+                ;
+
+<alignment_specifier> : KW_ALIGNAS LPAREN <type_name> RPAREN
+                      | KW_ALIGNAS LPAREN <conditional_expr> RPAREN
+                      ;
+
+# ``_Atomic`` is grammatically a qualifier here (the
+# ``_Atomic ( type-name )`` specifier form would conflict with the
+# qualifier-position form ``_Atomic int`` in LR(1) and is rare enough
+# in practice to defer). ``restrict`` is C99+ but accepted alongside
+# the older two qualifiers.
+<type_qualifier> : KW_CONST | KW_VOLATILE | KW_RESTRICT | KW_ATOMIC ;
+
+# Type specifiers cover all built-in C23 numeric types plus the
+# ``typeof(expr)`` / ``typeof_unqual(expr)`` forms (we always parse
+# the body as ``expr``; the typedef-name hack already resolves a
+# leading type identifier into TYPEDEF_NAME so ``typeof(MyInt)``
+# parses with ``MyInt`` lowering to a typedef reference inside
+# expression context) and ``_BitInt(N)``. struct / union / enum and
+# typedef-names ride through unchanged.
+<type_spec> : KW_VOID | KW_CHAR | KW_SHORT | KW_INT | KW_LONG
+            | KW_SIGNED | KW_UNSIGNED
+            | KW_FLOAT | KW_DOUBLE | KW_BOOL
+            | KW_COMPLEX | KW_IMAGINARY
+            | KW_DECIMAL32 | KW_DECIMAL64 | KW_DECIMAL128
+            | KW_INT128
+            | KW_BITINT LPAREN <conditional_expr> RPAREN
+            | KW_TYPEOF LPAREN <expr> RPAREN
+            | KW_TYPEOF_UNQUAL LPAREN <expr> RPAREN
+            | <struct_or_union_specifier>
+            | <enum_specifier>
+            | TYPEDEF_NAME
+            ;
+
+# struct / union: a tag + body, just a body, or just a tag (reference or
+# forward decl). Empty bodies are not modelled here — uc_core does not use
+# them and standard C disallows them at this level.
+<struct_or_union_specifier> : <struct_or_union> IDENT LBRACE <struct_decl_list> RBRACE
+                            | <struct_or_union> LBRACE <struct_decl_list> RBRACE
+                            | <struct_or_union> IDENT LBRACE RBRACE
+                            | <struct_or_union> LBRACE RBRACE
+                            | <struct_or_union> IDENT
+                            ;
+
+<struct_or_union> : KW_STRUCT | KW_UNION ;
+
+<struct_decl_list> : <struct_decl_list> <struct_decl>
+                   | <struct_decl>
+                   ;
+
+# Members: typed declarators, no initializers (different from the top-level
+# init_declarator). Bit-fields written `name : width` (named) or `: width`
+# (anonymous, used for padding) parse via the explicit struct_declarator
+# non-terminal.
+<struct_decl> : <decl_specs> <struct_declarator_list> SEMI
+              | <decl_specs> SEMI                     # C11+ anonymous struct/union member
+              | <static_assert_declaration>           # C11+ allows static_assert inside struct
+              ;
+
+<struct_declarator_list> : <struct_declarator_list> COMMA <struct_declarator>
+                         | <struct_declarator>
+                         ;
+
+<struct_declarator> : <declarator>
+                    | <declarator> COLON <conditional_expr>
+                    | COLON <conditional_expr>
+                    ;
+
+# enum: tag + body (with or without trailing comma), just a body, or just a tag.
+<enum_specifier> : KW_ENUM IDENT LBRACE <enumerator_list> RBRACE
+                 | KW_ENUM IDENT LBRACE <enumerator_list> COMMA RBRACE
+                 | KW_ENUM LBRACE <enumerator_list> RBRACE
+                 | KW_ENUM LBRACE <enumerator_list> COMMA RBRACE
+                 | KW_ENUM IDENT
+                 ;
+
+<enumerator_list> : <enumerator_list> COMMA <enumerator>
+                  | <enumerator>
+                  ;
+
+# Enumerator values are constant expressions; conditional_expr is the C
+# standard's "constant-expression" non-terminal — it excludes both
+# assignment and the comma operator.
+<enumerator> : IDENT
+             | IDENT ASSIGN <conditional_expr>
+             ;
+
+<init_declarator_list_opt> : <init_declarator_list>
+                           |
+                           ;
+
+<init_declarator_list> : <init_declarator_list> COMMA <init_declarator>
+                       | <init_declarator>
+                       ;
+
+<init_declarator> : <declarator>
+                  | <declarator> ASSIGN <initializer>
+                  ;
+
+# Declarators allow pointer prefixes and either array brackets or a
+# function-parameter parenthesis suffix.
+<declarator> : <pointer> <direct_declarator>
+             | <direct_declarator>
+             ;
+
+<pointer> : <pointer> STAR <type_qualifier_list_opt>
+          | STAR <type_qualifier_list_opt>
+          ;
+
+<type_qualifier_list_opt> : <type_qualifier_list>
+                          |
+                          ;
+
+<type_qualifier_list> : <type_qualifier_list> <type_qualifier>
+                      | <type_qualifier>
+                      ;
+
+<direct_declarator> : IDENT
+                    | LPAREN <declarator> RPAREN
+                    | <direct_declarator> LBRACKET <type_qualifier_list_opt> <conditional_expr> RBRACKET
+                    | <direct_declarator> LBRACKET <type_qualifier_list_opt> RBRACKET
+                    | <direct_declarator> LBRACKET <type_qualifier_list_opt> STAR RBRACKET
+                    | <direct_declarator> LBRACKET KW_STATIC <type_qualifier_list_opt> <conditional_expr> RBRACKET
+                    | <direct_declarator> LBRACKET <type_qualifier_list> KW_STATIC <conditional_expr> RBRACKET
+                    | <direct_declarator> LPAREN <parameter_type_list> RPAREN
+                    | <direct_declarator> LPAREN RPAREN
+                    ;
+
+<parameter_type_list> : <parameter_list>
+                      | <parameter_list> COMMA ELLIPSIS
+                      ;
+
+<parameter_list> : <parameter_list> COMMA <parameter>
+                 | <parameter>
+                 ;
+
+# A parameter accepts either a regular (named) declarator, an abstract
+# (nameless) declarator — common in prototypes such as
+# ``int strlen(char *);`` — or just a type-spec list with neither.
+<parameter> : <decl_specs> <declarator>
+            | <decl_specs> <abstract_declarator>
+            | <decl_specs>
+            ;
+
+<initializer> : <assignment_expr>
+              | LBRACE <initializer_list> RBRACE
+              | LBRACE <initializer_list> COMMA RBRACE
+              | LBRACE RBRACE
+              ;
+
+# C99 designated initializers: any element can be prefixed by a
+# designator-list followed by `=`.
+<initializer_list> : <initializer_list> COMMA <designated_initializer>
+                   | <designated_initializer>
+                   ;
+
+<designated_initializer> : <initializer>
+                         | <designation> <initializer>
+                         ;
+
+<designation> : <designator_list> ASSIGN ;
+
+<designator_list> : <designator_list> <designator>
+                  | <designator>
+                  ;
+
+<designator> : LBRACKET <conditional_expr> RBRACKET
+             | LBRACKET <conditional_expr> ELLIPSIS <conditional_expr> RBRACKET
+             | DOT IDENT
+             ;
+
+# --- statements ------------------------------------------------------------
+
+<stmt> : <matched_stmt>
+       | <unmatched_stmt>
+       ;
+
+# Threading the matched/unmatched discipline through labels and loop
+# bodies. iteration_stmt's body is a stmt (which can be unmatched) — that
+# would re-introduce the dangling-else conflict if iteration_stmt itself
+# could appear in a position where ELSE follows.
+<matched_stmt> : <matched_if>
+               | <compound_stmt>
+               | <expression_stmt>
+               | <jump_stmt>
+               | <matched_iteration_stmt>
+               | <matched_switch_stmt>
+               | IDENT COLON <matched_stmt>
+               | IDENT COLON <declaration>
+               | KW_CASE <conditional_expr> COLON <matched_stmt>
+               | KW_DEFAULT COLON <matched_stmt>
+               ;
+
+<unmatched_stmt> : <unmatched_if>
+                 | <unmatched_iteration_stmt>
+                 | <unmatched_switch_stmt>
+                 | IDENT COLON <unmatched_stmt>
+                 | KW_CASE <conditional_expr> COLON <unmatched_stmt>
+                 | KW_DEFAULT COLON <unmatched_stmt>
+                 ;
+
+<matched_if> : KW_IF LPAREN <expr> RPAREN <matched_stmt> KW_ELSE <matched_stmt> ;
+<unmatched_if> : KW_IF LPAREN <expr> RPAREN <stmt>
+               | KW_IF LPAREN <expr> RPAREN <matched_stmt> KW_ELSE <unmatched_stmt>
+               ;
+
+<matched_iteration_stmt> : KW_WHILE LPAREN <expr> RPAREN <matched_stmt>
+                         | KW_DO <matched_stmt> KW_WHILE LPAREN <expr> RPAREN SEMI
+                         | KW_FOR LPAREN <for_init> <for_cond_opt> SEMI <for_step_opt> RPAREN <matched_stmt>
+                         ;
+
+<unmatched_iteration_stmt> : KW_WHILE LPAREN <expr> RPAREN <unmatched_stmt>
+                           | KW_FOR LPAREN <for_init> <for_cond_opt> SEMI <for_step_opt> RPAREN <unmatched_stmt>
+                           ;
+
+# switch is matched/unmatched on the body it wraps, just like iteration.
+<matched_switch_stmt> : KW_SWITCH LPAREN <expr> RPAREN <matched_stmt> ;
+<unmatched_switch_stmt> : KW_SWITCH LPAREN <expr> RPAREN <unmatched_stmt> ;
+
+<compound_stmt> : LBRACE <block_items> RBRACE ;
+
+<block_items> : <block_items> <block_item>
+              |
+              ;
+
+<block_item> : <declaration>
+             | <stmt>
+             | <static_assert_declaration>
+             | <asm_declaration>
+             ;
+
+<expression_stmt> : SEMI
+                  | <expr> SEMI
+                  ;
+
+# `for (e; e; e)` and `for (decl e; e)` — covers both classical and C99 forms.
+<for_init> : <declaration>
+           | <expression_stmt>
+           ;
+
+<for_cond_opt> : <expr>
+               |
+               ;
+
+<for_step_opt> : <expr>
+               |
+               ;
+
+<jump_stmt> : KW_GOTO IDENT SEMI
+            | KW_CONTINUE SEMI
+            | KW_BREAK SEMI
+            | KW_RETURN SEMI
+            | KW_RETURN <expr> SEMI
+            ;
+
+# --- expressions -----------------------------------------------------------
+# Standard C precedence ladder. We stop at assignment_expr for places where
+# comma-expressions are forbidden (function arguments, initializers,
+# declaration sizes); use `expr` (which folds in comma) at the top level.
+
+<expr> : <assignment_expr>
+       | <expr> COMMA <assignment_expr>
+       ;
+
+<assignment_expr> : <conditional_expr>
+                  | <unary_expr> ASSIGN     <assignment_expr>
+                  | <unary_expr> PLUS_EQ    <assignment_expr>
+                  | <unary_expr> MINUS_EQ   <assignment_expr>
+                  | <unary_expr> STAR_EQ    <assignment_expr>
+                  | <unary_expr> SLASH_EQ   <assignment_expr>
+                  | <unary_expr> PERCENT_EQ <assignment_expr>
+                  | <unary_expr> AMP_EQ     <assignment_expr>
+                  | <unary_expr> PIPE_EQ    <assignment_expr>
+                  | <unary_expr> CARET_EQ   <assignment_expr>
+                  | <unary_expr> LSHIFT_EQ  <assignment_expr>
+                  | <unary_expr> RSHIFT_EQ  <assignment_expr>
+                  ;
+
+<conditional_expr> : <logical_or_expr>
+                   | <logical_or_expr> QUESTION <expr> COLON <conditional_expr>
+                   ;
+
+<logical_or_expr> : <logical_or_expr> LOR <logical_and_expr>
+                  | <logical_and_expr>
+                  ;
+
+<logical_and_expr> : <logical_and_expr> LAND <inclusive_or_expr>
+                   | <inclusive_or_expr>
+                   ;
+
+<inclusive_or_expr> : <inclusive_or_expr> PIPE <exclusive_or_expr>
+                    | <exclusive_or_expr>
+                    ;
+
+<exclusive_or_expr> : <exclusive_or_expr> CARET <and_expr>
+                    | <and_expr>
+                    ;
+
+<and_expr> : <and_expr> AMP <equality_expr>
+           | <equality_expr>
+           ;
+
+<equality_expr> : <equality_expr> EQ <relational_expr>
+                | <equality_expr> NE <relational_expr>
+                | <relational_expr>
+                ;
+
+<relational_expr> : <relational_expr> LT <shift_expr>
+                  | <relational_expr> GT <shift_expr>
+                  | <relational_expr> LE <shift_expr>
+                  | <relational_expr> GE <shift_expr>
+                  | <shift_expr>
+                  ;
+
+<shift_expr> : <shift_expr> LSHIFT <additive_expr>
+             | <shift_expr> RSHIFT <additive_expr>
+             | <additive_expr>
+             ;
+
+<additive_expr> : <additive_expr> PLUS  <multiplicative_expr>
+                | <additive_expr> MINUS <multiplicative_expr>
+                | <multiplicative_expr>
+                ;
+
+<multiplicative_expr> : <multiplicative_expr> STAR    <cast_expr>
+                      | <multiplicative_expr> SLASH   <cast_expr>
+                      | <multiplicative_expr> PERCENT <cast_expr>
+                      | <cast_expr>
+                      ;
+
+# Casts use the typedef-name lexer hack: after the host installs a token
+# filter and a typedef-tracking hook, `(MyInt) x` lexes its IDENT as
+# TYPEDEF_NAME, which disambiguates `LPAREN type_name RPAREN cast_expr`
+# (a cast) from `LPAREN expr RPAREN op ...` (a parenthesised expression).
+<cast_expr> : <unary_expr>
+            | LPAREN <type_name> RPAREN <cast_expr>
+            ;
+
+# Abstract declarator — the right-hand side of casts, compound-literal
+# types, and _Generic associations.
+<type_name> : <decl_specs>
+            | <decl_specs> <abstract_declarator>
+            ;
+
+<abstract_declarator> : <pointer>
+                      | <pointer> <direct_abstract_declarator>
+                      | <direct_abstract_declarator>
+                      ;
+
+<direct_abstract_declarator> : LPAREN <abstract_declarator> RPAREN
+                             | <direct_abstract_declarator> LBRACKET <type_qualifier_list_opt> <conditional_expr> RBRACKET
+                             | <direct_abstract_declarator> LBRACKET <type_qualifier_list_opt> RBRACKET
+                             | <direct_abstract_declarator> LBRACKET <type_qualifier_list_opt> STAR RBRACKET
+                             | <direct_abstract_declarator> LBRACKET KW_STATIC <type_qualifier_list_opt> <conditional_expr> RBRACKET
+                             | <direct_abstract_declarator> LBRACKET <type_qualifier_list> KW_STATIC <conditional_expr> RBRACKET
+                             | <direct_abstract_declarator> LPAREN <parameter_type_list> RPAREN
+                             | <direct_abstract_declarator> LPAREN RPAREN
+                             | LBRACKET <type_qualifier_list_opt> <conditional_expr> RBRACKET
+                             | LBRACKET <type_qualifier_list_opt> RBRACKET
+                             | LBRACKET <type_qualifier_list_opt> STAR RBRACKET
+                             | LBRACKET KW_STATIC <type_qualifier_list_opt> <conditional_expr> RBRACKET
+                             | LBRACKET <type_qualifier_list> KW_STATIC <conditional_expr> RBRACKET
+                             | LPAREN <parameter_type_list> RPAREN
+                             | LPAREN RPAREN
+                             ;
+
+<unary_expr> : <postfix_expr>
+             | INC <unary_expr>
+             | DEC <unary_expr>
+             | AMP   <cast_expr>
+             | STAR  <cast_expr>
+             | PLUS  <cast_expr>
+             | MINUS <cast_expr>
+             | TILDE <cast_expr>
+             | BANG  <cast_expr>
+             | KW_SIZEOF <unary_expr>
+             | KW_SIZEOF LPAREN <type_name> RPAREN
+             | KW_ALIGNOF LPAREN <type_name> RPAREN
+             | KW_REAL <cast_expr>                  # GCC __real__ x
+             | KW_IMAG <cast_expr>                  # GCC __imag__ x
+             ;
+
+<postfix_expr> : <primary_expr>
+               | <postfix_expr> LBRACKET <expr> RBRACKET
+               | <postfix_expr> LPAREN <argument_list> RPAREN
+               | <postfix_expr> LPAREN RPAREN
+               | <postfix_expr> DOT IDENT
+               | <postfix_expr> ARROW IDENT
+               | <postfix_expr> INC
+               | <postfix_expr> DEC
+               | LPAREN <type_name> RPAREN LBRACE <initializer_list> RBRACE
+               | LPAREN <type_name> RPAREN LBRACE <initializer_list> COMMA RBRACE
+               | LPAREN <type_name> RPAREN LBRACE RBRACE
+               ;
+
+<primary_expr> : IDENT
+               | INT_LIT
+               | FLOAT_LIT
+               | CHAR_LIT
+               | <string_literal>
+               | KW_NULLPTR
+               | LPAREN <expr> RPAREN
+               | LPAREN <compound_stmt> RPAREN
+               | KW_GENERIC LPAREN <assignment_expr> COMMA <generic_assoc_list> RPAREN
+               | KW_VA_ARG LPAREN <assignment_expr> COMMA <type_name> RPAREN
+               | KW_OFFSETOF LPAREN <type_name> COMMA <offsetof_designator> RPAREN
+               ;
+
+# offsetof's second argument is a member designator: an IDENT
+# optionally followed by a chain of ``.field`` and ``[expr]`` accesses.
+<offsetof_designator> : IDENT
+                      | <offsetof_designator> DOT IDENT
+                      | <offsetof_designator> LBRACKET <expr> RBRACKET
+                      ;
+
+# Adjacent string literals concatenate per C — ``"abc" "def"`` is one
+# string. Macro expansion routinely produces this shape (``"a" B "c"``
+# where ``B`` is ``"b"``). Modelled as a left-recursive list so the
+# lexer doesn't have to glue tokens together.
+<string_literal> : STRING_LIT
+                 | <string_literal> STRING_LIT
+                 ;
+
+<generic_assoc_list> : <generic_assoc_list> COMMA <generic_association>
+                     | <generic_association>
+                     ;
+
+# Each association is `type_name : expr` or `default : expr`. The COLON is
+# unambiguous in this context — _Generic is the only place an association
+# list appears.
+<generic_association> : <type_name> COLON <assignment_expr>
+                      | KW_DEFAULT COLON <assignment_expr>
+                      ;
+
+<argument_list> : <argument_list> COMMA <assignment_expr>
+                | <assignment_expr>
+                ;

@@ -14,14 +14,14 @@ from __future__ import annotations
 
 import pytest
 
-from plox.lex.build import lex_from_ir
-from plox.lex.scanner import Scanner, Token
-from plox.parse.glr import GLRParseError, glr_from_lr, glr_parse
-from plox.parse.glr.runtime import AmbiguityNode, GLRNode
-from plox.parse.grammar import compile_grammar
-from plox.parse.lr1 import build_lr1
-from plox.parse.runtime import parse as lr_parse
-from plox.spec.reader import read_source
+from uplox.lex.build import lex_from_ir
+from uplox.lex.scanner import Scanner, Token
+from uplox.parse.glr import GLRParseError, glr_from_lr, glr_parse
+from uplox.parse.glr.runtime import AmbiguityNode, GLRNode
+from uplox.parse.grammar import compile_grammar
+from uplox.parse.lr1 import build_lr1
+from uplox.parse.runtime import parse as lr_parse
+from uplox.spec.reader import read_source
 
 
 # ---- unambiguous regression: calc.
@@ -76,7 +76,7 @@ def test_glr_matches_lr_shape_on_calc():
     # The kinds and structural shapes must match — same productions used,
     # same RHS counts at each level.
     def shape(node) -> object:
-        from plox.parse.runtime import ParseNode
+        from uplox.parse.runtime import ParseNode
 
         if isinstance(node, Token):
             return ("T", node.name)

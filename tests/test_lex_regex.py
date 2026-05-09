@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from plox.lex.regex import (
+from uplox.lex.regex import (
     Alt,
     CharClass,
     Concat,

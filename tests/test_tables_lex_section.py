@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import json
 
-from plox.lex.dfa import from_nfa, minimise
-from plox.lex.nfa import build, combine
-from plox.lex.regex import parse as re_parse
-from plox.lex.scanner import Scanner
-from plox.tables import dfa_from_json, dfa_to_json, dump_bundle, empty_bundle
+from uplox.lex.dfa import from_nfa, minimise
+from uplox.lex.nfa import build, combine
+from uplox.lex.regex import parse as re_parse
+from uplox.lex.scanner import Scanner
+from uplox.tables import dfa_from_json, dfa_to_json, dump_bundle, empty_bundle
 
 
 def make_calc_dfa():
@@ -66,7 +66,7 @@ def test_unknown_key_is_ignored():
 
 
 def test_empty_dfa_round_trip():
-    from plox.lex.dfa import DFA  # local import — only needed for this fixture
+    from uplox.lex.dfa import DFA  # local import — only needed for this fixture
 
     dfa = DFA(transitions=[[-1] * 256], accepts={}, start=0)
     section = dfa_to_json(dfa, tokens=[], skip=[])

@@ -158,5 +158,5 @@ DECLARE
        15:   OPEN FILE
        16:   CLOSE FILE
        17:   SEARCH FOR FIRST OCCURRENCE
-    /* end of plox-parseable prefix */
+    /* end of uplox-parseable prefix */
 END BDOS;

@@ -1,11 +1,11 @@
-# plox grammar source format (`.plox`)
+# uplox grammar source format (`.uplox`)
 
-The canonical example is [`examples/plox_self.plox`](../examples/plox_self.plox),
-the .plox grammar that describes the .plox DSL itself.
+The canonical example is [`examples/uplox_self.uplox`](../examples/uplox_self.uplox),
+the .uplox grammar that describes the .uplox DSL itself.
 
 ## File shape
 
-A `.plox` file starts with `%grammar`, then has any combination of
+A `.uplox` file starts with `%grammar`, then has any combination of
 sections and one-shot directives:
 
 ```
@@ -19,7 +19,7 @@ sections and one-shot directives:
 ```
 
 `%grammar` declares the grammar name, which becomes the prefix for every
-generated symbol in every backend (`plox_<name>_ctx`, `<name>_parse()`, …).
+generated symbol in every backend (`uplox_<name>_ctx`, `<name>_parse()`, …).
 The name must match `[A-Za-z_][A-Za-z0-9_]*`.
 
 Lines beginning with `#` are comments. Blank lines are ignored. Sections
@@ -94,7 +94,7 @@ MINUS   = '-'
   token: the DFA matches only the opening pattern, and the runtime
   extends the match by counting nested instances of (open, close) until
   depth returns to zero. Used for content that is not a regular language —
-  target-language action bodies inside the .plox DSL itself are the
+  target-language action bodies inside the .uplox DSL itself are the
   canonical example.
 
 Token names match `[A-Za-z_][A-Za-z0-9_]*`. There is no case rule —
@@ -139,7 +139,7 @@ to a single production.
 * `%hook=<name>` attaches a hook to a single production. The hook's name
   must match a `%hooks` entry. The runtime fires it at both `pre_reduce`
   and `post_reduce` for every reduction of that production.
-* `{ … }` is the semantic action — opaque target-language source. plox
+* `{ … }` is the semantic action — opaque target-language source. uplox
   does not parse the contents; it copies the text verbatim into the JSON
   bundle and leaves interpretation to the backend.
 * `$$`, `$1`, `$2`, … inside actions are passed through unchanged. Backends
@@ -174,13 +174,13 @@ LR(1) conflicts are reported as errors with the conflicting items, the
 look-ahead set, and source positions of the offending productions. There
 is no implicit shift-prefer rule — ambiguous grammars must be made
 unambiguous, or built with conflicts preserved and parsed via the GLR
-runtime (`plox parse --glr`).
+runtime (`uplox parse --glr`).
 
 ## Lexer feedback (typedef-name and friends)
 
 Some grammars need parser state to influence terminal classification —
 the canonical case is C's `typedef Foo;` followed by `Foo x;`, where
-`Foo` is a different terminal in each position. plox handles this
+`Foo` is a different terminal in each position. uplox handles this
 without a DSL extension: hosts install a **token filter** callback at
 parse time that rewrites a lookahead's terminal kind based on whatever
 state they're tracking, and a `%hook=<name>` on the typedef-bearing
@@ -188,7 +188,7 @@ production fires after each reduce so the host can update that state
 between tokens.
 
 The mechanics live in the runtime, not the grammar source. The Python
-runtime ships `plox.hooks.TypedefTracker` as a turnkey implementation;
+runtime ships `uplox.hooks.TypedefTracker` as a turnkey implementation;
 C / C++ / Lua hosts wire `set_token_filter` and `set_post_reduce` on the
 emitted parser. See [`c_backend.md`](c_backend.md), [`cpp_backend.md`](cpp_backend.md),
 [`lua_backend.md`](lua_backend.md), and [`py_backend.md`](py_backend.md) for the per-backend ABIs.

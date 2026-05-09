@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from plox.spec.reader import ReaderError, read_source
+from uplox.spec.reader import ReaderError, read_source
 
 
 CALC = """
@@ -32,7 +32,7 @@ SLASH  = '/'
 
 
 def test_basic_rule_shape():
-    ir = read_source(CALC, "calc.plox")
+    ir = read_source(CALC, "calc.uplox")
     rules = {r.name: r for r in ir.rules}
     assert set(rules) == {"expr", "term", "factor"}
     assert ir.start_symbol == "expr"  # default = first rule
@@ -55,7 +55,7 @@ def test_action_text_preserved_with_braces():
 
 
 def test_hook_attached_to_production():
-    ir = read_source(CALC, "calc.plox")
+    ir = read_source(CALC, "calc.uplox")
     expr = next(r for r in ir.rules if r.name == "expr")
     assert expr.productions[0].hook == "on_add"
     assert expr.productions[1].hook is None
@@ -137,6 +137,6 @@ def test_position_points_into_rules_section():
         "<y> : ! ;\n"  # line 6 - syntax error
     )
     with pytest.raises(ReaderError) as exc:
-        read_source(src, "test.plox")
+        read_source(src, "test.uplox")
     msg = str(exc.value)
-    assert "test.plox:6:" in msg
+    assert "test.uplox:6:" in msg

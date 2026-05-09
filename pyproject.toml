@@ -3,13 +3,9 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-# Distribution name: "uplox" (the matplotlib-helper "plox" already
-# squats the bare name on PyPI; the GitHub repo was renamed to
-# avwohl/uplox to match). The Python module, the CLI binary, and
-# the .plox grammar format keep the original "plox" name. Users
-# install via `pip install uplox` and import via `import plox`
-# (setuptools allows the dist name and the import name to differ;
-# cf. python-dateutil → dateutil).
+# Renamed end-to-end to "uplox" to avoid the matplotlib-helper "plox"
+# squat on PyPI. PyPI dist, GitHub repo, Python module, CLI binary,
+# and .uplox grammar file extension all use the new name.
 name = "uplox"
 version = "2.0.0"
 description = "Compiler front-end generator: grammar source to canonical JSON tables plus C/C++/Python/Lua drivers"
@@ -18,7 +14,7 @@ license = "GPL-3.0-or-later"
 requires-python = ">=3.11"
 dependencies = []
 authors = [
-    {name = "plox developers"}
+    {name = "uplox developers"}
 ]
 keywords = [
     "compiler", "compiler-compiler", "parser-generator", "lexer-generator",
@@ -45,14 +41,14 @@ Repository = "https://github.com/avwohl/uplox"
 Issues = "https://github.com/avwohl/uplox/issues"
 
 [project.scripts]
-plox = "plox.cli.main:main"
+uplox = "uplox.cli.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["plox*"]
+include = ["uplox*"]
 
 [tool.setuptools.package-data]
-plox = ["py.typed"]
+uplox = ["py.typed"]
 
 [project.optional-dependencies]
 dev = [

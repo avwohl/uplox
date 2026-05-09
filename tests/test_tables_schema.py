@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from plox.tables import PLOX_SCHEMA_VERSION, dump_bundle, empty_bundle
+from uplox.tables import UPLOX_SCHEMA_VERSION, dump_bundle, empty_bundle
 
 
 def test_empty_bundle_round_trips():
@@ -14,7 +14,7 @@ def test_empty_bundle_round_trips():
     text = dump_bundle(b)
     parsed = json.loads(text)
     assert parsed == b
-    assert parsed["plox_schema"] == PLOX_SCHEMA_VERSION
+    assert parsed["uplox_schema"] == UPLOX_SCHEMA_VERSION
     assert parsed["meta"]["grammar"] == "calc"
 
 
@@ -30,7 +30,7 @@ def test_dump_is_deterministic():
 
 def test_rejects_wrong_schema():
     b = empty_bundle("g")
-    b["plox_schema"] = "0"
+    b["uplox_schema"] = "0"
     with pytest.raises(ValueError):
         dump_bundle(b)
 

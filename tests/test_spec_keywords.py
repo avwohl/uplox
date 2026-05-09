@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from plox.parse.grammar import compile_grammar
-from plox.spec.reader import ReaderError, read_source
+from uplox.parse.grammar import compile_grammar
+from uplox.spec.reader import ReaderError, read_source
 
 
 def test_default_prefix_is_empty():

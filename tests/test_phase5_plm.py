@@ -1,6 +1,6 @@
 """Phase 5 milestone: PL/M-80 subset grammar parses real PL/M sample programs.
 
-This is the integration check that proves plox is past the "toy grammar" stage —
+This is the integration check that proves uplox is past the "toy grammar" stage —
 a 60-token, 100+-production grammar that compiles to an LR(1) table with no
 conflicts and parses real source code.
 """
@@ -11,16 +11,16 @@ from pathlib import Path
 
 import pytest
 
-from plox.lex.build import lex_from_ir
-from plox.lex.scanner import Scanner
-from plox.parse.grammar import compile_grammar
-from plox.parse.lr1 import build_lr1
-from plox.parse.runtime import HookRegistry, ParseNode, parse
-from plox.spec.reader import read_file
+from uplox.lex.build import lex_from_ir
+from uplox.lex.scanner import Scanner
+from uplox.parse.grammar import compile_grammar
+from uplox.parse.lr1 import build_lr1
+from uplox.parse.runtime import HookRegistry, ParseNode, parse
+from uplox.spec.reader import read_file
 
 
-PLOX_REPO = Path(__file__).resolve().parents[1]
-PLM_SUBSET = PLOX_REPO / "examples" / "plm_subset.plox"
+UPLOX_REPO = Path(__file__).resolve().parents[1]
+PLM_SUBSET = UPLOX_REPO / "examples" / "plm_subset.uplox"
 HELLO_PLM = Path("/home/wohl/src/uplm80/examples/hello_cpm.plm")
 
 
@@ -72,7 +72,7 @@ def test_hello_cpm_recognises_address_literal():
     addr = find_kind(tree, "address_literal")
     assert addr is not None
     # First child is the NUMBER token "0100H"
-    from plox.lex.scanner import Token
+    from uplox.lex.scanner import Token
     assert isinstance(addr.children[0], Token) and addr.children[0].text == "0100H"
 
 

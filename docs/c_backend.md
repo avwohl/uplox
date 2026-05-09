@@ -1,4 +1,4 @@
-# plox C backend
+# uplox C backend
 
 The C backend emits a **self-contained** `.c` / `.h` pair for each grammar.
 There is no shared runtime library — every generated file embeds its own
@@ -8,15 +8,15 @@ add them to your build, and you're done.
 
 ## Re-entrancy guarantee
 
-Every piece of mutable state lives on a `plox_<grammar>_ctx`. The generator
+Every piece of mutable state lives on a `uplox_<grammar>_ctx`. The generator
 verifies that:
 
 * No file-scope mutable variables are emitted. Tables are `static const`.
 * Every function takes a `ctx` pointer (or returns one).
 * All identifier names that escape the translation unit are prefixed with
-  `plox_<grammar>_` or `PLOX_<GRAMMAR>_`.
+  `uplox_<grammar>_` or `UPLOX_<GRAMMAR>_`.
 
-Two grammars built with plox can therefore link into the same binary with
+Two grammars built with uplox can therefore link into the same binary with
 zero collisions. This is the **acceptance test** for the C backend, not a
 nice-to-have — uc80 and uc386 are designed to share the uc_core front-end
 and link side-by-side, and the build setup uses both compilers from the
@@ -27,26 +27,26 @@ same shell.
 For a grammar named `calc`:
 
 ```c
-typedef struct plox_calc_ctx plox_calc_ctx;
+typedef struct uplox_calc_ctx uplox_calc_ctx;
 
 typedef enum {
-    PLOX_CALC_TOK__EOI_ = 0,        /* synthetic end-of-input marker */
-    PLOX_CALC_TOK_NUMBER,
-    PLOX_CALC_TOK_PLUS,
+    UPLOX_CALC_TOK__EOI_ = 0,        /* synthetic end-of-input marker */
+    UPLOX_CALC_TOK_NUMBER,
+    UPLOX_CALC_TOK_PLUS,
     /* ... one entry per declared token */
-    PLOX_CALC_TOK__COUNT__
-} plox_calc_token_kind;
+    UPLOX_CALC_TOK__COUNT__
+} uplox_calc_token_kind;
 
 typedef enum {
-    PLOX_CALC_NT__START__ = 0,      /* augmented start non-terminal */
-    PLOX_CALC_NT_EXPR,
-    PLOX_CALC_NT_TERM,
+    UPLOX_CALC_NT__START__ = 0,      /* augmented start non-terminal */
+    UPLOX_CALC_NT_EXPR,
+    UPLOX_CALC_NT_TERM,
     /* ... one entry per declared rule */
-    PLOX_CALC_NT__COUNT__
-} plox_calc_nt_kind;
+    UPLOX_CALC_NT__COUNT__
+} uplox_calc_nt_kind;
 
-typedef struct plox_calc_node plox_calc_node;
-struct plox_calc_node {
+typedef struct uplox_calc_node uplox_calc_node;
+struct uplox_calc_node {
     int          kind;          /* token kind for leaves, non-terminal kind otherwise */
     int          is_terminal;   /* nonzero for token leaves */
     int          production;    /* -1 for terminals; production index otherwise */
@@ -54,26 +54,26 @@ struct plox_calc_node {
     int          column;
     const char  *text;          /* leaves: lexeme (into input buffer); non-NUL-terminated */
     int          text_len;
-    plox_calc_node **children;
+    uplox_calc_node **children;
     int          num_children;
 };
 
 /* Lifecycle */
-plox_calc_ctx *plox_calc_create(const char *input, int input_len);
-void           plox_calc_destroy(plox_calc_ctx *ctx);
-int            plox_calc_parse(plox_calc_ctx *ctx, plox_calc_node **out_root);
-const char    *plox_calc_error(const plox_calc_ctx *ctx);
+uplox_calc_ctx *uplox_calc_create(const char *input, int input_len);
+void           uplox_calc_destroy(uplox_calc_ctx *ctx);
+int            uplox_calc_parse(uplox_calc_ctx *ctx, uplox_calc_node **out_root);
+const char    *uplox_calc_error(const uplox_calc_ctx *ctx);
 
 /* Symbolic names for tokens and non-terminals (debugging / pretty-printing) */
-const char *plox_calc_token_name(int token_kind);
-const char *plox_calc_nt_name(int nt_kind);
+const char *uplox_calc_token_name(int token_kind);
+const char *uplox_calc_nt_name(int nt_kind);
 ```
 
-* `plox_calc_create` allocates a ctx and stores a pointer into the input
+* `uplox_calc_create` allocates a ctx and stores a pointer into the input
   buffer. The caller owns the input buffer; it must outlive the ctx.
-* `plox_calc_parse` returns 0 on success. The output tree is owned by
-  the ctx and freed by `plox_calc_destroy`.
-* On parse error, `plox_calc_error` returns a stable C string describing
+* `uplox_calc_parse` returns 0 on success. The output tree is owned by
+  the ctx and freed by `uplox_calc_destroy`.
+* On parse error, `uplox_calc_error` returns a stable C string describing
   the first error; the parser stops at the first unrecoverable error.
 
 ## Lexer feedback (since 1.1.0)
@@ -87,16 +87,16 @@ surprises.
 ### Token filter
 
 ```c
-typedef int (*plox_calc_token_filter_fn)(
-    plox_calc_ctx *ctx,
+typedef int (*uplox_calc_token_filter_fn)(
+    uplox_calc_ctx *ctx,
     int            la_kind,
     const char    *la_text,    /* into input buffer; not NUL-terminated */
     int            la_len,
     void          *user_data);
 
-void plox_calc_set_token_filter(
-    plox_calc_ctx               *ctx,
-    plox_calc_token_filter_fn    fn,
+void uplox_calc_set_token_filter(
+    uplox_calc_ctx               *ctx,
+    uplox_calc_token_filter_fn    fn,
     void                        *user_data);
 ```
 
@@ -107,15 +107,15 @@ parser's next ACTION lookup; returning `la_kind` unchanged is a no-op.
 ### Post-reduce hook
 
 ```c
-typedef void (*plox_calc_post_reduce_fn)(
-    plox_calc_ctx  *ctx,
+typedef void (*uplox_calc_post_reduce_fn)(
+    uplox_calc_ctx  *ctx,
     int             prod_index,
-    plox_calc_node *node,
+    uplox_calc_node *node,
     void           *user_data);
 
-void plox_calc_set_post_reduce(
-    plox_calc_ctx             *ctx,
-    plox_calc_post_reduce_fn   fn,
+void uplox_calc_set_post_reduce(
+    uplox_calc_ctx             *ctx,
+    uplox_calc_post_reduce_fn   fn,
     void                      *user_data);
 ```
 
@@ -127,24 +127,24 @@ next ACTION lookup.
 ### Pattern: typedef-name in C
 
 ```c
-static int filter(plox_calc_ctx *ctx, int la_kind, const char *t, int len, void *ud) {
+static int filter(uplox_calc_ctx *ctx, int la_kind, const char *t, int len, void *ud) {
     typedef_set_t *s = ud;
-    if (la_kind == PLOX_CALC_TOK_IDENT && set_contains(s, t, len)) {
-        return PLOX_CALC_TOK_TYPEDEF_NAME;
+    if (la_kind == UPLOX_CALC_TOK_IDENT && set_contains(s, t, len)) {
+        return UPLOX_CALC_TOK_TYPEDEF_NAME;
     }
     return la_kind;
 }
 
-static void on_reduce(plox_calc_ctx *ctx, int prod, plox_calc_node *n, void *ud) {
+static void on_reduce(uplox_calc_ctx *ctx, int prod, uplox_calc_node *n, void *ud) {
     typedef_set_t *s = ud;
     if (prod == TYPEDEF_DECL_PROD && n->num_children >= 2) {
-        plox_calc_node *id = n->children[1];
+        uplox_calc_node *id = n->children[1];
         set_add(s, id->text, id->text_len);
     }
 }
 
-plox_calc_set_token_filter(ctx, filter, &my_typedefs);
-plox_calc_set_post_reduce(ctx, on_reduce, &my_typedefs);
+uplox_calc_set_token_filter(ctx, filter, &my_typedefs);
+uplox_calc_set_post_reduce(ctx, on_reduce, &my_typedefs);
 ```
 
 A complete worked example is in
@@ -153,13 +153,13 @@ A complete worked example is in
 ## Balanced-bracket tokens (since 1.3.0)
 
 Tokens declared with `%balanced='<close>'` in the grammar source come
-through to the emitted scanner via a per-grammar `plox_<g>_token_balanced[]`
+through to the emitted scanner via a per-grammar `uplox_<g>_token_balanced[]`
 array (one entry per token, holding the close-delimiter byte or 0). After
 the DFA matches a balanced token, the scanner extends the match by
 counting nested open/close pairs in the input until depth returns to
 zero — the open byte is whatever the DFA already consumed at the start
 of the token. An unmatched close raises an "unterminated balanced token"
-error via the same `plox_<g>_error` path as a lexical error.
+error via the same `uplox_<g>_error` path as a lexical error.
 
 The feature is what lets non-regular bodies (target-language action
 bodies, Lua-style long brackets, etc.) be lexed as a single token.
@@ -169,7 +169,7 @@ The Python runtime had it since 1.2.0; the C backend gained it in 1.3.0.
 
 The emitted ACTION table is sparse; a state whose only valid actions are
 all reduce-X for the same production X gets a `-1`-default entry in
-`plox_<g>_default_reduction[]`. The driver consults that on ACTION miss
+`uplox_<g>_default_reduction[]`. The driver consults that on ACTION miss
 before erroring. This is what makes the typedef-name hack work in
 canonical LR(1) — without default reductions, the parser errors before
 the post-reduce hook can update the host's typedef set.

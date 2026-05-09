@@ -4,19 +4,19 @@ from __future__ import annotations
 
 import pytest
 
-from plox.hooks import (
+from uplox.hooks import (
     HookRegistry,
     ScopedNameTable,
     SyncSetRecovery,
     TypeTable,
     scoped_table_hooks,
 )
-from plox.lex.build import lex_from_ir
-from plox.lex.scanner import Scanner
-from plox.parse.grammar import compile_grammar
-from plox.parse.lr1 import build_lr1
-from plox.parse.runtime import ParseContext, parse
-from plox.spec.reader import read_source
+from uplox.lex.build import lex_from_ir
+from uplox.lex.scanner import Scanner
+from uplox.parse.grammar import compile_grammar
+from uplox.parse.lr1 import build_lr1
+from uplox.parse.runtime import ParseContext, parse
+from uplox.spec.reader import read_source
 
 
 # ---- ScopedNameTable in isolation --------------------------------------------

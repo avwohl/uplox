@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from plox.parse.grammar import compile_grammar
-from plox.parse.lr1 import (
+from uplox.parse.grammar import compile_grammar
+from uplox.parse.lr1 import (
     AcceptAction,
     Conflict,
     ReduceAction,
     ShiftAction,
     build_lr1,
 )
-from plox.spec.reader import read_source
+from uplox.spec.reader import read_source
 
 
 CALC = """
@@ -57,7 +57,7 @@ def test_accept_on_end_marker():
     ]
     assert len(accepts) == 1
     _state, term = accepts[0]
-    from plox.parse.grammar import END_MARKER
+    from uplox.parse.grammar import END_MARKER
     assert term == END_MARKER
 
 

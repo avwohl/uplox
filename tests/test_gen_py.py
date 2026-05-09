@@ -19,12 +19,12 @@ from pathlib import Path
 
 import pytest
 
-from plox.gen.py import emit_py
-from plox.lex.build import lex_from_ir
-from plox.parse.grammar import compile_grammar
-from plox.parse.lr1 import build_lr1
-from plox.spec.reader import read_source
-from plox.tables import dfa_to_json, empty_bundle, table_to_json
+from uplox.gen.py import emit_py
+from uplox.lex.build import lex_from_ir
+from uplox.parse.grammar import compile_grammar
+from uplox.parse.lr1 import build_lr1
+from uplox.spec.reader import read_source
+from uplox.tables import dfa_to_json, empty_bundle, table_to_json
 
 
 CALC = """
@@ -61,9 +61,9 @@ def _import_emitted(tmp_path: Path, src: str, prefix: str | None = None):
     bundle = _build_bundle(src)
     text = emit_py(bundle, prefix=prefix)
     name = (prefix or bundle["meta"]["grammar"]).lower()
-    module_path = tmp_path / f"plox_{name}.py"
+    module_path = tmp_path / f"uplox_{name}.py"
     module_path.write_text(text)
-    spec = importlib.util.spec_from_file_location(f"plox_{name}", module_path)
+    spec = importlib.util.spec_from_file_location(f"uplox_{name}", module_path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     # Cache under a unique name so successive tests don't collide.
@@ -87,7 +87,7 @@ def test_emit_module_parses_real_input(tmp_path):
 
 
 def test_emit_module_raises_parseerror_on_syntax_error(tmp_path):
-    from plox.parse.runtime import ParseError
+    from uplox.parse.runtime import ParseError
 
     module = _import_emitted(tmp_path, CALC)
     with pytest.raises(ParseError):

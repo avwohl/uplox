@@ -18,12 +18,12 @@ from pathlib import Path
 
 import pytest
 
-from plox.gen.c import emit_c
-from plox.lex.build import lex_from_ir
-from plox.parse.grammar import compile_grammar
-from plox.parse.lr1 import build_lr1
-from plox.spec.reader import read_source
-from plox.tables import dfa_to_json, dump_bundle, empty_bundle, table_to_json
+from uplox.gen.c import emit_c
+from uplox.lex.build import lex_from_ir
+from uplox.parse.grammar import compile_grammar
+from uplox.parse.lr1 import build_lr1
+from uplox.spec.reader import read_source
+from uplox.tables import dfa_to_json, dump_bundle, empty_bundle, table_to_json
 
 
 CC = shutil.which("cc") or shutil.which("gcc")
@@ -64,8 +64,8 @@ def build_calc_bundle() -> dict:
 def emit_to(tmp_path: Path, bundle: dict, prefix: str | None = None) -> tuple[Path, Path]:
     header, impl = emit_c(bundle, prefix=prefix)
     name = (prefix or bundle["meta"]["grammar"]).lower()
-    h = tmp_path / f"plox_{name}.h"
-    c = tmp_path / f"plox_{name}.c"
+    h = tmp_path / f"uplox_{name}.h"
+    c = tmp_path / f"uplox_{name}.c"
     h.write_text(header)
     c.write_text(impl)
     return h, c
@@ -96,7 +96,7 @@ def cc_compile_object(source: Path, out: Path, include: Path) -> None:
 def test_emitted_c_compiles_without_warnings(tmp_path):
     bundle = build_calc_bundle()
     _h, c = emit_to(tmp_path, bundle)
-    obj = tmp_path / "plox_calc.o"
+    obj = tmp_path / "uplox_calc.o"
     cc_compile_object(c, obj, include=tmp_path)
     assert obj.exists()
 
@@ -104,8 +104,8 @@ def test_emitted_c_compiles_without_warnings(tmp_path):
 def test_emitted_c_for_plm_subset_compiles(tmp_path):
     """Stress test: 700+ states, ~100 productions. The generated C is large
     but must still compile cleanly."""
-    plm_path = Path(__file__).resolve().parents[1] / "examples" / "plm_subset.plox"
-    from plox.spec.reader import read_file
+    plm_path = Path(__file__).resolve().parents[1] / "examples" / "plm_subset.uplox"
+    from uplox.spec.reader import read_file
     ir = read_file(str(plm_path))
     dfa, tokens, skip = lex_from_ir(ir)
     grammar = compile_grammar(ir)
@@ -115,7 +115,7 @@ def test_emitted_c_for_plm_subset_compiles(tmp_path):
     bundle["parse"] = table_to_json(table)
 
     _h, c = emit_to(tmp_path, bundle)
-    obj = tmp_path / "plox_plm_subset.o"
+    obj = tmp_path / "uplox_plm_subset.o"
     cc_compile_object(c, obj, include=tmp_path)
     assert obj.exists()
 
@@ -127,11 +127,11 @@ CALC_DRIVER = """
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "plox_calc.h"
+#include "uplox_calc.h"
 
-static int evaluate(const plox_calc_node *n) {
+static int evaluate(const uplox_calc_node *n) {
     if (n->is_terminal) {
-        if (n->kind == PLOX_CALC_TOK_NUMBER) {
+        if (n->kind == UPLOX_CALC_TOK_NUMBER) {
             char buf[32];
             int len = n->text_len < 31 ? n->text_len : 31;
             memcpy(buf, n->text, len);
@@ -143,21 +143,21 @@ static int evaluate(const plox_calc_node *n) {
     /* Walk down trivial wrappers. */
     if (n->num_children == 1) return evaluate(n->children[0]);
     if (n->num_children == 3) {
-        const plox_calc_node *op = n->children[1];
+        const uplox_calc_node *op = n->children[1];
         if (op->is_terminal) {
             int l = evaluate(n->children[0]);
             int r = evaluate(n->children[2]);
             switch (op->kind) {
-                case PLOX_CALC_TOK_PLUS:  return l + r;
-                case PLOX_CALC_TOK_MINUS: return l - r;
-                case PLOX_CALC_TOK_STAR:  return l * r;
-                case PLOX_CALC_TOK_SLASH: return r ? l / r : 0;
-                case PLOX_CALC_TOK_LPAREN: return evaluate(n->children[1]);
+                case UPLOX_CALC_TOK_PLUS:  return l + r;
+                case UPLOX_CALC_TOK_MINUS: return l - r;
+                case UPLOX_CALC_TOK_STAR:  return l * r;
+                case UPLOX_CALC_TOK_SLASH: return r ? l / r : 0;
+                case UPLOX_CALC_TOK_LPAREN: return evaluate(n->children[1]);
                 default: break;
             }
         }
         /* Parenthesised: ( expr ) */
-        if (n->children[0]->is_terminal && n->children[0]->kind == PLOX_CALC_TOK_LPAREN) {
+        if (n->children[0]->is_terminal && n->children[0]->kind == UPLOX_CALC_TOK_LPAREN) {
             return evaluate(n->children[1]);
         }
     }
@@ -168,15 +168,15 @@ int main(void) {
     char buf[4096];
     int n = (int)fread(buf, 1, sizeof(buf) - 1, stdin);
     buf[n] = 0;
-    plox_calc_ctx *ctx = plox_calc_create(buf, n);
-    plox_calc_node *root = NULL;
-    if (plox_calc_parse(ctx, &root) != 0) {
-        fprintf(stderr, "parse error: %s\\n", plox_calc_error(ctx));
-        plox_calc_destroy(ctx);
+    uplox_calc_ctx *ctx = uplox_calc_create(buf, n);
+    uplox_calc_node *root = NULL;
+    if (uplox_calc_parse(ctx, &root) != 0) {
+        fprintf(stderr, "parse error: %s\\n", uplox_calc_error(ctx));
+        uplox_calc_destroy(ctx);
         return 1;
     }
     printf("%d\\n", evaluate(root));
-    plox_calc_destroy(ctx);
+    uplox_calc_destroy(ctx);
     return 0;
 }
 """
@@ -188,7 +188,7 @@ def build_calc_evaluator(tmp_path: Path) -> Path:
     driver = tmp_path / "main.c"
     driver.write_text(CALC_DRIVER)
     binary = tmp_path / "calc"
-    cc_compile(driver, tmp_path / "plox_calc.c", out=binary, include=tmp_path)
+    cc_compile(driver, tmp_path / "uplox_calc.c", out=binary, include=tmp_path)
     return binary
 
 
@@ -282,27 +282,27 @@ TWO_DRIVER = """
 /* Two grammar contexts in the same binary, in flight at the same time. */
 #include <stdio.h>
 #include <string.h>
-#include "plox_calc.h"
-#include "plox_tiny.h"
+#include "uplox_calc.h"
+#include "uplox_tiny.h"
 
 int main(void) {
     /* calc context */
     const char *calc_src = "1 + 2";
-    plox_calc_ctx *calc_ctx = plox_calc_create(calc_src, (int)strlen(calc_src));
+    uplox_calc_ctx *calc_ctx = uplox_calc_create(calc_src, (int)strlen(calc_src));
     /* tiny context */
     const char *tiny_src = "aabb";
-    plox_tiny_ctx *tiny_ctx = plox_tiny_create(tiny_src, (int)strlen(tiny_src));
+    uplox_tiny_ctx *tiny_ctx = uplox_tiny_create(tiny_src, (int)strlen(tiny_src));
 
-    plox_calc_node *calc_root = NULL;
-    plox_tiny_node *tiny_root = NULL;
-    int calc_rc = plox_calc_parse(calc_ctx, &calc_root);
-    int tiny_rc = plox_tiny_parse(tiny_ctx, &tiny_root);
+    uplox_calc_node *calc_root = NULL;
+    uplox_tiny_node *tiny_root = NULL;
+    int calc_rc = uplox_calc_parse(calc_ctx, &calc_root);
+    int tiny_rc = uplox_tiny_parse(tiny_ctx, &tiny_root);
 
-    printf("calc rc=%d nt=%s\\n", calc_rc, calc_rc == 0 ? plox_calc_nt_name(calc_root->kind) : "");
-    printf("tiny rc=%d nt=%s\\n", tiny_rc, tiny_rc == 0 ? plox_tiny_nt_name(tiny_root->kind) : "");
+    printf("calc rc=%d nt=%s\\n", calc_rc, calc_rc == 0 ? uplox_calc_nt_name(calc_root->kind) : "");
+    printf("tiny rc=%d nt=%s\\n", tiny_rc, tiny_rc == 0 ? uplox_tiny_nt_name(tiny_root->kind) : "");
 
-    plox_calc_destroy(calc_ctx);
-    plox_tiny_destroy(tiny_ctx);
+    uplox_calc_destroy(calc_ctx);
+    uplox_tiny_destroy(tiny_ctx);
     return (calc_rc == 0 && tiny_rc == 0) ? 0 : 1;
 }
 """
@@ -319,7 +319,7 @@ def build_tiny_bundle() -> dict:
 
 
 def test_two_grammars_link_together(tmp_path):
-    """Acceptance test: two plox-emitted grammars compile and link into the
+    """Acceptance test: two uplox-emitted grammars compile and link into the
     same binary with zero symbol collisions, then run side-by-side without
     interfering."""
     emit_to(tmp_path, build_calc_bundle())
@@ -329,8 +329,8 @@ def test_two_grammars_link_together(tmp_path):
     binary = tmp_path / "two"
     cc_compile(
         driver,
-        tmp_path / "plox_calc.c",
-        tmp_path / "plox_tiny.c",
+        tmp_path / "uplox_calc.c",
+        tmp_path / "uplox_tiny.c",
         out=binary,
         include=tmp_path,
     )
@@ -347,12 +347,12 @@ def test_header_uses_consistent_prefix(tmp_path):
     bundle = build_calc_bundle()
     h_path, _c_path = emit_to(tmp_path, bundle)
     text = h_path.read_text()
-    assert "plox_calc_ctx" in text
-    assert "PLOX_CALC_TOK__EOI_" in text  # synthetic end-of-input marker
-    assert "PLOX_CALC_TOK_NUMBER" in text
-    assert "PLOX_CALC_NT__START__" in text or "PLOX_CALC_NT_EXPR" in text
+    assert "uplox_calc_ctx" in text
+    assert "UPLOX_CALC_TOK__EOI_" in text  # synthetic end-of-input marker
+    assert "UPLOX_CALC_TOK_NUMBER" in text
+    assert "UPLOX_CALC_NT__START__" in text or "UPLOX_CALC_NT_EXPR" in text
     # No leak of internal helpers in the header.
-    assert "plox_calc__" not in text
+    assert "uplox_calc__" not in text
 
 
 def test_emitted_c_supports_token_filter(tmp_path):
@@ -389,21 +389,21 @@ NAME  = /[A-Za-z_][A-Za-z0-9_]*/
 
     _h, c = emit_to(tmp_path, bundle)
     text = c.read_text()
-    assert "plox_tf_set_token_filter" in text
+    assert "uplox_tf_set_token_filter" in text
     assert "token_filter" in text
     assert "token_filter_data" in text
 
     # Driver: rewrite IDENT to NAME when the source starts with capital T.
     driver = tmp_path / "driver.c"
     driver.write_text(r"""
-#include "plox_tf.h"
+#include "uplox_tf.h"
 #include <stdio.h>
 #include <string.h>
 
-static int rewrite_T(plox_tf_ctx *ctx, int la_kind, const char *la_text, int la_len, void *ud) {
+static int rewrite_T(uplox_tf_ctx *ctx, int la_kind, const char *la_text, int la_len, void *ud) {
     (void)ctx; (void)ud; (void)la_len;
-    if (la_kind == PLOX_TF_TOK_IDENT && la_text[0] == 'T') {
-        return PLOX_TF_TOK_NAME;
+    if (la_kind == UPLOX_TF_TOK_IDENT && la_text[0] == 'T') {
+        return UPLOX_TF_TOK_NAME;
     }
     return la_kind;
 }
@@ -411,21 +411,21 @@ static int rewrite_T(plox_tf_ctx *ctx, int la_kind, const char *la_text, int la_
 int main(int argc, char **argv) {
     const char *src = (argc > 1) ? argv[1] : "Tx;";
     int n = (int)strlen(src);
-    plox_tf_ctx *ctx = plox_tf_create(src, n);
-    plox_tf_set_token_filter(ctx, rewrite_T, NULL);
-    plox_tf_node *root = NULL;
-    int rc = plox_tf_parse(ctx, &root);
+    uplox_tf_ctx *ctx = uplox_tf_create(src, n);
+    uplox_tf_set_token_filter(ctx, rewrite_T, NULL);
+    uplox_tf_node *root = NULL;
+    int rc = uplox_tf_parse(ctx, &root);
     if (rc != 0) {
-        fprintf(stderr, "parse error: %s\n", plox_tf_error(ctx));
-        plox_tf_destroy(ctx);
+        fprintf(stderr, "parse error: %s\n", uplox_tf_error(ctx));
+        uplox_tf_destroy(ctx);
         return 1;
     }
     /* `item` -> IDENT SEMI | NAME SEMI; the leaf at children[0] tells us
        which terminal kind the parser saw after filtering. */
-    plox_tf_node *item = root->children[0];
-    plox_tf_node *first = item->children[0];
-    printf("%s\n", plox_tf_token_name(first->kind));
-    plox_tf_destroy(ctx);
+    uplox_tf_node *item = root->children[0];
+    uplox_tf_node *first = item->children[0];
+    printf("%s\n", uplox_tf_token_name(first->kind));
+    uplox_tf_destroy(ctx);
     return 0;
 }
 """)
@@ -472,11 +472,11 @@ TNAME      = /[A-Za-z_][A-Za-z0-9_]*/
     bundle["parse"] = table_to_json(table)
     _h, c = emit_to(tmp_path, bundle)
     text = c.read_text()
-    assert "plox_tnh_set_post_reduce" in text
+    assert "uplox_tnh_set_post_reduce" in text
 
     driver = tmp_path / "driver.c"
     driver.write_text(r"""
-#include "plox_tnh.h"
+#include "uplox_tnh.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -505,22 +505,22 @@ static void set_add(typedef_set_t *s, const char *text, int len) {
     s->names[s->count++] = copy;
 }
 
-static int filter(plox_tnh_ctx *ctx, int la_kind, const char *la_text, int la_len, void *user_data) {
+static int filter(uplox_tnh_ctx *ctx, int la_kind, const char *la_text, int la_len, void *user_data) {
     (void)ctx;
     typedef_set_t *s = (typedef_set_t *)user_data;
-    if (la_kind == PLOX_TNH_TOK_IDENT && set_contains(s, la_text, la_len)) {
-        return PLOX_TNH_TOK_TNAME;
+    if (la_kind == UPLOX_TNH_TOK_IDENT && set_contains(s, la_text, la_len)) {
+        return UPLOX_TNH_TOK_TNAME;
     }
     return la_kind;
 }
 
-static void on_reduce(plox_tnh_ctx *ctx, int prod, plox_tnh_node *node, void *user_data) {
+static void on_reduce(uplox_tnh_ctx *ctx, int prod, uplox_tnh_node *node, void *user_data) {
     (void)ctx;
     typedef_set_t *s = (typedef_set_t *)user_data;
     /* Production 4 is `decl : KW_TYPEDEF IDENT SEMI` — the only path that
        declares a new type-name. children[1] is the IDENT terminal. */
     if (prod == 4 && node->num_children >= 2) {
-        plox_tnh_node *id = node->children[1];
+        uplox_tnh_node *id = node->children[1];
         set_add(s, id->text, id->text_len);
     }
 }
@@ -528,23 +528,23 @@ static void on_reduce(plox_tnh_ctx *ctx, int prod, plox_tnh_node *node, void *us
 int main(int argc, char **argv) {
     const char *src = (argc > 1) ? argv[1] : "typedef Foo; Foo;";
     int n = (int)strlen(src);
-    plox_tnh_ctx *ctx = plox_tnh_create(src, n);
+    uplox_tnh_ctx *ctx = uplox_tnh_create(src, n);
     typedef_set_t set = {0};
-    plox_tnh_set_token_filter(ctx, filter, &set);
-    plox_tnh_set_post_reduce(ctx, on_reduce, &set);
-    plox_tnh_node *root = NULL;
-    int rc = plox_tnh_parse(ctx, &root);
+    uplox_tnh_set_token_filter(ctx, filter, &set);
+    uplox_tnh_set_post_reduce(ctx, on_reduce, &set);
+    uplox_tnh_node *root = NULL;
+    int rc = uplox_tnh_parse(ctx, &root);
     if (rc != 0) {
-        fprintf(stderr, "parse error: %s\n", plox_tnh_error(ctx));
-        plox_tnh_destroy(ctx);
+        fprintf(stderr, "parse error: %s\n", uplox_tnh_error(ctx));
+        uplox_tnh_destroy(ctx);
         return 1;
     }
     /* Walk top-level decls and report which production each one used. */
-    plox_tnh_node *decls = root->children[0];
+    uplox_tnh_node *decls = root->children[0];
     /* `decls : decls decl | decl` — left-recursive list. Linearise. */
-    plox_tnh_node *items[32];
+    uplox_tnh_node *items[32];
     int n_items = 0;
-    plox_tnh_node *cur = decls;
+    uplox_tnh_node *cur = decls;
     while (cur && !cur->is_terminal) {
         if (cur->num_children == 2) {
             items[n_items++] = cur->children[1];
@@ -555,10 +555,10 @@ int main(int argc, char **argv) {
         }
     }
     for (int i = n_items - 1; i >= 0; --i) {
-        plox_tnh_node *d = items[i];
+        uplox_tnh_node *d = items[i];
         printf("decl%d: prod=%d\n", n_items - 1 - i, d->production);
     }
-    plox_tnh_destroy(ctx);
+    uplox_tnh_destroy(ctx);
     return 0;
 }
 """)
@@ -581,7 +581,7 @@ def test_emitted_c_carries_default_reduction_table(tmp_path):
     bundle = build_calc_bundle()
     _h, c = emit_to(tmp_path, bundle)
     text = c.read_text()
-    assert "plox_calc_default_reduction" in text, "default_reduction array missing"
+    assert "uplox_calc_default_reduction" in text, "default_reduction array missing"
     # And the parser body must consult it on action miss.
     assert "default_reduction[s]" in text
 
@@ -590,8 +590,8 @@ def test_emit_with_explicit_prefix_overrides_grammar_name(tmp_path):
     bundle = build_calc_bundle()
     h, _c = emit_to(tmp_path, bundle, prefix="myparser")
     text = h.read_text()
-    assert "plox_myparser_ctx" in text
-    assert "plox_calc_ctx" not in text
+    assert "uplox_myparser_ctx" in text
+    assert "uplox_calc_ctx" not in text
 
 
 def test_invalid_prefix_rejected(tmp_path):
@@ -618,7 +618,7 @@ ACTION = '{' %balanced='}'
 
 
 def build_bal_bundle() -> dict:
-    from plox.lex.build import balanced_tokens
+    from uplox.lex.build import balanced_tokens
 
     ir = read_source(BAL_GRAMMAR)
     dfa, tokens, skip = lex_from_ir(ir)
@@ -641,19 +641,19 @@ def test_emitted_c_supports_balanced_token(tmp_path):
     bundle = build_bal_bundle()
     _h, c = emit_to(tmp_path, bundle)
     text = c.read_text()
-    assert "plox_bal_token_balanced" in text, "balanced array missing from emit"
+    assert "uplox_bal_token_balanced" in text, "balanced array missing from emit"
 
     driver = tmp_path / "driver.c"
     driver.write_text(r"""
-#include "plox_bal.h"
+#include "uplox_bal.h"
 #include <stdio.h>
 #include <string.h>
 
 /* Walk the tree and count ACTION leaves; print their lengths in order. */
-static int count_actions(const plox_bal_node *n, int *lens, int cap, int *out_n) {
+static int count_actions(const uplox_bal_node *n, int *lens, int cap, int *out_n) {
     if (!n) return 0;
     if (n->is_terminal) {
-        if (n->kind == PLOX_BAL_TOK_ACTION) {
+        if (n->kind == UPLOX_BAL_TOK_ACTION) {
             if (*out_n < cap) lens[*out_n] = n->text_len;
             ++(*out_n);
         }
@@ -668,11 +668,11 @@ static int count_actions(const plox_bal_node *n, int *lens, int cap, int *out_n)
 int main(int argc, char **argv) {
     const char *src = (argc > 1) ? argv[1] : "";
     int n = (int)strlen(src);
-    plox_bal_ctx *ctx = plox_bal_create(src, n);
-    plox_bal_node *root = NULL;
-    if (plox_bal_parse(ctx, &root) != 0) {
-        fprintf(stderr, "parse error: %s\n", plox_bal_error(ctx));
-        plox_bal_destroy(ctx);
+    uplox_bal_ctx *ctx = uplox_bal_create(src, n);
+    uplox_bal_node *root = NULL;
+    if (uplox_bal_parse(ctx, &root) != 0) {
+        fprintf(stderr, "parse error: %s\n", uplox_bal_error(ctx));
+        uplox_bal_destroy(ctx);
         return 1;
     }
     int lens[16]; int cnt = 0;
@@ -680,7 +680,7 @@ int main(int argc, char **argv) {
     printf("actions=%d", cnt);
     for (int i = 0; i < cnt; ++i) printf(" len%d=%d", i, lens[i]);
     printf("\n");
-    plox_bal_destroy(ctx);
+    uplox_bal_destroy(ctx);
     return 0;
 }
 """)
@@ -704,19 +704,19 @@ def test_emitted_c_balanced_unterminated_returns_error(tmp_path):
     _h, c = emit_to(tmp_path, bundle)
     driver = tmp_path / "driver.c"
     driver.write_text(r"""
-#include "plox_bal.h"
+#include "uplox_bal.h"
 #include <stdio.h>
 #include <string.h>
 int main(int argc, char **argv) {
     const char *src = (argc > 1) ? argv[1] : "x { unterminated";
     int n = (int)strlen(src);
-    plox_bal_ctx *ctx = plox_bal_create(src, n);
-    plox_bal_node *root = NULL;
-    int rc = plox_bal_parse(ctx, &root);
+    uplox_bal_ctx *ctx = uplox_bal_create(src, n);
+    uplox_bal_node *root = NULL;
+    int rc = uplox_bal_parse(ctx, &root);
     if (rc != 0) {
-        fprintf(stderr, "%s\n", plox_bal_error(ctx));
+        fprintf(stderr, "%s\n", uplox_bal_error(ctx));
     }
-    plox_bal_destroy(ctx);
+    uplox_bal_destroy(ctx);
     return rc == 0 ? 0 : 1;
 }
 """)
