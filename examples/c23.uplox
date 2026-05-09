@@ -229,6 +229,7 @@ RPAREN     = ')'
            | <declaration>
            | <static_assert_declaration>
            | <asm_declaration>
+           | SEMI                       # stray semi (empty macro expansion)
            ;
 
 # C11+ ``_Static_assert(cond)`` and ``_Static_assert(cond, msg)``,
