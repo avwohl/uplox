@@ -642,7 +642,13 @@ PIPE       = '|'
 
 <component_decl>   : <ident_list> COLON <subtype_indication> <init_opt> SEMI
                    | <ident_list> COLON 'aliased' <subtype_indication> <init_opt> SEMI
+                   | <ident_list> COLON <array_type_def> <init_opt> SEMI
+                   | <ident_list> COLON 'aliased' <array_type_def> <init_opt> SEMI
                    ;
+# Anonymous array as record component (e.g. ``Switches : array (...) of T;``)
+# is a GNAT extension — strict Ada RM 3.8(5) restricts component_definition
+# to subtype_indication or access_definition, but the GNAT runtime uses
+# the inline-array form in several record types.
 
 # ===========================================================================
 # Subtype indications
@@ -667,6 +673,10 @@ PIPE       = '|'
                      | 'access' <subtype_indication>
                      | 'access' 'all' <subtype_indication>
                      | 'access' 'constant' <subtype_indication>
+                     | 'access' 'procedure'
+                     | 'access' 'procedure' <formal_part>
+                     | 'access' 'function' 'return' <subtype_indication>
+                     | 'access' 'function' <formal_part> 'return' <subtype_indication>
                      | 'access' 'protected' 'procedure'
                      | 'access' 'protected' 'procedure' <formal_part>
                      | 'access' 'protected' 'function' 'return' <subtype_indication>
