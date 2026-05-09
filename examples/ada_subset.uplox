@@ -59,11 +59,15 @@ TRUE FALSE
 WS         = /[ \t\r\n]+/                            %skip
 COMMENT    = /--[^\n]*/                              %skip
 
-# Character literal: a single character (or doubled quote ``''``) wrapped
-# in apostrophes. Matched before TICK so ``'A'`` reads as one token; a
-# bare ``'`` (in attribute references like ``X'First``) falls back to
-# the 1-char TICK token via uplox's longest-match rule.
-CHAR_LIT   = /'([^'\n]|'')'/
+# Character literal: any single graphic character wrapped in apostrophes,
+# including the apostrophe itself (``'''`` is the apostrophe character).
+# Ada char literals do NOT use the doubled-quote escape that string
+# literals use — RM 2.5 says ``character_literal ::= 'graphic_character'``
+# with apostrophe permitted as a graphic_character. Matched before TICK so
+# ``'A'`` reads as one token; a bare ``'`` (in attribute references like
+# ``X'First``) falls back to the 1-char TICK token via uplox's
+# longest-match rule, since CHAR_LIT requires a closing apostrophe.
+CHAR_LIT   = /'[^\n]'/
 
 # String literal: doubled quote escape, no newlines.
 STRING_LIT = /"([^"\n]|"")*"/
