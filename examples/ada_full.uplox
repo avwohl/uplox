@@ -137,7 +137,13 @@ PIPE       = '|'
                    | <package_decl>
                    | <package_body>
                    | <generic_decl>
+                   | 'private' <package_decl>
+                   | 'private' <generic_decl>
                    ;
+# RM 7.3 / 10.1.1: ``private`` is permitted as a library-unit prefix
+# on package and generic declarations (private library units). It
+# cannot be a prefix on declarations *inside* a package because that
+# is reserved for the private-part marker.
 
 # ===========================================================================
 # Pragmas
@@ -231,12 +237,16 @@ PIPE       = '|'
                    | <subprogram_spec> 'is' 'abstract' <aspect_spec> SEMI
                    | <subprogram_spec> 'is' 'null' SEMI
                    | <subprogram_spec> 'is' 'null' <aspect_spec> SEMI
+                   | <subprogram_spec> 'is' LPAREN <expr> RPAREN SEMI
+                   | <subprogram_spec> 'is' LPAREN <expr> RPAREN <aspect_spec> SEMI
                    | <subprogram_spec> 'renames' <name> SEMI
                    | <subprogram_spec> 'renames' <name> <aspect_spec> SEMI
                    | <subprogram_spec> 'is' 'separate' SEMI
                    | <subprogram_spec> 'is' 'new' <name> SEMI
                    | <subprogram_spec> 'is' 'new' <name> <aspect_spec> SEMI
                    ;
+# Expression function (Ada 2012, RM 6.8): a function spec whose body
+# is a single parenthesised expression — ``function F return T is (E);``
 
 <subprogram_body>  : <subprogram_spec> 'is' <decl_part> 'begin' <handled_stmt_seq> 'end' <opt_designator> SEMI ;
 
@@ -637,6 +647,7 @@ PIPE       = '|'
                    ;
 
 <component_list>   : <component_list> <component_decl>
+                   | <component_list> <pragma>
                    |
                    ;
 
@@ -1017,7 +1028,10 @@ PIPE       = '|'
                    | LPAREN <agg_named_list> RPAREN
                    | LPAREN <expr> 'with' <agg_named_list> RPAREN
                    | LPAREN <expr> 'with' 'null' 'record' RPAREN
+                   | LPAREN 'null' 'record' RPAREN
                    ;
+# ``(null record)`` (RM 4.3.1) is the empty record aggregate, used as
+# the value of a null-record type.
 
 <agg_positional_two_plus> : <expr> COMMA <agg_positional_tail>
                           ;
@@ -1054,12 +1068,21 @@ PIPE       = '|'
                       ;
 
 <generic_formal>   : <object_decl>
+                   | <formal_object_decl>
                    | <type_decl>
                    | <generic_formal_subprogram>
                    | <generic_formal_package>
                    | <use_clause>
                    | <pragma>
                    ;
+
+# Generic formal object (RM 12.4): like an object_decl but with an
+# explicit mode keyword (`in`, `in out`, `out`). Bare `in` is the
+# default but is still written explicitly in much of the runtime.
+<formal_object_decl> : <ident_list> COLON 'in' <subtype_indication> <init_opt> SEMI
+                     | <ident_list> COLON 'in' 'out' <subtype_indication> <init_opt> SEMI
+                     | <ident_list> COLON 'out' <subtype_indication> <init_opt> SEMI
+                     ;
 
 # ``with procedure NAME [(...)] [is <>]`` — a formal subprogram
 # parameter. The ``is <>`` form means "default to a same-named
@@ -1069,6 +1092,7 @@ PIPE       = '|'
 <subprogram_default_opt> : 'is' BOX
                          | 'is' <name>
                          | 'is' 'null'
+                         | 'is' 'abstract'
                          |
                          ;
 

@@ -93,7 +93,7 @@ def categorize(err_msg: str, src: str) -> str:
     # Reserved words used as identifiers (invalid Ada accepted by no real Ada
     # compiler). We can recognize these because the unexpected token is one
     # of {digits, delta, range, ...} appearing where an IDENT was expected.
-    if re.search(r"unexpected token 'KW_(digits|delta|range|access|all|abs)' '(\w+)'", err_msg):
+    if re.search(r"unexpected token 'KW_(digits|delta|range|access|all|abs|rem|mod|xor|entry|false|true|null)' '(\w+)'", err_msg):
         # If the line contains "<word> :" or ".<word>" or "(<word>" the word
         # is being used as a regular identifier.
         kw = re.search(r"KW_(\w+)", err_msg).group(1)
