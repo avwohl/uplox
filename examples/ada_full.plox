@@ -1,0 +1,943 @@
+# Ada 2012 grammar — extended on top of ada_subset.plox.
+#
+# Layered over the constructs ada_subset already covers (top-level
+# packages, basic types, statements, expressions, attributes,
+# aggregates, with / use). Adds:
+#
+#   * Exceptions: declarations, ``raise`` statements, exception handlers.
+#   * Access types: ``access T``, ``access all/constant T``,
+#     ``access procedure/function``, allocators (``new T``).
+#   * Renamings: subprogram, object, exception, package.
+#   * Tagged types, interfaces, abstract / synchronized / limited
+#     classifiers; ``new parent with record`` derived types.
+#   * Discriminated records (incl. variant parts).
+#   * Aspect specifications (``with Pre => P, Post => Q, ...``).
+#   * Generic declarations and generic instantiations.
+#   * Tasks and protected types: declarations, bodies, entries,
+#     ``accept`` / ``select`` / ``delay`` / ``abort`` / ``requeue``.
+#   * ``private`` types (``type T is private`` / ``limited private``).
+#   * Separate clauses (``is separate``).
+#   * Subprogram bodies expanded with exception handlers.
+#
+# Lexer assumptions (same as ada_subset):
+#
+#   * The host **lowercases reserved words** before handing the source
+#     to plox. Identifiers keep their original case in token text.
+#   * Comments (``-- ...``) and whitespace are stripped by the WS /
+#     COMMENT token rules.
+
+%grammar ada_full
+
+%options
+start = compilation_unit
+
+%keyword_prefix KW_
+%keywords
+abort abs abstract accept access aliased all and array at
+begin body case constant declare delay delta digits do
+else elsif end entry exception exit
+for function generic goto if in interface is
+limited loop mod new not null of or others out overriding
+package parallel pragma private procedure protected
+raise range record rem renames requeue return reverse
+select separate some subtype synchronized
+tagged task terminate then type
+until use when while with xor
+true false
+
+%tokens
+WS         = /[ \t\r\n]+/                            %skip
+COMMENT    = /--[^\n]*/                              %skip
+
+# Character literal: a single character (or doubled quote ``''``) wrapped
+# in apostrophes. Matched before TICK so ``'A'`` reads as one token; a
+# bare ``'`` (in attribute references like ``X'First``) falls back to
+# the 1-char TICK token via plox's longest-match rule.
+CHAR_LIT   = /'([^'\n]|'')'/
+
+# String literal: doubled quote escape, no newlines.
+STRING_LIT = /"([^"\n]|"")*"/
+
+# Numeric literals. Ada has decimal and based forms (``2#1010#``,
+# ``16#FF#``). Underscores can appear inside integers as digit
+# separators. Real literals are decimal-only here; based reals are
+# rare and deferred.
+INT_LIT    = /[0-9][0-9_]*([eE][+-]?[0-9_]+)?|[0-9]+#[0-9A-Fa-f][0-9A-Fa-f_]*#([eE][+-]?[0-9_]+)?/
+REAL_LIT   = /[0-9][0-9_]*\.[0-9][0-9_]*([eE][+-]?[0-9_]+)?/
+
+# Identifiers — letters, digits, underscores; must start with a letter.
+IDENT      = /[A-Za-z][A-Za-z0-9_]*/
+
+# Multi-char operators before single-char ones.
+ARROW      = '=>'
+DOTDOT     = '..'
+STARSTAR   = '**'
+ASSIGN     = ':='
+NEQ        = '/='
+LE         = '<='
+GE         = '>='
+LSHIFT     = '<<'
+RSHIFT     = '>>'
+BOX        = '<>'
+
+EQ         = '='
+LT         = '<'
+GT         = '>'
+PLUS       = '+'
+MINUS      = '-'
+STAR       = '*'
+SLASH      = '/'
+AMP        = '&'
+TICK       = /'/
+LPAREN     = '('
+RPAREN     = ')'
+COMMA      = ','
+SEMI       = ';'
+COLON      = ':'
+DOT        = '.'
+PIPE       = '|'
+
+%rules
+
+# ===========================================================================
+# Compilation unit
+# ===========================================================================
+#
+# A compilation unit is a sequence of context items (``with`` / ``use``)
+# followed by one library unit. Subunits and child units are deferred.
+
+# A source file may contain a sequence of compilation units (e.g.
+# package spec immediately followed by its body) — Ada doesn't require
+# them in separate files.
+<compilation_unit> : <unit_seq>
+                   ;
+
+<unit_seq>         : <one_unit>
+                   | <unit_seq> <one_unit>
+                   ;
+
+<one_unit>         : <context_clause> <library_unit>
+                   ;
+
+<context_clause>   : <context_clause> <context_item>
+                   |
+                   ;
+
+<context_item>     : 'with' <ident_list> SEMI
+                   | 'use'  <ident_list> SEMI
+                   | <pragma>
+                   ;
+
+<library_unit>     : <subprogram_decl>
+                   | <subprogram_body>
+                   | <package_decl>
+                   | <package_body>
+                   | <generic_decl>
+                   ;
+
+# ===========================================================================
+# Pragmas
+# ===========================================================================
+
+<pragma>           : 'pragma' IDENT SEMI
+                   | 'pragma' IDENT LPAREN <pragma_args> RPAREN SEMI
+                   ;
+
+<pragma_args>      : <pragma_arg>
+                   | <pragma_args> COMMA <pragma_arg>
+                   ;
+
+<pragma_arg>       : <expr>
+                   | IDENT ARROW <expr>
+                   ;
+
+# ===========================================================================
+# Names — the universal "identifier chain with parens, dots, and ticks"
+#
+# In Ada, ``Name(Args)`` is syntactically the same shape regardless of
+# whether the name designates a function, an array, a type
+# (conversion), or a slice. Disambiguation belongs in the AST builder
+# / semantic phase, not here. Keeping it as a single non-terminal also
+# avoids the LALR conflicts that two parallel name forms would create.
+# ===========================================================================
+
+<name>             : IDENT
+                   | <name> DOT IDENT
+                   | <name> DOT 'all'
+                   | <name> LPAREN <expr_or_assoc_list> RPAREN
+                   | <name> TICK <attribute_designator>
+                   ;
+
+# Attribute designators are normally identifiers but a handful of
+# reserved words are also valid (``T'Range``, ``T'Access``,
+# ``T'Delta``, ``T'Digits``, ``T'Mod``). Listed explicitly so the
+# common attribute uses parse without lexer feedback gymnastics.
+<attribute_designator> : IDENT
+                       | 'range'
+                       | 'access'
+                       | 'delta'
+                       | 'digits'
+                       | 'mod'
+                       ;
+
+<ident_list>        : <name>
+                   | <ident_list> COMMA <name>
+                   ;
+
+# ``X(Y, Z)`` may be a function call, a positional aggregate-call,
+# an indexed component, or a type conversion. ``X(K => V)`` is a named
+# parameter association. Mixing positional and named is allowed.
+<expr_or_assoc_list> : <expr_or_assoc>
+                     | <expr_or_assoc_list> COMMA <expr_or_assoc>
+                     ;
+
+# Named associations (``K => V``) are restricted here to a bare IDENT
+# selector to keep the LR machinery from merging ``<name>`` reductions
+# from list-of-names contexts (object_decl, with-clause, etc.) with
+# ``<name>`` reductions from expression-position. Real Ada also
+# permits ``Pkg.K => V`` and array-index-form named assocs; uada80
+# can post-process the IDENT to a SelectedName when needed.
+<expr_or_assoc>    : <expr>
+                   | <expr> DOTDOT <expr>
+                   | IDENT ARROW <expr>
+                   | 'others' ARROW <expr>
+                   ;
+
+# ===========================================================================
+# Subprograms
+# ===========================================================================
+
+# Subprogram declarations cover prototypes (``F(args) return T;``),
+# bodies/specs renaming (``renames Other``), separate-clause stubs
+# (``is separate``), and generic instantiations (``is new G;``).
+# Function instantiations may omit the trailing ``return T`` because
+# the return type comes from the generic; that's covered by the
+# bare-spec ``function`` form in <subprogram_spec> below — its only
+# legal continuations are ``is new G`` or ``renames Other``, the
+# semantic phase rejects bare ``;`` etc.
+<subprogram_decl>  : <subprogram_spec> SEMI
+                   | <subprogram_spec> 'renames' <name> SEMI
+                   | <subprogram_spec> 'is' 'separate' SEMI
+                   | <subprogram_spec> 'is' 'new' <name> SEMI
+                   ;
+
+<subprogram_body>  : <subprogram_spec> 'is' <decl_part> 'begin' <handled_stmt_seq> 'end' <opt_designator> SEMI ;
+
+# Note: formal part is *not* optional in the grammar — the LALR machinery
+# can't distinguish an empty formal_part_opt followed by ``is`` (start of
+# body) from a bare designator followed by ``is new`` (instantiation
+# tail). Instead we list the present-vs-absent cases explicitly so the
+# parser commits without lookahead-2.
+<subprogram_spec>  : <overriding_opt> 'procedure' <designator> <formal_part>
+                   | <overriding_opt> 'procedure' <designator>
+                   | <overriding_opt> 'function'  <designator> <formal_part> 'return' <name>
+                   | <overriding_opt> 'function'  <designator> 'return' <name>
+                   | <overriding_opt> 'function'  <designator>
+                   ;
+
+# Ada 2005 introduced ``overriding`` / ``not overriding`` as a
+# subprogram declarator prefix.
+<overriding_opt>   : 'overriding'
+                   | 'not' 'overriding'
+                   |
+                   ;
+
+<formal_part>      : LPAREN <formal_param_list> RPAREN ;
+
+<designator>       : IDENT
+                   | STRING_LIT
+                   ;
+
+# End-of-block designator. A name covers both bare IDENTs and
+# dotted child-package names (``end Pkg.Child;``); operator-name
+# string-literal designators (``end "+";``) are accepted too. The
+# semantic phase verifies the closing designator matches the opener.
+<opt_designator>   : <name>
+                   | STRING_LIT
+                   |
+                   ;
+
+## ``formal_part_opt`` was here in earlier drafts but has been split
+## into present/absent forms at every call site to avoid an empty
+## production conflicting with a generic-instantiation tail (``is
+## new``) at lookahead 1.
+<formal_param_list> : <formal_param>
+                    | <formal_param_list> SEMI <formal_param>
+                    ;
+
+# ``Name [, Name ...] : [in] [out] subtype [:= default]``
+<formal_param>     : <ident_list> COLON <mode> <name> <default_expr_opt>
+                   ;
+
+<mode>             : 'in'
+                   | 'out'
+                   | 'in' 'out'
+                   |
+                   ;
+
+<default_expr_opt> : ASSIGN <expr>
+                   |
+                   ;
+
+# Defining-identifier list: an ``IDENT, IDENT, ...`` sequence used
+# wherever a declaration introduces one or more new identifiers
+# (object decls, formal parameters, exception decls, components).
+# Built directly atop ``name_list``-shaped ``name``s; we extract the
+# defining IDENT in the AST builder. Doing it this way (vs. a
+# dedicated IDENT-only list) avoids an LALR(1) reduce/reduce on
+# ``IDENT`` lookahead ``COMMA`` between ``ident_list -> IDENT`` and
+# ``name -> IDENT`` that no amount of grammar restructuring fully
+# eliminates without semantic-action support.
+
+
+# ===========================================================================
+# Packages
+# ===========================================================================
+
+<package_decl>     : 'package' <name> 'is' <decl_part> <private_part_opt> 'end' <opt_designator> SEMI
+                   | 'package' <name> 'is' 'new' <name> SEMI
+                   | 'package' <name> 'renames' <name> SEMI
+                   | 'package' 'body' <name> 'is' 'separate' SEMI
+                   ;
+
+<private_part_opt> : 'private' <decl_part>
+                   |
+                   ;
+
+<package_body>     : 'package' 'body' <name> 'is' <decl_part> <init_part_opt> 'end' <opt_designator> SEMI ;
+
+<init_part_opt>    : 'begin' <handled_stmt_seq>
+                   |
+                   ;
+
+# ===========================================================================
+# Declarative parts
+# ===========================================================================
+#
+# Ada admits any mix of declarations in a declarative part — variable,
+# type, subtype, subprogram (decl or body), package, pragma, use clause.
+
+<decl_part>        : <decl_part> <decl_item>
+                   |
+                   ;
+
+<decl_item>        : <representation_clause>
+                   | <object_decl>
+                   | <type_decl>
+                   | <subtype_decl>
+                   | <subprogram_decl>
+                   | <subprogram_body>
+                   | <package_decl>
+                   | <package_body>
+                   | <use_clause>
+                   | <pragma>
+                   | <number_decl>
+                   | <exception_decl>
+                   | <generic_decl>
+                   | <task_decl>
+                   | <task_body>
+                   | <protected_decl>
+                   | <protected_body>
+                   ;
+
+# ``E : exception;`` and ``E : exception renames Other;``. Sharing the
+# leading ``ident_list COLON`` shape with ``object_decl`` is fine
+# because the ``'exception'`` token after the colon is unique here —
+# subtype indications never start with EXCEPTION.
+<exception_decl>   : <ident_list> COLON 'exception' <exception_rename_opt> SEMI
+                   ;
+
+# Representation / aspect clauses introduced by ``for``: attribute
+# definition (``for X'Address use Y;``), record representation
+# (``for T use record ... end record;``), and enumeration
+# representation (``for E use (A => 1, B => 2);``). The shared
+# ``<name>`` prefix covers the qualified-name aspect target.
+<representation_clause> : 'for' <name> 'use' <expr> SEMI
+                        | 'for' <name> 'use' 'record' <component_clauses> 'end' 'record' SEMI
+                        | 'for' <name> 'use' 'record' 'at' 'mod' <expr> SEMI <component_clauses> 'end' 'record' SEMI
+                        ;
+
+<component_clauses> : <component_clauses> <component_clause>
+                    |
+                    ;
+
+# ``component_name at expr range L .. H;``
+<component_clause>  : <name> 'at' <expr> 'range' <expr> DOTDOT <expr> SEMI
+                    ;
+
+# Renaming form ``E : exception renames Other;`` is technically
+# restricted to a single declarator in real Ada; we accept the
+# ident_list shape and let the AST builder enforce the cardinality.
+<exception_rename_opt> : 'renames' <name>
+                       |
+                       ;
+
+<use_clause>       : 'use' <ident_list> SEMI
+                   | 'use' 'type' <ident_list> SEMI
+                   ;
+
+# ``Pi : constant := 3.14;`` — number declaration without explicit type.
+<number_decl>      : <ident_list> COLON 'constant' ASSIGN <expr> SEMI ;
+
+# ``X, Y : [aliased] [constant] T [:= expr];``
+<object_decl>      : <ident_list> COLON <object_qualifiers> <subtype_indication> <init_opt> SEMI
+                   | <ident_list> COLON <object_qualifiers> <subtype_indication> 'renames' <name> SEMI
+                   | <ident_list> COLON <object_qualifiers> <array_type_def> <init_opt> SEMI
+                   | <ident_list> COLON <object_qualifiers> <access_type_def> <init_opt> SEMI
+                   ;
+
+<object_qualifiers> : 'aliased' 'constant'
+                    | 'aliased'
+                    | 'constant'
+                    |
+                    ;
+
+<init_opt>         : ASSIGN <expr>
+                   |
+                   ;
+
+# ===========================================================================
+# Type & subtype declarations
+# ===========================================================================
+
+<subtype_decl>     : 'subtype' IDENT 'is' <subtype_indication> SEMI ;
+
+<type_decl>        : 'type' IDENT 'is' <type_definition> SEMI
+                   | 'type' IDENT SEMI                              # incomplete type
+                   ;
+
+<type_definition>  : <enum_type_def>
+                   | <integer_type_def>
+                   | <array_type_def>
+                   | <record_type_def>
+                   | <access_type_def>
+                   | <derived_type_def>
+                   | <tagged_type_def>
+                   | <private_type_def>
+                   | <interface_type_def>
+                   ;
+
+# Derived: ``new T``, optionally with a ``with record … end record``
+# extension or ``with private`` indication.
+<derived_type_def> : 'new' <subtype_indication>
+                   | 'new' <subtype_indication> 'with' <record_type_def>
+                   | 'new' <subtype_indication> 'with' 'private'
+                   | 'abstract' 'new' <subtype_indication> 'with' <record_type_def>
+                   | 'abstract' 'new' <subtype_indication> 'with' 'private'
+                   ;
+
+# Tagged record: ``[abstract] [limited] tagged record … end record``.
+<tagged_type_def>  : <type_classifier> 'record' <component_list> 'end' 'record'
+                   | <type_classifier> 'null' 'record'
+                   | 'tagged' <record_type_def>
+                   | 'tagged' 'private'
+                   | 'tagged' 'limited' 'private'
+                   ;
+
+<type_classifier>  : 'abstract' 'tagged'
+                   | 'limited' 'tagged'
+                   | 'abstract' 'limited' 'tagged'
+                   ;
+
+# Private types: ``type T is [limited] private``.
+<private_type_def> : 'private'
+                   | 'limited' 'private'
+                   ;
+
+# Interfaces: ``type I is [limited|synchronized|tagged] interface
+# [and parent_list]``.
+<interface_type_def> : 'interface'
+                     | 'interface' 'and' <ident_list>
+                     | <interface_kind> 'interface'
+                     | <interface_kind> 'interface' 'and' <ident_list>
+                     ;
+
+<interface_kind>   : 'limited'
+                   | 'synchronized'
+                   | 'task'
+                   | 'protected'
+                   ;
+
+# Access types. Plain access-to-object, ``access all/constant T``,
+# and access-to-subprogram. The optional formal-part on the
+# subprogram form is shared with subprogram_spec.
+<access_type_def>  : 'access' <subtype_indication>
+                   | 'access' 'all' <subtype_indication>
+                   | 'access' 'constant' <subtype_indication>
+                   | 'access' 'procedure'
+                   | 'access' 'procedure' <formal_part>
+                   | 'access' 'function' 'return' <name>
+                   | 'access' 'function' <formal_part> 'return' <name>
+                   ;
+
+<enum_type_def>    : LPAREN <enum_literal_list> RPAREN ;
+
+<enum_literal_list> : <enum_literal>
+                    | <enum_literal_list> COMMA <enum_literal>
+                    ;
+
+<enum_literal>     : IDENT
+                   | CHAR_LIT
+                   ;
+
+# ``range L .. H`` or ``mod 256`` for plain integer types; ``range <>``
+# is the generic formal "any integer type" placeholder.
+<integer_type_def> : 'range' <expr> DOTDOT <expr>
+                   | 'range' BOX
+                   | 'mod' <expr>
+                   ;
+
+<array_type_def>   : 'array' LPAREN <index_constraint_list> RPAREN 'of' <subtype_indication>
+                   ;
+
+<index_constraint_list> : <index_constraint>
+                        | <index_constraint_list> COMMA <index_constraint>
+                        ;
+
+<index_constraint> : <expr> DOTDOT <expr>
+                   | <name> 'range' BOX
+                   | <name>
+                   ;
+
+<record_type_def>  : 'record' <component_list> 'end' 'record'
+                   | 'null' 'record'
+                   ;
+
+<component_list>   : <component_list> <component_decl>
+                   |
+                   ;
+
+<component_decl>   : <ident_list> COLON <subtype_indication> <init_opt> SEMI
+                   ;
+
+# ===========================================================================
+# Subtype indications
+# ===========================================================================
+#
+# ``T``, ``T range L .. H``, ``T(L .. H)``.
+
+# A subtype indication is just a name (possibly with index / range
+# constraint parens) with an optional explicit ``range L .. H`` tail.
+# Index constraints like ``String(1..15)`` parse via the ``name``
+# alternative — the parens with a DOTDOT-form ``expr_or_assoc`` inside
+# are captured by the unified ``name LPAREN expr_or_assoc_list RPAREN``
+# rule. The semantic phase decides whether those parens are a call,
+# an index, or a constraint based on what the leading name resolves to.
+<subtype_indication> : <name>
+                     | <name> 'range' <expr> DOTDOT <expr>
+                     ;
+
+# ===========================================================================
+# Statements
+# ===========================================================================
+
+<stmt_seq>         : <stmt>
+                   | <stmt_seq> <stmt>
+                   ;
+
+# Subprogram bodies, blocks, and package init parts may have an
+# optional exception-handler section. We model that by wrapping
+# ``stmt_seq`` in an outer non-terminal and using it everywhere a
+# body's statement list appears.
+<handled_stmt_seq> : <stmt_seq>
+                   | <stmt_seq> 'exception' <handler_list>
+                   ;
+
+<handler_list>     : <handler>
+                   | <handler_list> <handler>
+                   ;
+
+# Exception handler: ``when E1 | E2 => stmts``. The optional Ada-95
+# occurrence binding ``when X : E => …`` is omitted to avoid an LALR
+# ambiguity between ``IDENT :`` (occurrence binding) and ``ident_list
+# COLON …`` (object decl). uada80 callers needing the binding can
+# rewrite it as a separate ``when E => declare X : … begin …;`` block.
+<handler>          : 'when' <discrete_choice_list> ARROW <stmt_seq>
+                   ;
+
+<stmt>             : <labeled_stmt>
+                   | <unlabeled_stmt>
+                   ;
+
+<labeled_stmt>     : LSHIFT IDENT RSHIFT <unlabeled_stmt>
+                   ;
+
+<unlabeled_stmt>   : <null_stmt>
+                   | <assignment_stmt>
+                   | <call_stmt>
+                   | <return_stmt>
+                   | <if_stmt>
+                   | <case_stmt>
+                   | <loop_stmt>
+                   | <exit_stmt>
+                   | <goto_stmt>
+                   | <block_stmt>
+                   | <pragma>
+                   | <raise_stmt>
+                   | <delay_stmt>
+                   | <abort_stmt>
+                   | <accept_stmt>
+                   | <select_stmt>
+                   | <requeue_stmt>
+                   ;
+
+# Exception raising. ``raise;`` is a re-raise inside a handler;
+# ``raise E;`` is a normal raise; ``raise E with msg;`` (Ada 2005+)
+# attaches a message expression to the occurrence.
+<raise_stmt>       : 'raise' SEMI
+                   | 'raise' <name> SEMI
+                   | 'raise' <name> 'with' <expr> SEMI
+                   ;
+
+# Tasking statements (parsed at full grammar; semantics deferred).
+<delay_stmt>       : 'delay' <expr> SEMI
+                   | 'delay' 'until' <expr> SEMI
+                   ;
+
+<abort_stmt>       : 'abort' <ident_list> SEMI ;
+
+<requeue_stmt>     : 'requeue' <name> SEMI
+                   | 'requeue' <name> 'with' 'abort' SEMI
+                   ;
+
+# ``accept E [(params)] [do stmts end E];``. The entry name is
+# restricted to a bare IDENT — allowing the full ``<name>`` form
+# triggers an LALR ambiguity between ``name LPAREN args RPAREN``
+# (call-style indexing) and ``LPAREN formal_param_list RPAREN``
+# (parameter declarations) inside the parens that follow. Real Ada
+# accepts always reference a bare entry name, so the restriction
+# costs nothing in practice.
+<accept_stmt>      : 'accept' IDENT SEMI
+                   | 'accept' IDENT <formal_part> SEMI
+                   | 'accept' IDENT 'do' <handled_stmt_seq> 'end' <opt_designator> SEMI
+                   | 'accept' IDENT <formal_part> 'do' <handled_stmt_seq> 'end' <opt_designator> SEMI
+                   ;
+
+# ``select`` covers selective accepts, conditional / timed entry
+# calls, and asynchronous transfers. The plox grammar models the
+# common shape (``select stmts {or stmts} [else stmts] end select;``)
+# and leaves accept/delay/terminate alternatives to ordinary stmts
+# inside the alternative bodies.
+<select_stmt>      : 'select' <stmt_seq> <select_or_list_opt> <select_else_opt> 'end' 'select' SEMI ;
+
+<select_or_list_opt> : <select_or_list_opt> 'or' <stmt_seq>
+                     |
+                     ;
+
+<select_else_opt>  : 'else' <stmt_seq>
+                   | 'then' 'abort' <stmt_seq>
+                   |
+                   ;
+
+<null_stmt>        : 'null' SEMI ;
+
+<assignment_stmt>  : <name> ASSIGN <expr> SEMI ;
+
+# ``Name;`` and ``Name(args);`` — both shapes are call statements.
+# Sharing ``<name>`` keeps this conflict-free.
+<call_stmt>        : <name> SEMI ;
+
+<return_stmt>      : 'return' SEMI
+                   | 'return' <expr> SEMI
+                   ;
+
+<if_stmt>          : 'if' <expr> 'then' <stmt_seq> <elsif_part> <else_part> 'end' 'if' SEMI ;
+
+<elsif_part>       : <elsif_part> 'elsif' <expr> 'then' <stmt_seq>
+                   |
+                   ;
+
+<else_part>        : 'else' <stmt_seq>
+                   |
+                   ;
+
+<case_stmt>        : 'case' <expr> 'is' <case_alternatives> 'end' 'case' SEMI ;
+
+<case_alternatives> : <case_alternatives> <case_alternative>
+                    | <case_alternative>
+                    ;
+
+<case_alternative> : 'when' <discrete_choice_list> ARROW <stmt_seq>
+                   ;
+
+<discrete_choice_list> : <discrete_choice>
+                       | <discrete_choice_list> PIPE <discrete_choice>
+                       ;
+
+<discrete_choice>  : <expr>
+                   | <expr> DOTDOT <expr>
+                   | 'others'
+                   ;
+
+# Loops: plain ``loop ... end loop;``, ``while`` and ``for`` heads.
+<loop_stmt>        : <iteration_scheme> 'loop' <stmt_seq> 'end' 'loop' <opt_loop_label> SEMI ;
+
+# Iteration: ``while expr``, classic ``for I in [reverse] R``, and
+# Ada 2012 element-iteration ``for E of [reverse] A``.
+<iteration_scheme> : 'while' <expr>
+                   | 'for' IDENT 'in' <reverse_opt> <discrete_range>
+                   | 'for' IDENT 'of' <reverse_opt> <name>
+                   |
+                   ;
+
+<reverse_opt>      : 'reverse'
+                   |
+                   ;
+
+<discrete_range>   : <expr> DOTDOT <expr>
+                   | <name>
+                   | <name> 'range' <expr> DOTDOT <expr>
+                   ;
+
+<opt_loop_label>   : IDENT
+                   |
+                   ;
+
+<exit_stmt>        : 'exit' SEMI
+                   | 'exit' IDENT SEMI
+                   | 'exit' 'when' <expr> SEMI
+                   | 'exit' IDENT 'when' <expr> SEMI
+                   ;
+
+<goto_stmt>        : 'goto' IDENT SEMI ;
+
+<block_stmt>       : 'declare' <decl_part> 'begin' <handled_stmt_seq> 'end' SEMI
+                   | 'begin' <handled_stmt_seq> 'end' SEMI
+                   ;
+
+# ===========================================================================
+# Expressions
+# ===========================================================================
+#
+# Ada's expression grammar is a flat 5-level ladder: relation, simple
+# expression, term, factor, primary. Boolean operators (``and``, ``or``,
+# ``and then``, ``or else``, ``xor``) sit above relations.
+# Short-circuit is two tokens, modelled as a separate alternative.
+
+<expr>             : <relation>
+                   | <expr> 'and' <relation>
+                   | <expr> 'and' 'then' <relation>
+                   | <expr> 'or' <relation>
+                   | <expr> 'or' 'else' <relation>
+                   | <expr> 'xor' <relation>
+                   ;
+
+<relation>         : <simple_expr>
+                   | <simple_expr> EQ  <simple_expr>
+                   | <simple_expr> NEQ <simple_expr>
+                   | <simple_expr> LT  <simple_expr>
+                   | <simple_expr> LE  <simple_expr>
+                   | <simple_expr> GT  <simple_expr>
+                   | <simple_expr> GE  <simple_expr>
+                   | <simple_expr> 'in' <simple_expr> DOTDOT <simple_expr>
+                   | <simple_expr> 'not' 'in' <simple_expr> DOTDOT <simple_expr>
+                   ;
+
+<simple_expr>      : <term>
+                   | PLUS  <term>
+                   | MINUS <term>
+                   | <simple_expr> PLUS  <term>
+                   | <simple_expr> MINUS <term>
+                   | <simple_expr> AMP   <term>
+                   ;
+
+<term>             : <factor>
+                   | <term> STAR  <factor>
+                   | <term> SLASH <factor>
+                   | <term> 'mod' <factor>
+                   | <term> 'rem' <factor>
+                   ;
+
+<factor>           : <primary>
+                   | <primary> STARSTAR <primary>
+                   | 'not' <primary>
+                   | 'abs' <primary>
+                   ;
+
+<primary>          : <name>
+                   | INT_LIT
+                   | REAL_LIT
+                   | CHAR_LIT
+                   | STRING_LIT
+                   | 'null'
+                   | 'true'
+                   | 'false'
+                   | LPAREN <expr> RPAREN
+                   | <aggregate>
+                   | <qualified_expr>
+                   | <allocator>
+                   ;
+
+# ``new T`` / ``new T(args)`` / ``new T'(qualified)``. The first form
+# uses a *dedicated* allocator-subtype non-terminal — sharing
+# ``subtype_indication`` with ``derived_type_def`` (also ``new …``)
+# would trigger an LALR state-merge that explodes the conflict count,
+# so we keep the rules disjoint even though the body is the same.
+# ``new T'(qualified)`` is the only allocator form supported by this
+# grammar. The unqualified ``new T`` and parenthesised
+# ``new T(constraint)`` shapes share the ``'new' <name>`` prefix
+# with a derived-type definition; the resulting LALR state-merge
+# explodes the conflict count. Code using the unqualified form should
+# rewrite as ``new T'(value)`` until ada_full models the disambiguation
+# via lexer feedback.
+<allocator>        : 'new' <name> TICK LPAREN <expr> RPAREN
+                   ;
+
+# ``T'(expr)`` qualified expression / type conversion.
+<qualified_expr>   : <name> TICK LPAREN <expr> RPAREN
+                   ;
+
+# Aggregates: positional ``(a, b, c)`` (must have at least 2 elements
+# to disambiguate from parenthesised expression), or named
+# ``(Field => v, ...)`` / array-style ``(1 => v, 2..5 => w, others => x)``.
+# Single-element named aggregates need at least one ``ARROW`` to
+# disambiguate; that's enforced by the choice list rule.
+<aggregate>        : LPAREN <agg_positional_two_plus> RPAREN
+                   | LPAREN <agg_named_list> RPAREN
+                   ;
+
+<agg_positional_two_plus> : <expr> COMMA <agg_positional_tail>
+                          ;
+
+<agg_positional_tail> : <expr>
+                      | <expr> COMMA <agg_positional_tail>
+                      ;
+
+<agg_named_list>   : <agg_named_assoc>
+                   | <agg_named_list> COMMA <agg_named_assoc>
+                   ;
+
+<agg_named_assoc>  : <discrete_choice_list> ARROW <expr>
+                   ;
+
+# ===========================================================================
+# Generics
+# ===========================================================================
+#
+# A generic declaration consists of a generic formal part (parameters)
+# followed by a subprogram or package specification. A generic
+# instantiation is a subprogram or package declaration whose body is
+# ``is new generic_name(actuals)``.
+
+<generic_decl>     : 'generic' <generic_formal_part> <subprogram_spec> SEMI
+                   | 'generic' <generic_formal_part> 'package' <name> 'is' <decl_part> <private_part_opt> 'end' <opt_designator> SEMI
+                   ;
+
+<generic_formal_part> : <generic_formal_part> <generic_formal>
+                      |
+                      ;
+
+<generic_formal>   : <object_decl>
+                   | <type_decl>
+                   | <generic_formal_subprogram>
+                   | <generic_formal_package>
+                   | <use_clause>
+                   | <pragma>
+                   ;
+
+# ``with procedure NAME [(...)] [is <>]`` — a formal subprogram
+# parameter. The ``is <>`` form means "default to a same-named
+# procedure visible at the instantiation site".
+<generic_formal_subprogram> : 'with' <subprogram_spec> <subprogram_default_opt> SEMI ;
+
+<subprogram_default_opt> : 'is' BOX
+                         | 'is' <name>
+                         | 'is' 'null'
+                         |
+                         ;
+
+<generic_formal_package>   : 'with' 'package' <name> 'is' 'new' <name> SEMI ;
+
+# Note: generic actual parts are absorbed into the trailing ``<name>``
+# of the IS-NEW form via ``name LPAREN expr_or_assoc_list RPAREN``;
+# we no longer keep a dedicated ``generic_actual_part_opt`` rule
+# because the prefix overlap with ``name`` produced a SEMI
+# reduce/reduce conflict.
+
+# Generic instantiations are handled inside ``subprogram_decl`` and
+# ``package_decl`` via the ``IS NEW name [(actuals)]`` tail; this
+# avoids the LR conflicts a separate non-terminal would introduce
+# (``PROCEDURE NAME IS …`` is also the prefix of a subprogram body).
+
+# ===========================================================================
+# Tasks and protected types
+# ===========================================================================
+
+<task_decl>        : 'task' <task_kind> IDENT <task_def_opt> SEMI ;
+
+<task_kind>        : 'type'
+                   |
+                   ;
+
+<task_def_opt>     : 'is' <task_items> <task_private_opt> 'end' <opt_designator>
+                   | 'is' 'new' <ident_list> 'with' <task_items> <task_private_opt> 'end' <opt_designator>
+                   |
+                   ;
+
+<task_items>       : <task_items> <task_item>
+                   |
+                   ;
+
+<task_item>        : <entry_decl>
+                   | <pragma>
+                   | <use_clause>
+                   ;
+
+<task_private_opt> : 'private' <task_items>
+                   |
+                   ;
+
+<task_body>        : 'task' 'body' IDENT 'is' <decl_part> 'begin' <handled_stmt_seq> 'end' <opt_designator> SEMI
+                   | 'task' 'body' IDENT 'is' 'separate' SEMI
+                   ;
+
+# ``entry E [(params)]`` — the explicit ``entry E (family_index)``
+# form would conflict with the parameter list parens, so we let the
+# parser see only the parameter form. Entry families needing an
+# index can be parsed by the host post-hoc on the formal-part shape.
+<entry_decl>       : 'entry' IDENT SEMI
+                   | 'entry' IDENT <formal_part> SEMI
+                   ;
+
+<protected_decl>   : 'protected' <task_kind> IDENT <protected_def_opt> SEMI ;
+
+<protected_def_opt> : 'is' <protected_items> <protected_private_opt> 'end' <opt_designator>
+                    | 'is' 'new' <ident_list> 'with' <protected_items> <protected_private_opt> 'end' <opt_designator>
+                    |
+                    ;
+
+<protected_items>  : <protected_items> <protected_item>
+                   |
+                   ;
+
+# Protected items in spec: subprogram decls, entries, and component
+# declarations (in the private part).
+<protected_item>   : <subprogram_decl>
+                   | <entry_decl>
+                   | <object_decl>
+                   | <pragma>
+                   | <use_clause>
+                   ;
+
+<protected_private_opt> : 'private' <protected_items>
+                        |
+                        ;
+
+<protected_body>   : 'protected' 'body' IDENT 'is' <protected_body_items> 'end' <opt_designator> SEMI
+                   | 'protected' 'body' IDENT 'is' 'separate' SEMI
+                   ;
+
+<protected_body_items> : <protected_body_items> <protected_body_item>
+                       |
+                       ;
+
+<protected_body_item>  : <subprogram_decl>
+                       | <subprogram_body>
+                       | <entry_body>
+                       | <pragma>
+                       | <use_clause>
+                       ;
+
+<entry_body>       : 'entry' IDENT 'when' <expr> 'is' <decl_part> 'begin' <handled_stmt_seq> 'end' <opt_designator> SEMI
+                   | 'entry' IDENT <formal_part> 'when' <expr> 'is' <decl_part> 'begin' <handled_stmt_seq> 'end' <opt_designator> SEMI
+                   ;
