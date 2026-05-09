@@ -4,11 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 # Distribution name: "uplox" (the matplotlib-helper "plox" already
-# squats the bare name on PyPI). The Python module, the CLI binary,
-# the GitHub repo, and the .plox grammar format keep the original
-# "plox" name. Users install via `pip install uplox` and import via
-# `import plox` (setuptools allows the dist name and the import name
-# to differ; cf. python-dateutil → dateutil).
+# squats the bare name on PyPI; the GitHub repo was renamed to
+# avwohl/uplox to match). The Python module, the CLI binary, and
+# the .plox grammar format keep the original "plox" name. Users
+# install via `pip install uplox` and import via `import plox`
+# (setuptools allows the dist name and the import name to differ;
+# cf. python-dateutil → dateutil).
 name = "uplox"
 version = "2.0.0"
 description = "Compiler front-end generator: grammar source to canonical JSON tables plus C/C++/Python/Lua drivers"
@@ -39,9 +40,9 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/avwohl/plox"
-Repository = "https://github.com/avwohl/plox"
-Issues = "https://github.com/avwohl/plox/issues"
+Homepage = "https://github.com/avwohl/uplox"
+Repository = "https://github.com/avwohl/uplox"
+Issues = "https://github.com/avwohl/uplox/issues"
 
 [project.scripts]
 plox = "plox.cli.main:main"

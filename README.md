@@ -81,10 +81,11 @@ pip install uplox        # PyPI distribution name
 ```
 
 The PyPI distribution is `uplox` because the bare `plox` name on PyPI
-is already taken by an unrelated matplotlib helper. The Python module,
-the CLI binary, the GitHub repo, and the `.plox` grammar format all
-keep the original `plox` name — `pip install uplox` installs a
-top-level `import plox` and a `plox` command.
+is already taken by an unrelated matplotlib helper; the GitHub repo
+([avwohl/uplox](https://github.com/avwohl/uplox)) was renamed to
+match. The Python module, the CLI binary, and the `.plox` grammar
+format all keep the original `plox` name — `pip install uplox`
+installs a top-level `import plox` and a `plox` command.
 
 ## Quick start
 
