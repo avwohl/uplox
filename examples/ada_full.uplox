@@ -163,6 +163,7 @@ PIPE       = '|'
 
 <name>             : IDENT
                    | <name> DOT IDENT
+                   | <name> DOT STRING_LIT
                    | <name> DOT 'all'
                    | <name> LPAREN <expr_or_assoc_list> RPAREN
                    | <name> TICK <attribute_designator>
@@ -200,7 +201,12 @@ PIPE       = '|'
 <expr_or_assoc>    : <expr>
                    | <expr> DOTDOT <expr>
                    | IDENT ARROW <expr>
+                   | IDENT ARROW BOX
+                   | INT_LIT ARROW <expr>
+                   | CHAR_LIT ARROW <expr>
                    | 'others' ARROW <expr>
+                   | 'others' ARROW BOX
+                   | BOX
                    ;
 
 # ===========================================================================
@@ -216,9 +222,16 @@ PIPE       = '|'
 # legal continuations are ``is new G`` or ``renames Other``, the
 # semantic phase rejects bare ``;`` etc.
 <subprogram_decl>  : <subprogram_spec> SEMI
+                   | <subprogram_spec> <aspect_spec> SEMI
+                   | <subprogram_spec> 'is' 'abstract' SEMI
+                   | <subprogram_spec> 'is' 'abstract' <aspect_spec> SEMI
+                   | <subprogram_spec> 'is' 'null' SEMI
+                   | <subprogram_spec> 'is' 'null' <aspect_spec> SEMI
                    | <subprogram_spec> 'renames' <name> SEMI
+                   | <subprogram_spec> 'renames' <name> <aspect_spec> SEMI
                    | <subprogram_spec> 'is' 'separate' SEMI
                    | <subprogram_spec> 'is' 'new' <name> SEMI
+                   | <subprogram_spec> 'is' 'new' <name> <aspect_spec> SEMI
                    ;
 
 <subprogram_body>  : <subprogram_spec> 'is' <decl_part> 'begin' <handled_stmt_seq> 'end' <opt_designator> SEMI ;
@@ -230,8 +243,8 @@ PIPE       = '|'
 # parser commits without lookahead-2.
 <subprogram_spec>  : <overriding_opt> 'procedure' <designator> <formal_part>
                    | <overriding_opt> 'procedure' <designator>
-                   | <overriding_opt> 'function'  <designator> <formal_part> 'return' <name>
-                   | <overriding_opt> 'function'  <designator> 'return' <name>
+                   | <overriding_opt> 'function'  <designator> <formal_part> 'return' <subtype_indication>
+                   | <overriding_opt> 'function'  <designator> 'return' <subtype_indication>
                    | <overriding_opt> 'function'  <designator>
                    ;
 
@@ -244,7 +257,14 @@ PIPE       = '|'
 
 <formal_part>      : LPAREN <formal_param_list> RPAREN ;
 
+## A subprogram designator is a bare IDENT, an operator-name string
+## literal, or a dotted form for child library units (``procedure
+## Ada.Containers.Sort is …``). The dotted form is restricted to a
+## chain of IDENTs (no ``.all`` / parens / ticks) so it doesn't
+## collide with the more general ``<name>`` and trigger an LR
+## ambiguity at the trailing LPAREN (formal_part vs name args).
 <designator>       : IDENT
+                   | <designator> DOT IDENT
                    | STRING_LIT
                    ;
 
@@ -265,8 +285,20 @@ PIPE       = '|'
                     | <formal_param_list> SEMI <formal_param>
                     ;
 
-# ``Name [, Name ...] : [in] [out] subtype [:= default]``
-<formal_param>     : <ident_list> COLON <mode> <name> <default_expr_opt>
+# ``Name [, Name ...] : [in] [out] [aliased] subtype [:= default]``
+# The subtype indication can be an anonymous access type, so
+# ``X : access T`` and ``X : not null access procedure (...)`` parse
+# via <subtype_indication>. The aliased qualifier is currently only
+# accepted when paired with an explicit mode keyword to keep the LR
+# table free of an empty-mode/aliased shift/reduce.
+<formal_param>     : <ident_list> COLON <mode> <subtype_indication> <default_expr_opt>
+                   | <ident_list> COLON <mode> <array_type_def> <default_expr_opt>
+                   | <ident_list> COLON 'aliased' <subtype_indication> <default_expr_opt>
+                   | <ident_list> COLON 'in' 'aliased' <subtype_indication> <default_expr_opt>
+                   | <ident_list> COLON 'out' 'aliased' <subtype_indication> <default_expr_opt>
+                   | <ident_list> COLON 'aliased' 'in' <subtype_indication> <default_expr_opt>
+                   | <ident_list> COLON 'aliased' 'in' 'out' <subtype_indication> <default_expr_opt>
+                   | <ident_list> COLON 'aliased' 'out' <subtype_indication> <default_expr_opt>
                    ;
 
 <mode>             : 'in'
@@ -295,7 +327,9 @@ PIPE       = '|'
 # ===========================================================================
 
 <package_decl>     : 'package' <name> 'is' <decl_part> <private_part_opt> 'end' <opt_designator> SEMI
+                   | 'package' <name> <aspect_spec> 'is' <decl_part> <private_part_opt> 'end' <opt_designator> SEMI
                    | 'package' <name> 'is' 'new' <name> SEMI
+                   | 'package' <name> 'is' 'new' <name> <aspect_spec> SEMI
                    | 'package' <name> 'renames' <name> SEMI
                    | 'package' 'body' <name> 'is' 'separate' SEMI
                    ;
@@ -381,9 +415,9 @@ PIPE       = '|'
 
 # ``X, Y : [aliased] [constant] T [:= expr];``
 <object_decl>      : <ident_list> COLON <object_qualifiers> <subtype_indication> <init_opt> SEMI
+                   | <ident_list> COLON <object_qualifiers> <subtype_indication> <init_opt> <aspect_spec> SEMI
                    | <ident_list> COLON <object_qualifiers> <subtype_indication> 'renames' <name> SEMI
                    | <ident_list> COLON <object_qualifiers> <array_type_def> <init_opt> SEMI
-                   | <ident_list> COLON <object_qualifiers> <access_type_def> <init_opt> SEMI
                    ;
 
 <object_qualifiers> : 'aliased' 'constant'
@@ -402,8 +436,39 @@ PIPE       = '|'
 
 <subtype_decl>     : 'subtype' IDENT 'is' <subtype_indication> SEMI ;
 
+# Type declarations. Aspect specifications on type decls are folded
+# into ``<derived_tail>`` (and into ``<private_type_def>`` /
+# ``<tagged_type_def>`` etc.) where they need to coexist with the
+# derived ``with`` extension; placing aspect_spec at this outer
+# level instead would cause an LR conflict on ``with`` after a bare
+# derived type ``new T``. That trade-off costs aspect specs on
+# non-derived integer/array types — uada80 can recover them via
+# pragmas if needed.
 <type_decl>        : 'type' IDENT 'is' <type_definition> SEMI
+                   | 'type' IDENT <discriminant_part> 'is' <type_definition> SEMI
                    | 'type' IDENT SEMI                              # incomplete type
+                   | 'type' IDENT <discriminant_part> SEMI          # incomplete with discrims
+                   ;
+
+# Discriminant part: ``(D1, D2 : T1; D3 : T2 := default)``.
+# Modelled as a parenthesised semicolon-separated list of formal-
+# param-shaped declarations — the AST builder distinguishes
+# discriminants from formals by context.
+<discriminant_part> : LPAREN <formal_param_list> RPAREN
+                    | LPAREN BOX RPAREN
+                    ;
+
+# Aspect specifications: ``with Pre => P, Post => Q, Convention => C``
+# trailing most declarations. Each aspect mark is an IDENT and the
+# expression after ``=>`` is restricted to expr (no name-with-arrow).
+<aspect_spec>      : 'with' <aspect_assoc_list> ;
+
+<aspect_assoc_list> : <aspect_assoc>
+                    | <aspect_assoc_list> COMMA <aspect_assoc>
+                    ;
+
+<aspect_assoc>     : <name>
+                   | <name> ARROW <expr>
                    ;
 
 <type_definition>  : <enum_type_def>
@@ -415,15 +480,51 @@ PIPE       = '|'
                    | <tagged_type_def>
                    | <private_type_def>
                    | <interface_type_def>
+                   | <float_type_def>
+                   | <fixed_type_def>
                    ;
 
-# Derived: ``new T``, optionally with a ``with record … end record``
-# extension or ``with private`` indication.
+# Floating-point: ``digits N [range L .. H]``; generic formal:
+# ``digits <>``.
+<float_type_def>   : 'digits' <expr>
+                   | 'digits' <expr> 'range' <expr> DOTDOT <expr>
+                   | 'digits' BOX
+                   ;
+
+# Fixed-point and decimal-fixed-point types. Generic formals use
+# ``<>`` as both the delta and digits placeholders.
+<fixed_type_def>   : 'delta' <expr>
+                   | 'delta' <expr> 'range' <expr> DOTDOT <expr>
+                   | 'delta' <expr> 'digits' <expr>
+                   | 'delta' <expr> 'digits' <expr> 'range' <expr> DOTDOT <expr>
+                   | 'delta' BOX
+                   | 'delta' BOX 'digits' BOX
+                   ;
+
+# Derived: ``new T`` (plain derivation), optionally with a tagged
+# extension (``with record … end record``) or private completion
+# (``with private``). The trailing ``with`` is shared by *aspect
+# specifications* attached to the enclosing declaration; we
+# distinguish the two by lookahead at the token after ``with`` —
+# ``record`` / ``private`` continue the type definition; an IDENT
+# starts an aspect mark and is left for the surrounding rule's
+# optional aspect_spec to consume.
 <derived_type_def> : 'new' <subtype_indication>
-                   | 'new' <subtype_indication> 'with' <record_type_def>
-                   | 'new' <subtype_indication> 'with' 'private'
-                   | 'abstract' 'new' <subtype_indication> 'with' <record_type_def>
-                   | 'abstract' 'new' <subtype_indication> 'with' 'private'
+                   | 'new' <subtype_indication> 'with' <derived_tail>
+                   | 'abstract' 'new' <subtype_indication> 'with' <derived_tail>
+                   ;
+
+# After ``new T with``, plox commits on the next token: ``record`` /
+# ``null`` continue a tagged record extension; ``private`` is the
+# private completion; otherwise the parser would normally start an
+# aspect specification — but LALR(1) can't distinguish that from a
+# bare derived type with a trailing aspect, so we fold aspect
+# associations into this tail too. The AST builder differentiates
+# extension-style records from aspect lists by inspecting the
+# resulting ParseNode shape.
+<derived_tail>     : <record_type_def>
+                   | 'private'
+                   | <aspect_assoc_list>
                    ;
 
 # Tagged record: ``[abstract] [limited] tagged record … end record``.
@@ -432,16 +533,34 @@ PIPE       = '|'
                    | 'tagged' <record_type_def>
                    | 'tagged' 'private'
                    | 'tagged' 'limited' 'private'
+                   | 'abstract' 'tagged' 'private'
+                   | 'abstract' 'tagged' 'limited' 'private'
+                   | 'abstract' 'tagged' 'limited' 'private' <aspect_spec>
                    ;
 
-<type_classifier>  : 'abstract' 'tagged'
+# ``limited``/``abstract``/``tagged`` qualifiers preceding ``record``
+# / ``null record``. Keep them disjoint from the standalone
+# ``tagged record_type_def`` rule above to avoid a tagged/null-record
+# shift/reduce conflict.
+<type_classifier>  : 'abstract'
+                   | 'limited'
+                   | 'abstract' 'tagged'
                    | 'limited' 'tagged'
+                   | 'tagged' 'limited'
+                   | 'abstract' 'tagged' 'limited'
                    | 'abstract' 'limited' 'tagged'
+                   | 'limited' 'abstract' 'tagged'
                    ;
 
-# Private types: ``type T is [limited] private``.
+# Private types: ``type T is [limited] private`` plus the
+# Ada-2012-and-later trailing aspect specification (``with Pre =>
+# …, …``). Aspects are placed inside the type-def rather than at
+# the type_decl level so they can coexist with derived/tagged
+# extensions without LR ambiguity.
 <private_type_def> : 'private'
                    | 'limited' 'private'
+                   | 'private' <aspect_spec>
+                   | 'limited' 'private' <aspect_spec>
                    ;
 
 # Interfaces: ``type I is [limited|synchronized|tagged] interface
@@ -466,11 +585,18 @@ PIPE       = '|'
                    | 'access' 'constant' <subtype_indication>
                    | 'access' 'procedure'
                    | 'access' 'procedure' <formal_part>
-                   | 'access' 'function' 'return' <name>
-                   | 'access' 'function' <formal_part> 'return' <name>
+                   | 'access' 'function' 'return' <subtype_indication>
+                   | 'access' 'function' <formal_part> 'return' <subtype_indication>
+                   | 'access' 'protected' 'procedure'
+                   | 'access' 'protected' 'procedure' <formal_part>
+                   | 'access' 'protected' 'function' 'return' <subtype_indication>
+                   | 'access' 'protected' 'function' <formal_part> 'return' <subtype_indication>
                    ;
 
-<enum_type_def>    : LPAREN <enum_literal_list> RPAREN ;
+# Plain enum or generic formal "any discrete type" placeholder.
+<enum_type_def>    : LPAREN <enum_literal_list> RPAREN
+                   | LPAREN BOX RPAREN
+                   ;
 
 <enum_literal_list> : <enum_literal>
                     | <enum_literal_list> COMMA <enum_literal>
@@ -485,9 +611,11 @@ PIPE       = '|'
 <integer_type_def> : 'range' <expr> DOTDOT <expr>
                    | 'range' BOX
                    | 'mod' <expr>
+                   | 'mod' BOX
                    ;
 
 <array_type_def>   : 'array' LPAREN <index_constraint_list> RPAREN 'of' <subtype_indication>
+                   | 'array' LPAREN <index_constraint_list> RPAREN 'of' 'aliased' <subtype_indication>
                    ;
 
 <index_constraint_list> : <index_constraint>
@@ -496,6 +624,7 @@ PIPE       = '|'
 
 <index_constraint> : <expr> DOTDOT <expr>
                    | <name> 'range' BOX
+                   | <name> 'range' <expr> DOTDOT <expr>
                    | <name>
                    ;
 
@@ -508,6 +637,7 @@ PIPE       = '|'
                    ;
 
 <component_decl>   : <ident_list> COLON <subtype_indication> <init_opt> SEMI
+                   | <ident_list> COLON 'aliased' <subtype_indication> <init_opt> SEMI
                    ;
 
 # ===========================================================================
@@ -516,15 +646,27 @@ PIPE       = '|'
 #
 # ``T``, ``T range L .. H``, ``T(L .. H)``.
 
-# A subtype indication is just a name (possibly with index / range
-# constraint parens) with an optional explicit ``range L .. H`` tail.
-# Index constraints like ``String(1..15)`` parse via the ``name``
-# alternative — the parens with a DOTDOT-form ``expr_or_assoc`` inside
-# are captured by the unified ``name LPAREN expr_or_assoc_list RPAREN``
-# rule. The semantic phase decides whether those parens are a call,
-# an index, or a constraint based on what the leading name resolves to.
+# A subtype indication is a (possibly null-excluded) type name with an
+# optional explicit ``range L .. H`` tail. The ``not null`` prefix is
+# Ada 2005 — restricts an access subtype to never alias null.
 <subtype_indication> : <name>
                      | <name> 'range' <expr> DOTDOT <expr>
+                     | 'not' 'null' <name>
+                     | 'not' 'null' <name> 'range' <expr> DOTDOT <expr>
+                     | 'not' 'null' 'access' <subtype_indication>
+                     | 'not' 'null' 'access' 'all' <subtype_indication>
+                     | 'not' 'null' 'access' 'constant' <subtype_indication>
+                     | 'not' 'null' 'access' 'procedure'
+                     | 'not' 'null' 'access' 'procedure' <formal_part>
+                     | 'not' 'null' 'access' 'function' 'return' <subtype_indication>
+                     | 'not' 'null' 'access' 'function' <formal_part> 'return' <subtype_indication>
+                     | 'access' <subtype_indication>
+                     | 'access' 'all' <subtype_indication>
+                     | 'access' 'constant' <subtype_indication>
+                     | 'access' 'protected' 'procedure'
+                     | 'access' 'protected' 'procedure' <formal_part>
+                     | 'access' 'protected' 'function' 'return' <subtype_indication>
+                     | 'access' 'protected' 'function' <formal_part> 'return' <subtype_indication>
                      ;
 
 # ===========================================================================
@@ -733,6 +875,11 @@ PIPE       = '|'
                    | <simple_expr> 'not' 'in' <simple_expr> DOTDOT <simple_expr>
                    ;
 
+# Pipe-separated membership choices (``X in A | B | C``) are not
+# modelled — the LR(1) machinery can't keep the bare-``in`` form
+# disjoint from the pipe-form when both share the same simple_expr
+# right-hand side. Affects ~5 GNAT runtime files.
+
 <simple_expr>      : <term>
                    | PLUS  <term>
                    | MINUS <term>
@@ -766,21 +913,45 @@ PIPE       = '|'
                    | <aggregate>
                    | <qualified_expr>
                    | <allocator>
+                   | <if_expr>
+                   | <case_expr>
                    ;
+
+# Ada 2012 conditional expression: ``(if X then Y [elsif … then …]
+# [else …])``. The mandatory enclosing parens disambiguate from the
+# ``if`` *statement* and let the LR table commit on lookahead.
+<if_expr>          : LPAREN 'if' <expr> 'then' <expr> <elsif_expr_part> <else_expr_opt> RPAREN
+                   ;
+
+<elsif_expr_part>  : <elsif_expr_part> 'elsif' <expr> 'then' <expr>
+                   |
+                   ;
+
+<else_expr_opt>    : 'else' <expr>
+                   |
+                   ;
+
+# Ada 2012 case expression: ``(case X is when A => Y, when B => Z)``.
+<case_expr>        : LPAREN 'case' <expr> 'is' <case_expr_alternatives> RPAREN
+                   ;
+
+<case_expr_alternatives> : <case_expr_alternative>
+                         | <case_expr_alternatives> COMMA <case_expr_alternative>
+                         ;
+
+<case_expr_alternative>  : 'when' <discrete_choice_list> ARROW <expr> ;
 
 # ``new T`` / ``new T(args)`` / ``new T'(qualified)``. The first form
 # uses a *dedicated* allocator-subtype non-terminal — sharing
 # ``subtype_indication`` with ``derived_type_def`` (also ``new …``)
 # would trigger an LALR state-merge that explodes the conflict count,
 # so we keep the rules disjoint even though the body is the same.
-# ``new T'(qualified)`` is the only allocator form supported by this
-# grammar. The unqualified ``new T`` and parenthesised
-# ``new T(constraint)`` shapes share the ``'new' <name>`` prefix
-# with a derived-type definition; the resulting LALR state-merge
-# explodes the conflict count. Code using the unqualified form should
-# rewrite as ``new T'(value)`` until ada_full models the disambiguation
-# via lexer feedback.
+# Allocators: qualified ``new T'(value)`` and bare ``new T``.
+# Bare allocators use ``<name>`` rather than ``<subtype_indication>``
+# because the latter also appears as ``<derived_type_def>``'s body
+# (also ``new …``) — sharing the prefix triggers an LALR state-merge.
 <allocator>        : 'new' <name> TICK LPAREN <expr> RPAREN
+                   | 'new' <name>
                    ;
 
 # ``T'(expr)`` qualified expression / type conversion.
@@ -794,6 +965,8 @@ PIPE       = '|'
 # disambiguate; that's enforced by the choice list rule.
 <aggregate>        : LPAREN <agg_positional_two_plus> RPAREN
                    | LPAREN <agg_named_list> RPAREN
+                   | LPAREN <expr> 'with' <agg_named_list> RPAREN
+                   | LPAREN <expr> 'with' 'null' 'record' RPAREN
                    ;
 
 <agg_positional_two_plus> : <expr> COMMA <agg_positional_tail>
@@ -808,6 +981,7 @@ PIPE       = '|'
                    ;
 
 <agg_named_assoc>  : <discrete_choice_list> ARROW <expr>
+                   | <discrete_choice_list> ARROW BOX
                    ;
 
 # ===========================================================================
@@ -863,7 +1037,9 @@ PIPE       = '|'
 # Tasks and protected types
 # ===========================================================================
 
-<task_decl>        : 'task' <task_kind> IDENT <task_def_opt> SEMI ;
+<task_decl>        : 'task' <task_kind> IDENT <task_def_opt> SEMI
+                   | 'task' <task_kind> IDENT <discriminant_part> <task_def_opt> SEMI
+                   ;
 
 <task_kind>        : 'type'
                    |
@@ -899,7 +1075,9 @@ PIPE       = '|'
                    | 'entry' IDENT <formal_part> SEMI
                    ;
 
-<protected_decl>   : 'protected' <task_kind> IDENT <protected_def_opt> SEMI ;
+<protected_decl>   : 'protected' <task_kind> IDENT <protected_def_opt> SEMI
+                   | 'protected' <task_kind> IDENT <discriminant_part> <protected_def_opt> SEMI
+                   ;
 
 <protected_def_opt> : 'is' <protected_items> <protected_private_opt> 'end' <opt_designator>
                     | 'is' 'new' <ident_list> 'with' <protected_items> <protected_private_opt> 'end' <opt_designator>
