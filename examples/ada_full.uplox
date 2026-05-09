@@ -1006,7 +1006,9 @@ PIPE       = '|'
 # ``is new generic_name(actuals)``.
 
 <generic_decl>     : 'generic' <generic_formal_part> <subprogram_spec> SEMI
+                   | 'generic' <generic_formal_part> <subprogram_spec> <aspect_spec> SEMI
                    | 'generic' <generic_formal_part> 'package' <name> 'is' <decl_part> <private_part_opt> 'end' <opt_designator> SEMI
+                   | 'generic' <generic_formal_part> 'package' <name> <aspect_spec> 'is' <decl_part> <private_part_opt> 'end' <opt_designator> SEMI
                    ;
 
 <generic_formal_part> : <generic_formal_part> <generic_formal>
@@ -1050,7 +1052,9 @@ PIPE       = '|'
 # ===========================================================================
 
 <task_decl>        : 'task' <task_kind> IDENT <task_def_opt> SEMI
+                   | 'task' <task_kind> IDENT <aspect_spec> <task_def_opt> SEMI
                    | 'task' <task_kind> IDENT <discriminant_part> <task_def_opt> SEMI
+                   | 'task' <task_kind> IDENT <discriminant_part> <aspect_spec> <task_def_opt> SEMI
                    ;
 
 <task_kind>        : 'type'
@@ -1085,10 +1089,16 @@ PIPE       = '|'
 # index can be parsed by the host post-hoc on the formal-part shape.
 <entry_decl>       : 'entry' IDENT SEMI
                    | 'entry' IDENT <formal_part> SEMI
+                   | 'overriding' 'entry' IDENT SEMI
+                   | 'overriding' 'entry' IDENT <formal_part> SEMI
+                   | 'not' 'overriding' 'entry' IDENT SEMI
+                   | 'not' 'overriding' 'entry' IDENT <formal_part> SEMI
                    ;
 
 <protected_decl>   : 'protected' <task_kind> IDENT <protected_def_opt> SEMI
+                   | 'protected' <task_kind> IDENT <aspect_spec> <protected_def_opt> SEMI
                    | 'protected' <task_kind> IDENT <discriminant_part> <protected_def_opt> SEMI
+                   | 'protected' <task_kind> IDENT <discriminant_part> <aspect_spec> <protected_def_opt> SEMI
                    ;
 
 <protected_def_opt> : 'is' <protected_items> <protected_private_opt> 'end' <opt_designator>
