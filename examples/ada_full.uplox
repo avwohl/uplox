@@ -972,8 +972,14 @@ PIPE       = '|'
                    | 'new' <name>
                    ;
 
-# ``T'(expr)`` qualified expression / type conversion.
+# ``T'(expr)`` qualified expression / type conversion, plus
+# ``T'aggregate`` (RM 4.7) for forms like ``String'(1 => Value)`` or
+# ``Vector'(1, 2, 3)`` where the parenthesised content is an aggregate
+# rather than a parenthesised expression. The two forms are disjoint
+# because <aggregate> requires two-plus positional, a named list, or
+# the ``with`` extension shape — none of which match <expr>.
 <qualified_expr>   : <name> TICK LPAREN <expr> RPAREN
+                   | <name> TICK <aggregate>
                    ;
 
 # Aggregates: positional ``(a, b, c)`` (must have at least 2 elements
