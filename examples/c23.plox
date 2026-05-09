@@ -51,7 +51,7 @@
 start = translation_unit
 
 %tokens
-WS         = /[ \t\r\n]+/                        %skip
+WS         = /[ \t\r\n\x0c\x0b]+/                %skip
 LINE_COMMENT = /\/\/[^\n]*/                      %skip
 BLOCK_COMMENT = /\/\*([^*]|\*+[^*\/])*\*+\//     %skip
 
@@ -302,6 +302,8 @@ RPAREN     = ')'
 # them and standard C disallows them at this level.
 <struct_or_union_specifier> : <struct_or_union> IDENT LBRACE <struct_decl_list> RBRACE
                             | <struct_or_union> LBRACE <struct_decl_list> RBRACE
+                            | <struct_or_union> IDENT LBRACE RBRACE
+                            | <struct_or_union> LBRACE RBRACE
                             | <struct_or_union> IDENT
                             ;
 
@@ -380,8 +382,11 @@ RPAREN     = ')'
 
 <direct_declarator> : IDENT
                     | LPAREN <declarator> RPAREN
-                    | <direct_declarator> LBRACKET <conditional_expr> RBRACKET
-                    | <direct_declarator> LBRACKET RBRACKET
+                    | <direct_declarator> LBRACKET <type_qualifier_list_opt> <conditional_expr> RBRACKET
+                    | <direct_declarator> LBRACKET <type_qualifier_list_opt> RBRACKET
+                    | <direct_declarator> LBRACKET <type_qualifier_list_opt> STAR RBRACKET
+                    | <direct_declarator> LBRACKET KW_STATIC <type_qualifier_list_opt> <conditional_expr> RBRACKET
+                    | <direct_declarator> LBRACKET <type_qualifier_list> KW_STATIC <conditional_expr> RBRACKET
                     | <direct_declarator> LPAREN <parameter_type_list> RPAREN
                     | <direct_declarator> LPAREN RPAREN
                     ;
@@ -405,6 +410,7 @@ RPAREN     = ')'
 <initializer> : <assignment_expr>
               | LBRACE <initializer_list> RBRACE
               | LBRACE <initializer_list> COMMA RBRACE
+              | LBRACE RBRACE
               ;
 
 # C99 designated initializers: any element can be prefixed by a
@@ -424,6 +430,7 @@ RPAREN     = ')'
                   ;
 
 <designator> : LBRACKET <conditional_expr> RBRACKET
+             | LBRACKET <conditional_expr> ELLIPSIS <conditional_expr> RBRACKET
              | DOT IDENT
              ;
 
@@ -605,12 +612,18 @@ RPAREN     = ')'
                       ;
 
 <direct_abstract_declarator> : LPAREN <abstract_declarator> RPAREN
-                             | <direct_abstract_declarator> LBRACKET <conditional_expr> RBRACKET
-                             | <direct_abstract_declarator> LBRACKET RBRACKET
+                             | <direct_abstract_declarator> LBRACKET <type_qualifier_list_opt> <conditional_expr> RBRACKET
+                             | <direct_abstract_declarator> LBRACKET <type_qualifier_list_opt> RBRACKET
+                             | <direct_abstract_declarator> LBRACKET <type_qualifier_list_opt> STAR RBRACKET
+                             | <direct_abstract_declarator> LBRACKET KW_STATIC <type_qualifier_list_opt> <conditional_expr> RBRACKET
+                             | <direct_abstract_declarator> LBRACKET <type_qualifier_list> KW_STATIC <conditional_expr> RBRACKET
                              | <direct_abstract_declarator> LPAREN <parameter_type_list> RPAREN
                              | <direct_abstract_declarator> LPAREN RPAREN
-                             | LBRACKET <conditional_expr> RBRACKET
-                             | LBRACKET RBRACKET
+                             | LBRACKET <type_qualifier_list_opt> <conditional_expr> RBRACKET
+                             | LBRACKET <type_qualifier_list_opt> RBRACKET
+                             | LBRACKET <type_qualifier_list_opt> STAR RBRACKET
+                             | LBRACKET KW_STATIC <type_qualifier_list_opt> <conditional_expr> RBRACKET
+                             | LBRACKET <type_qualifier_list> KW_STATIC <conditional_expr> RBRACKET
                              | LPAREN <parameter_type_list> RPAREN
                              | LPAREN RPAREN
                              ;
@@ -641,6 +654,7 @@ RPAREN     = ')'
                | <postfix_expr> DEC
                | LPAREN <type_name> RPAREN LBRACE <initializer_list> RBRACE
                | LPAREN <type_name> RPAREN LBRACE <initializer_list> COMMA RBRACE
+               | LPAREN <type_name> RPAREN LBRACE RBRACE
                ;
 
 <primary_expr> : IDENT
@@ -650,6 +664,7 @@ RPAREN     = ')'
                | <string_literal>
                | KW_NULLPTR
                | LPAREN <expr> RPAREN
+               | LPAREN <compound_stmt> RPAREN
                | KW_GENERIC LPAREN <assignment_expr> COMMA <generic_assoc_list> RPAREN
                ;
 
