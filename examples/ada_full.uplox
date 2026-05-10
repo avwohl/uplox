@@ -983,7 +983,12 @@ KW_pragma KW_with
                    | 'accept' IDENT <formal_part> SEMI
                    | 'accept' IDENT 'do' <handled_stmt_seq> 'end' <opt_designator> SEMI
                    | 'accept' IDENT <formal_part> 'do' <handled_stmt_seq> 'end' <opt_designator> SEMI
+                   | 'accept' IDENT LPAREN <expr> RPAREN SEMI
+                   | 'accept' IDENT LPAREN <expr> RPAREN <formal_part> SEMI
+                   | 'accept' IDENT LPAREN <expr> RPAREN 'do' <handled_stmt_seq> 'end' <opt_designator> SEMI
+                   | 'accept' IDENT LPAREN <expr> RPAREN <formal_part> 'do' <handled_stmt_seq> 'end' <opt_designator> SEMI
                    ;
+# Accept of entry-family member (RM 9.5.2): ``accept E (idx) ...``
 
 # ``select`` covers selective accepts, conditional / timed entry
 # calls, and asynchronous transfers. The uplox grammar models the
@@ -1437,10 +1442,16 @@ KW_pragma KW_with
 # index can be parsed by the host post-hoc on the formal-part shape.
 <entry_decl>       : 'entry' IDENT SEMI
                    | 'entry' IDENT <formal_part> SEMI
+                   | 'entry' IDENT LPAREN <discrete_range> RPAREN SEMI
+                   | 'entry' IDENT LPAREN <discrete_range> RPAREN <formal_part> SEMI
                    | 'overriding' 'entry' IDENT SEMI
                    | 'overriding' 'entry' IDENT <formal_part> SEMI
+                   | 'overriding' 'entry' IDENT LPAREN <discrete_range> RPAREN SEMI
+                   | 'overriding' 'entry' IDENT LPAREN <discrete_range> RPAREN <formal_part> SEMI
                    | 'not' 'overriding' 'entry' IDENT SEMI
                    | 'not' 'overriding' 'entry' IDENT <formal_part> SEMI
+                   | 'not' 'overriding' 'entry' IDENT LPAREN <discrete_range> RPAREN SEMI
+                   | 'not' 'overriding' 'entry' IDENT LPAREN <discrete_range> RPAREN <formal_part> SEMI
                    ;
 
 <protected_decl>   : 'protected' <task_kind> IDENT <protected_def_opt> SEMI
@@ -1488,4 +1499,7 @@ KW_pragma KW_with
 
 <entry_body>       : 'entry' IDENT 'when' <expr> 'is' <decl_part> 'begin' <handled_stmt_seq> 'end' <opt_designator> SEMI
                    | 'entry' IDENT <formal_part> 'when' <expr> 'is' <decl_part> 'begin' <handled_stmt_seq> 'end' <opt_designator> SEMI
+                   | 'entry' IDENT LPAREN 'for' IDENT 'in' <discrete_range> RPAREN 'when' <expr> 'is' <decl_part> 'begin' <handled_stmt_seq> 'end' <opt_designator> SEMI
+                   | 'entry' IDENT LPAREN 'for' IDENT 'in' <discrete_range> RPAREN <formal_part> 'when' <expr> 'is' <decl_part> 'begin' <handled_stmt_seq> 'end' <opt_designator> SEMI
                    ;
+# Entry family body (RM 9.5.2): ``entry E (for I in Range) when ... is ... end E;``
