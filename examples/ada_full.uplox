@@ -66,7 +66,7 @@ STRING_LIT = /"([^"\n]|"")*"/
 # ``16#FF#``). Underscores can appear inside integers as digit
 # separators. Real literals are decimal-only here; based reals are
 # rare and deferred.
-INT_LIT    = /[0-9][0-9_]*([eE][+-]?[0-9_]+)?|[0-9]+#[0-9A-Fa-f][0-9A-Fa-f_]*#([eE][+-]?[0-9_]+)?/
+INT_LIT    = /[0-9][0-9_]*([eE][+-]?[0-9_]+)?|[0-9]+#[0-9A-Fa-f][0-9A-Fa-f_]*#([eE][+-]?[0-9_]+)?|[0-9]+:[0-9A-Fa-f][0-9A-Fa-f_]*:([eE][+-]?[0-9_]+)?/
 REAL_LIT   = /[0-9][0-9_]*\.[0-9][0-9_]*([eE][+-]?[0-9_]+)?/
 
 # Identifiers — letters, digits, underscores; must start with a letter.
@@ -840,9 +840,17 @@ PIPE       = '|'
 # common shape (``select stmts {or stmts} [else stmts] end select;``)
 # and leaves accept/delay/terminate alternatives to ordinary stmts
 # inside the alternative bodies.
-<select_stmt>      : 'select' <stmt_seq> <select_or_list_opt> <select_else_opt> 'end' 'select' SEMI ;
+<select_stmt>      : 'select' <select_alt> <select_or_list_opt> <select_else_opt> 'end' 'select' SEMI ;
 
-<select_or_list_opt> : <select_or_list_opt> 'or' <stmt_seq>
+# RM 9.7.1: a select_alternative may have a guard ``when condition =>``.
+# Allowed in front of any ``select`` / ``or`` body. Conflict-free
+# because no <stmt> starts with ``when`` (case alternatives use
+# ``when`` only after ``is``, inside <case_stmt>).
+<select_alt>       : <stmt_seq>
+                   | 'when' <expr> ARROW <stmt_seq>
+                   ;
+
+<select_or_list_opt> : <select_or_list_opt> 'or' <select_alt>
                      |
                      ;
 
