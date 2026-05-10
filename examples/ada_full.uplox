@@ -122,11 +122,24 @@ PIPE       = '|'
 
 <one_unit>         : <context_clause> <library_unit>
                    | <pragma>
+                   | <context_clause> <subunit>
                    ;
 # A pragma is itself a kind of compilation_unit (RM 10.1.1) — used for
 # configuration pragmas before a library_unit and library-unit pragmas
 # trailing one. Treating pragma as a standalone <one_unit> avoids the
 # context_item-vs-trailing-pragma ambiguity at unit boundaries.
+
+# Subunit (RM 10.1.3): a body separated out from its parent unit using
+# ``separate (Parent_Name)`` followed by a subprogram, package, task,
+# or protected body.
+<subunit>          : 'separate' LPAREN <name> RPAREN <proper_body>
+                   ;
+
+<proper_body>      : <subprogram_body>
+                   | <package_body>
+                   | <task_body>
+                   | <protected_body>
+                   ;
 
 <context_clause>   : <context_clause> <context_item>
                    |
