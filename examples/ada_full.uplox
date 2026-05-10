@@ -341,18 +341,22 @@ KW_pragma KW_with
 # body) from a bare designator followed by ``is new`` (instantiation
 # tail). Instead we list the present-vs-absent cases explicitly so the
 # parser commits without lookahead-2.
-<subprogram_spec>  : <overriding_opt> 'procedure' <designator> <formal_part>
-                   | <overriding_opt> 'procedure' <designator>
-                   | <overriding_opt> 'function'  <designator> <formal_part> 'return' <subtype_indication>
-                   | <overriding_opt> 'function'  <designator> 'return' <subtype_indication>
-                   | <overriding_opt> 'function'  <designator>
+<subprogram_spec>  : <bare_spec>
+                   | 'overriding' <bare_spec>
+                   | 'not' 'overriding' <bare_spec>
                    ;
 
-# Ada 2005 introduced ``overriding`` / ``not overriding`` as a
-# subprogram declarator prefix.
-<overriding_opt>   : 'overriding'
-                   | 'not' 'overriding'
-                   |
+# ``<bare_spec>`` is the subprogram_spec without the optional
+# ``overriding`` / ``not overriding`` prefix (Ada 2005). Pulled out
+# so generic_decl can avoid an empty <overriding_opt> reduction at
+# the ``generic`` token — that empty reduction blocked LR(1) from
+# distinguishing a generic subprogram decl from a generic renaming
+# (`generic procedure F renames G;`).
+<bare_spec>        : 'procedure' <designator> <formal_part>
+                   | 'procedure' <designator>
+                   | 'function'  <designator> <formal_part> 'return' <subtype_indication>
+                   | 'function'  <designator> 'return' <subtype_indication>
+                   | 'function'  <designator>
                    ;
 
 <formal_part>      : LPAREN <formal_param_list> RPAREN ;
@@ -1349,24 +1353,30 @@ KW_pragma KW_with
 # instantiation is a subprogram or package declaration whose body is
 # ``is new generic_name(actuals)``.
 
-<generic_decl>     : 'generic' <generic_formal_part> <subprogram_spec> SEMI
-                   | 'generic' <generic_formal_part> <subprogram_spec> <aspect_spec> SEMI
-                   | 'generic' <generic_formal_part> 'package' <name> 'is' <decl_part> <private_part_opt> 'end' <opt_designator> SEMI
-                   | 'generic' <generic_formal_part> 'package' <name> <aspect_spec> 'is' <decl_part> <private_part_opt> 'end' <opt_designator> SEMI
+<generic_decl>     : 'generic' <generic_formal_part_ne> <subprogram_spec> SEMI
+                   | 'generic' <generic_formal_part_ne> <subprogram_spec> <aspect_spec> SEMI
+                   | 'generic' <generic_formal_part_ne> 'package' <name> 'is' <decl_part> <private_part_opt> 'end' <opt_designator> SEMI
+                   | 'generic' <generic_formal_part_ne> 'package' <name> <aspect_spec> 'is' <decl_part> <private_part_opt> 'end' <opt_designator> SEMI
+                   | 'generic' <bare_spec> SEMI
+                   | 'generic' <bare_spec> <aspect_spec> SEMI
+                   | 'generic' 'overriding' <bare_spec> SEMI
+                   | 'generic' 'overriding' <bare_spec> <aspect_spec> SEMI
+                   | 'generic' 'not' 'overriding' <bare_spec> SEMI
+                   | 'generic' 'not' 'overriding' <bare_spec> <aspect_spec> SEMI
+                   | 'generic' 'package' <name> 'is' <decl_part> <private_part_opt> 'end' <opt_designator> SEMI
+                   | 'generic' 'package' <name> <aspect_spec> 'is' <decl_part> <private_part_opt> 'end' <opt_designator> SEMI
+                   | 'generic' 'package' <name> 'renames' <name> SEMI
+                   | 'generic' 'procedure' <designator> 'renames' <name> SEMI
+                   | 'generic' 'function' <designator> 'renames' <name> SEMI
                    ;
-# Generic renaming (RM 8.5.5) is *not* supported here — adding it
-# requires resolving a 15-conflict shift/reduce on KW_package after
-# ``generic`` between the regular and renaming forms, which %shift
-# cannot disambiguate without breaking all the regular generic decls
-# (the renaming form would over-match). Splitting the formal_part into
-# empty vs non-empty halves the conflict count to 10 (now on
-# overriding_opt -> ε for procedure/function), but eliminating those
-# requires a deeper restructure of <subprogram_spec>. Needs LR(2)
-# lookahead or a grammar-level disambiguator.
-
-<generic_formal_part> : <generic_formal_part> <generic_formal>
-                      |
-                      ;
+# Generic renaming (RM 8.5.5): empty-formal-part subprograms and
+# packages can rename, e.g. ``generic package P renames Q;``. The
+# split into an explicit non-empty <generic_formal_part_ne> + the
+# bare-form alternatives avoids the empty-production LR(1) conflict
+# that the older inline encoding produced.
+<generic_formal_part_ne> : <generic_formal>
+                         | <generic_formal_part_ne> <generic_formal>
+                         ;
 
 <generic_formal>   : <object_decl>
                    | <formal_object_decl>
