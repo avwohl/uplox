@@ -268,6 +268,7 @@ KW_pragma KW_with
                    | <simple_expr> DOTDOT <simple_expr>
                    | <name> 'range' <simple_expr> DOTDOT <simple_expr>
                    | <name> 'range' BOX
+                   | 'if' <expr> 'then' <expr> <elsif_expr_part> <else_expr_opt>
                    | IDENT ARROW <expr>
                    | IDENT ARROW BOX
                    | INT_LIT ARROW <expr>
@@ -565,6 +566,8 @@ KW_pragma KW_with
                    | 'type' IDENT <discriminant_part> 'is' <type_definition> <aspect_spec> SEMI
                    | 'type' IDENT SEMI                              # incomplete type
                    | 'type' IDENT <discriminant_part> SEMI          # incomplete with discrims
+                   | 'type' IDENT 'is' 'tagged' SEMI                # incomplete tagged
+                   | 'type' IDENT <discriminant_part> 'is' 'tagged' SEMI
                    ;
 
 # Discriminant part: ``(D1, D2 : T1; D3 : T2 := default)``.
@@ -1174,6 +1177,8 @@ KW_pragma KW_with
                    | 'true'
                    | 'false'
                    | LPAREN <expr> RPAREN
+                   | LPAREN 'raise' <name> RPAREN
+                   | LPAREN 'raise' <name> 'with' <expr> RPAREN
                    | <aggregate>
                    | <qualified_expr>
                    | <allocator>
@@ -1181,6 +1186,10 @@ KW_pragma KW_with
                    | <case_expr>
                    | <quantified_expr>
                    ;
+# Parenthesised raise_expression as a primary (RM 11.3): ``(raise X)``
+# or ``(raise X with "msg")``. Confined to LPAREN/RPAREN context to
+# avoid the binary-operator ambiguity that adding raise_expr to
+# <primary> directly would create.
 
 # Ada 2012 quantified expression (RM 4.5.8):
 #   (for all I in Range => P)
@@ -1218,7 +1227,13 @@ KW_pragma KW_with
                          | <case_expr_alternatives> COMMA <case_expr_alternative>
                          ;
 
-<case_expr_alternative>  : 'when' <discrete_choice_list> ARROW <expr> ;
+<case_expr_alternative>  : 'when' <discrete_choice_list> ARROW <expr>
+                         | 'when' <discrete_choice_list> ARROW 'raise' <name>
+                         | 'when' <discrete_choice_list> ARROW 'raise' <name> 'with' <expr>
+                         ;
+# Per RM 4.5.7, a case_expression alternative dependent_expression may
+# be a raise_expression. We allow the raise form here (not as a generic
+# <primary>) — same approach as <aspect_assoc>.
 
 # ``new T`` / ``new T(args)`` / ``new T'(qualified)``. The first form
 # uses a *dedicated* allocator-subtype non-terminal — sharing
@@ -1244,7 +1259,12 @@ KW_pragma KW_with
                    | <name> TICK <aggregate>
                    | <name> TICK LPAREN 'if' <expr> 'then' <expr> <elsif_expr_part> <else_expr_opt> RPAREN
                    | <name> TICK LPAREN 'case' <expr> 'is' <case_expr_alternatives> RPAREN
+                   | <name> TICK LPAREN 'raise' <name> RPAREN
+                   | <name> TICK LPAREN 'raise' <name> 'with' <expr> RPAREN
+                   | <qualified_expr> LPAREN <expr_or_assoc_list> RPAREN
                    ;
+# Indexing of a qualified expression: ``String'(E)(1)``. After T'(E),
+# treat further (idx) as an indexed component on the qualified result.
 # T'(if ...) and T'(case ...) — qualified expression containing a bare
 # conditional/case. The qualified-expression's parens stand in for the
 # conditional's normally-required parens (RM 4.5.7).
@@ -1338,6 +1358,8 @@ KW_pragma KW_with
                          | 'is' <name>
                          | 'is' 'null'
                          | 'is' 'abstract'
+                         | 'is' 'abstract' BOX
+                         | 'is' CHAR_LIT
                          |
                          ;
 
