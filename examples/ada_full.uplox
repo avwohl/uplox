@@ -266,6 +266,8 @@ KW_pragma KW_with
 # can post-process the IDENT to a SelectedName when needed.
 <expr_or_assoc>    : <expr>
                    | <simple_expr> DOTDOT <simple_expr>
+                   | <name> 'range' <simple_expr> DOTDOT <simple_expr>
+                   | <name> 'range' BOX
                    | IDENT ARROW <expr>
                    | IDENT ARROW BOX
                    | INT_LIT ARROW <expr>
@@ -304,10 +306,17 @@ KW_pragma KW_with
                    | <subprogram_spec> 'is' 'null' <aspect_spec> SEMI
                    | <subprogram_spec> 'is' LPAREN <expr> RPAREN SEMI
                    | <subprogram_spec> 'is' LPAREN <expr> RPAREN <aspect_spec> SEMI
+                   | <subprogram_spec> 'is' LPAREN 'if' <expr> 'then' <expr> <elsif_expr_part> <else_expr_opt> RPAREN SEMI
+                   | <subprogram_spec> 'is' LPAREN 'if' <expr> 'then' <expr> <elsif_expr_part> <else_expr_opt> RPAREN <aspect_spec> SEMI
+                   | <subprogram_spec> 'is' LPAREN 'case' <expr> 'is' <case_expr_alternatives> RPAREN SEMI
+                   | <subprogram_spec> 'is' LPAREN 'case' <expr> 'is' <case_expr_alternatives> RPAREN <aspect_spec> SEMI
                    | <subprogram_spec> 'is' <aggregate> SEMI
                    | <subprogram_spec> 'is' <aggregate> <aspect_spec> SEMI
                    | <subprogram_spec> 'renames' <name> SEMI
                    | <subprogram_spec> 'renames' <name> <aspect_spec> SEMI
+                   | <subprogram_spec> 'renames' CHAR_LIT SEMI
+                   | <subprogram_spec> 'renames' 'true' SEMI
+                   | <subprogram_spec> 'renames' 'false' SEMI
                    | <subprogram_spec> 'is' 'separate' SEMI
                    | <subprogram_spec> 'is' 'new' <name> SEMI
                    | <subprogram_spec> 'is' 'new' <name> <aspect_spec> SEMI
@@ -577,7 +586,13 @@ KW_pragma KW_with
 
 <aspect_assoc>     : <name>
                    | <name> ARROW <expr>
+                   | <name> ARROW 'raise' <name>
+                   | <name> ARROW 'raise' <name> 'with' <expr>
                    ;
+# Predicate_Failure (RM 7.3.4) takes a raise_expression rather than a
+# normal expression. We only allow raise_expression here (not as a
+# generic <primary>) because the latter conflicts with binary operators
+# in <expr>'s ladder (raise expr is right-greedy on with-clauses).
 
 <type_definition>  : <enum_type_def>
                    | <integer_type_def>
@@ -705,6 +720,17 @@ KW_pragma KW_with
                    | 'access' 'protected' 'procedure' <formal_part>
                    | 'access' 'protected' 'function' 'return' <subtype_indication>
                    | 'access' 'protected' 'function' <formal_part> 'return' <subtype_indication>
+                   | 'not' 'null' 'access' <subtype_indication>
+                   | 'not' 'null' 'access' 'all' <subtype_indication>
+                   | 'not' 'null' 'access' 'constant' <subtype_indication>
+                   | 'not' 'null' 'access' 'procedure'
+                   | 'not' 'null' 'access' 'procedure' <formal_part>
+                   | 'not' 'null' 'access' 'function' 'return' <subtype_indication>
+                   | 'not' 'null' 'access' 'function' <formal_part> 'return' <subtype_indication>
+                   | 'not' 'null' 'access' 'protected' 'procedure'
+                   | 'not' 'null' 'access' 'protected' 'procedure' <formal_part>
+                   | 'not' 'null' 'access' 'protected' 'function' 'return' <subtype_indication>
+                   | 'not' 'null' 'access' 'protected' 'function' <formal_part> 'return' <subtype_indication>
                    ;
 
 # Plain enum or generic formal "any discrete type" placeholder.
@@ -807,6 +833,10 @@ KW_pragma KW_with
                      | 'not' 'null' 'access' 'procedure' <formal_part>
                      | 'not' 'null' 'access' 'function' 'return' <subtype_indication>
                      | 'not' 'null' 'access' 'function' <formal_part> 'return' <subtype_indication>
+                     | 'not' 'null' 'access' 'protected' 'procedure'
+                     | 'not' 'null' 'access' 'protected' 'procedure' <formal_part>
+                     | 'not' 'null' 'access' 'protected' 'function' 'return' <subtype_indication>
+                     | 'not' 'null' 'access' 'protected' 'function' <formal_part> 'return' <subtype_indication>
                      | 'access' <subtype_indication>
                      | 'access' 'all' <subtype_indication>
                      | 'access' 'constant' <subtype_indication>
@@ -1017,6 +1047,8 @@ KW_pragma KW_with
 
 <discrete_choice>  : <simple_expr>
                    | <simple_expr> DOTDOT <simple_expr>
+                   | <name> 'range' <simple_expr> DOTDOT <simple_expr>
+                   | <name> 'range' BOX
                    | 'others'
                    ;
 # RM 3.8.1 restricts discrete_choice to a static simple expression or
@@ -1148,14 +1180,6 @@ KW_pragma KW_with
                    | <if_expr>
                    | <case_expr>
                    | <quantified_expr>
-                   | <raise_expr>
-                   ;
-
-# Raise expression (Ada 2012, RM 11.3): ``raise Some_Exception`` or
-# ``raise Some_Exception with "message"`` as an expression. Distinct
-# from <raise_stmt> by context (no SEMI here, no with on the stmt).
-<raise_expr>       : 'raise' <name>
-                   | 'raise' <name> 'with' <expr>
                    ;
 
 # Ada 2012 quantified expression (RM 4.5.8):
@@ -1221,13 +1245,9 @@ KW_pragma KW_with
                    | <name> TICK LPAREN 'if' <expr> 'then' <expr> <elsif_expr_part> <else_expr_opt> RPAREN
                    | <name> TICK LPAREN 'case' <expr> 'is' <case_expr_alternatives> RPAREN
                    ;
-# Qualified expression containing a conditional expression (RM 4.5.7):
-# ``T'(if X then A else B)``. The qualified-expression parens serve as
-# the conditional's required parens — adding a separate alternative
-# rather than letting <expr> derive a bare-if avoids changing the
-# conditional's standalone parsing.
-# NOTE (WIP): this addition triggered LR table memory blow-up (>2.5GB
-# RSS) on a 4GB box; needs validation on a larger machine.
+# T'(if ...) and T'(case ...) — qualified expression containing a bare
+# conditional/case. The qualified-expression's parens stand in for the
+# conditional's normally-required parens (RM 4.5.7).
 
 # Aggregates: positional ``(a, b, c)`` (must have at least 2 elements
 # to disambiguate from parenthesised expression), or named
@@ -1240,6 +1260,7 @@ KW_pragma KW_with
                    | LPAREN <expr> 'with' <agg_named_list> RPAREN
                    | LPAREN <expr> 'with' 'null' 'record' RPAREN
                    | LPAREN <expr> 'with' <agg_positional_two_plus> RPAREN
+                   | LPAREN <expr> 'with' <expr> RPAREN
                    | LPAREN <expr> 'with' <expr> COMMA <agg_named_list> RPAREN
                    | LPAREN 'null' 'record' RPAREN
                    ;

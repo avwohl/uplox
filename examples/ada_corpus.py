@@ -174,12 +174,15 @@ def main(argv: list[str]) -> int:
     bundle_path = argv[1]
     corpus_dir = argv[2]
     save_fails = save_summary = None
+    skip_b_tests = False
     args = argv[3:]
     for i, a in enumerate(args):
         if a == "--save-fails" and i + 1 < len(args):
             save_fails = args[i + 1]
         if a == "--save-summary" and i + 1 < len(args):
             save_summary = args[i + 1]
+        if a == "--skip-b-tests":
+            skip_b_tests = True
 
     with open(bundle_path) as fh:
         bundle = json.load(fh)
@@ -191,7 +194,12 @@ def main(argv: list[str]) -> int:
     )
     table = table_from_json(bundle["parse"])
 
-    files = sorted(Path(corpus_dir).glob("*.ad[bs]"))
+    root = Path(corpus_dir)
+    files = sorted(
+        {p for pat in ("*.ad[bs]", "*.ada", "*.a") for p in root.rglob(pat)}
+    )
+    if skip_b_tests:
+        files = [p for p in files if not p.name[:1].lower() == "b"]
     n = len(files)
     pass_n = 0
     fails: list[tuple[str, str, str]] = []
