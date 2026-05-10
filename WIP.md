@@ -3,10 +3,10 @@
 ## Coverage
 
 	GNAT runtime	97.8% (1072/1096)	maxed (all 24 fails malformed source)
-	ACATS C/L/E/D	99.5% (2835/2849)	14 fails left
+	ACATS C/L/E/D	99.8% (2842/2849)	7 fails left, all unfixable or LR-blocked
 
-All session work is committed (head `6307a88`). Latest build bundle:
-`/tmp/ada_full_v34.json` (24 MB). Grammar: 653 productions, 49467
+All session work is committed (head `c38ca83`). Latest build bundle:
+`/tmp/ada_full_v36.json` (24 MB). Grammar: 664 productions, 49708
 states, 0 conflicts. uplox check ~10–15 s on Mac M-series; build
 ~10–20 min depending on state count; build peak RSS ~2.1 GB.
 
@@ -34,13 +34,8 @@ downloaded into `/tmp/acats` from simonjwright/ACATS during this
 session. `ada_corpus.py --skip-b-tests` filters intentionally-invalid
 B-tests (1876 files); the remaining 2849 are A/C/D/E/L tests.
 
-## What still fails (14 ACATS)
+## What still fails (7 ACATS)
 
-	7	generic renaming (`generic package X renames Y;`,
-	    `generic function F renames G;`) — 15 conflicts when added
-	    naively; existing comment notes %shift cannot disambiguate
-	    KW_package/KW_function after `generic` between regular and
-	    renaming forms without LR(2) lookahead.
 	3	malformed source — non-ASCII bytes in `a22006c`, `a2a031a`,
 	    `c2a021b` that no Ada compiler accepts.
 	2	range attribute as range constraint
@@ -54,13 +49,14 @@ B-tests (1876 files); the remaining 2849 are A/C/D/E/L tests.
 	1	aspect_spec on `type_decl` after discriminants — documented
 	    as conflicting with the derived-type ``with record`` extension.
 
-Net session: **+74 ACATS files (96.9% → 99.5%)**. GNAT runtime
+Net session: **+81 ACATS files (96.9% → 99.8%)**. GNAT runtime
 unchanged at 97.8% (every fail is malformed source).
 
 ## Things uplox would need for further coverage
 
-* **LR(2) lookahead** — would close generic renaming (~7 files) and
-  bare case-as-call-arg (~1 file).
+* **LR(2) lookahead** — would close bare case-as-call-arg (~1 file)
+  and aspect_spec after discriminants (~1 file). Generic renaming
+  used to need this; landed via grammar restructure instead.
 * **Context-sensitive lex hooks** — same as before; the
   `disambiguate_apostrophe` workaround in `ada_corpus.py` could
   go away.
@@ -69,6 +65,8 @@ unchanged at 97.8% (every fail is malformed source).
 ## Session commits
 
 ```
+c38ca83 ada_full: generic renaming via overriding/formal-part split (+7 ACATS, 99.5% → 99.8%)
+2a4f63e ada_full: note empirical generic-renaming conflict count after split
 6307a88 ada_full: goto with dotted label, raise after short-circuit (+2 ACATS, 99.4% → 99.5%)
 2b70c2f ada_full: entry families and accept-with-family-index (+28 ACATS, 98.5% → 99.4%)
 09709a5 ada_full: qualified-expr extensions and progenitor lists (+4 ACATS, 98.3% → 98.5%)
