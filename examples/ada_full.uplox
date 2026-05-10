@@ -195,6 +195,9 @@ PIPE       = '|'
                    | <name> DOT IDENT
                    | <name> DOT STRING_LIT
                    | <name> DOT 'all'
+                   | <name> DOT 'true'
+                   | <name> DOT 'false'
+                   | <name> DOT 'null'
                    | <name> LPAREN <expr_or_assoc_list> RPAREN
                    | <name> TICK <attribute_designator>
                    ;
@@ -279,7 +282,14 @@ PIPE       = '|'
 # Expression function (Ada 2012, RM 6.8): a function spec whose body
 # is a single parenthesised expression — ``function F return T is (E);``
 
-<subprogram_body>  : <subprogram_spec> 'is' <decl_part> 'begin' <handled_stmt_seq> 'end' <opt_designator> SEMI ;
+<subprogram_body>  : <subprogram_spec> 'is' <decl_part> 'begin' <handled_stmt_seq> 'end' <opt_designator> SEMI
+                   | <subprogram_spec> <aspect_spec> 'is' <decl_part> 'begin' <handled_stmt_seq> 'end' <opt_designator> SEMI
+                   ;
+# Aspect spec on subprogram body (RM 6.1) — the spec may carry pre /
+# post conditions etc. before its body. Distinguishable from the
+# <subprogram_decl> alternative ``<subprogram_spec> <aspect_spec>
+# SEMI`` by the lookahead after aspect_spec (``is`` for body, SEMI
+# for decl).
 
 # Note: formal part is *not* optional in the grammar — the LALR machinery
 # can't distinguish an empty formal_part_opt followed by ``is`` (start of
@@ -482,6 +492,10 @@ PIPE       = '|'
 
 <subtype_decl>     : 'subtype' IDENT 'is' <subtype_indication> SEMI
                    | 'subtype' IDENT 'is' <subtype_indication> <aspect_spec> SEMI
+                   | 'subtype' IDENT 'is' <name> 'delta' <expr> SEMI
+                   | 'subtype' IDENT 'is' <name> 'delta' <expr> 'range' <simple_expr> DOTDOT <simple_expr> SEMI
+                   | 'subtype' IDENT 'is' <name> 'digits' <expr> SEMI
+                   | 'subtype' IDENT 'is' <name> 'digits' <expr> 'range' <simple_expr> DOTDOT <simple_expr> SEMI
                    ;
 # Aspect spec on a subtype is fine since <subtype_indication>'s end
 # tokens (IDENT/RPAREN/INT_LIT/etc.) don't shadow the ``with`` of
@@ -1065,6 +1079,17 @@ PIPE       = '|'
                    | <allocator>
                    | <if_expr>
                    | <case_expr>
+                   | <quantified_expr>
+                   ;
+
+# Ada 2012 quantified expression (RM 4.5.8):
+#   (for all I in Range => P)
+#   (for some I in Range => P)
+# Mandatory enclosing parens disambiguate from the for-loop statement.
+<quantified_expr>  : LPAREN 'for' 'all' IDENT 'in' <discrete_range> ARROW <expr> RPAREN
+                   | LPAREN 'for' 'some' IDENT 'in' <discrete_range> ARROW <expr> RPAREN
+                   | LPAREN 'for' 'all' IDENT 'of' <name> ARROW <expr> RPAREN
+                   | LPAREN 'for' 'some' IDENT 'of' <name> ARROW <expr> RPAREN
                    ;
 
 # Ada 2012 conditional expression: ``(if X then Y [elsif … then …]
