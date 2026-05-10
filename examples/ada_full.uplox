@@ -66,8 +66,8 @@ STRING_LIT = /"([^"\n]|"")*"/
 # ``16#FF#``). Underscores can appear inside integers as digit
 # separators. Real literals are decimal-only here; based reals are
 # rare and deferred.
-INT_LIT    = /[0-9][0-9_]*([eE][+-]?[0-9_]+)?|[0-9]+#[0-9A-Fa-f][0-9A-Fa-f_]*#([eE][+-]?[0-9_]+)?|[0-9]+:[0-9A-Fa-f][0-9A-Fa-f_]*:([eE][+-]?[0-9_]+)?/
-REAL_LIT   = /[0-9][0-9_]*\.[0-9][0-9_]*([eE][+-]?[0-9_]+)?|[0-9]+#[0-9A-Fa-f][0-9A-Fa-f_]*\.[0-9A-Fa-f][0-9A-Fa-f_]*#([eE][+-]?[0-9_]+)?|[0-9]+:[0-9A-Fa-f][0-9A-Fa-f_]*\.[0-9A-Fa-f][0-9A-Fa-f_]*:([eE][+-]?[0-9_]+)?/
+INT_LIT    = /[0-9][0-9_]*([eE][+-]?[0-9_]+)?|[0-9][0-9_]*#[0-9A-Fa-f][0-9A-Fa-f_]*#([eE][+-]?[0-9_]+)?|[0-9][0-9_]*:[0-9A-Fa-f][0-9A-Fa-f_]*:([eE][+-]?[0-9_]+)?/
+REAL_LIT   = /[0-9][0-9_]*\.[0-9][0-9_]*([eE][+-]?[0-9_]+)?|[0-9][0-9_]*#[0-9A-Fa-f][0-9A-Fa-f_]*\.[0-9A-Fa-f][0-9A-Fa-f_]*#([eE][+-]?[0-9_]+)?|[0-9][0-9_]*:[0-9A-Fa-f][0-9A-Fa-f_]*\.[0-9A-Fa-f][0-9A-Fa-f_]*:([eE][+-]?[0-9_]+)?/
 
 # Identifiers — letters, digits, underscores; must start with a letter.
 IDENT      = /[A-Za-z][A-Za-z0-9_]*/
@@ -262,6 +262,8 @@ PIPE       = '|'
                    | <subprogram_spec> 'is' 'null' <aspect_spec> SEMI
                    | <subprogram_spec> 'is' LPAREN <expr> RPAREN SEMI
                    | <subprogram_spec> 'is' LPAREN <expr> RPAREN <aspect_spec> SEMI
+                   | <subprogram_spec> 'is' <aggregate> SEMI
+                   | <subprogram_spec> 'is' <aggregate> <aspect_spec> SEMI
                    | <subprogram_spec> 'renames' <name> SEMI
                    | <subprogram_spec> 'renames' <name> <aspect_spec> SEMI
                    | <subprogram_spec> 'is' 'separate' SEMI
@@ -423,6 +425,7 @@ PIPE       = '|'
 # representation (``for E use (A => 1, B => 2);``). The shared
 # ``<name>`` prefix covers the qualified-name aspect target.
 <representation_clause> : 'for' <name> 'use' <expr> SEMI
+                        | 'for' <name> 'use' 'at' <expr> SEMI
                         | 'for' <name> 'use' 'record' <component_clauses> 'end' 'record' SEMI
                         | 'for' <name> 'use' 'record' 'at' 'mod' <expr> SEMI <component_clauses> 'end' 'record' SEMI
                         ;
@@ -553,9 +556,15 @@ PIPE       = '|'
 # starts an aspect mark and is left for the surrounding rule's
 # optional aspect_spec to consume.
 <derived_type_def> : 'new' <subtype_indication>
+                   | 'new' <subtype_indication> 'delta' <expr>
+                   | 'new' <subtype_indication> 'delta' <expr> 'range' <simple_expr> DOTDOT <simple_expr>
+                   | 'new' <subtype_indication> 'digits' <expr>
+                   | 'new' <subtype_indication> 'digits' <expr> 'range' <simple_expr> DOTDOT <simple_expr>
                    | 'new' <subtype_indication> 'with' <derived_tail>
                    | 'abstract' 'new' <subtype_indication> 'with' <derived_tail>
                    ;
+# Delta / digits constraints on a derived fixed-point or floating
+# type (RM 3.5.9): ``type T is new Parent delta 0.1 range L .. H;``.
 
 # After ``new T with``, plox commits on the next token: ``record`` /
 # ``null`` continue a tagged record extension; ``private`` is the
