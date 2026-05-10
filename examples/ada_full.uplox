@@ -183,6 +183,8 @@ KW_pragma KW_with
                    | <generic_decl>
                    | 'private' <package_decl>
                    | 'private' <generic_decl>
+                   | 'private' <subprogram_decl>
+                   | 'private' <subprogram_body>
                    ;
 # RM 7.3 / 10.1.1: ``private`` is permitted as a library-unit prefix
 # on package and generic declarations (private library units). It
@@ -979,8 +981,11 @@ KW_pragma KW_with
                    | 'return' IDENT COLON <subtype_indication> 'do' <handled_stmt_seq> 'end' 'return' SEMI
                    | 'return' IDENT COLON <subtype_indication> ASSIGN <expr> 'do' <handled_stmt_seq> 'end' 'return' SEMI
                    | 'return' IDENT COLON 'constant' <subtype_indication> ASSIGN <expr> SEMI
+                   | 'return' IDENT COLON 'constant' <subtype_indication> ASSIGN <expr> 'do' <handled_stmt_seq> 'end' 'return' SEMI
                    | 'return' IDENT COLON 'aliased' <subtype_indication> SEMI
                    | 'return' IDENT COLON 'aliased' <subtype_indication> ASSIGN <expr> SEMI
+                   | 'return' IDENT COLON 'aliased' <subtype_indication> 'do' <handled_stmt_seq> 'end' 'return' SEMI
+                   | 'return' IDENT COLON 'aliased' <subtype_indication> ASSIGN <expr> 'do' <handled_stmt_seq> 'end' 'return' SEMI
                    ;
 # Extended return statement (Ada 2005, RM 6.5): allows the function
 # to name the returned object and optionally include a body that
@@ -1143,6 +1148,14 @@ KW_pragma KW_with
                    | <if_expr>
                    | <case_expr>
                    | <quantified_expr>
+                   | <raise_expr>
+                   ;
+
+# Raise expression (Ada 2012, RM 11.3): ``raise Some_Exception`` or
+# ``raise Some_Exception with "message"`` as an expression. Distinct
+# from <raise_stmt> by context (no SEMI here, no with on the stmt).
+<raise_expr>       : 'raise' <name>
+                   | 'raise' <name> 'with' <expr>
                    ;
 
 # Ada 2012 quantified expression (RM 4.5.8):
@@ -1205,7 +1218,16 @@ KW_pragma KW_with
 # the ``with`` extension shape — none of which match <expr>.
 <qualified_expr>   : <name> TICK LPAREN <expr> RPAREN
                    | <name> TICK <aggregate>
+                   | <name> TICK LPAREN 'if' <expr> 'then' <expr> <elsif_expr_part> <else_expr_opt> RPAREN
+                   | <name> TICK LPAREN 'case' <expr> 'is' <case_expr_alternatives> RPAREN
                    ;
+# Qualified expression containing a conditional expression (RM 4.5.7):
+# ``T'(if X then A else B)``. The qualified-expression parens serve as
+# the conditional's required parens — adding a separate alternative
+# rather than letting <expr> derive a bare-if avoids changing the
+# conditional's standalone parsing.
+# NOTE (WIP): this addition triggered LR table memory blow-up (>2.5GB
+# RSS) on a 4GB box; needs validation on a larger machine.
 
 # Aggregates: positional ``(a, b, c)`` (must have at least 2 elements
 # to disambiguate from parenthesised expression), or named
