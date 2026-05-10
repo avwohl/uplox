@@ -3,12 +3,12 @@
 ## Coverage
 
 	GNAT runtime	97.8% (1072/1096)	maxed (all 24 fails malformed source)
-	ACATS C/L/E/D	99.8% (2842/2849)	7 fails left, all unfixable or LR-blocked
+	ACATS C/L/E/D	99.8% (2844/2849)	5 fails left, all unfixable or LR-blocked
 
-All session work is committed (head `c38ca83`). Latest build bundle:
-`/tmp/ada_full_v36.json` (24 MB). Grammar: 664 productions, 49708
-states, 0 conflicts. uplox check ~10–15 s on Mac M-series; build
-~10–20 min depending on state count; build peak RSS ~2.1 GB.
+All session work is committed (head `7662d7d`). Latest build bundle:
+`/tmp/ada_full_v39.json` (25 MB). Grammar: 669 productions, 53565
+states, 0 conflicts. uplox check ~30 s on Mac M-series; build
+~15–25 min depending on state count; build peak RSS ~2.5 GB.
 
 ## Resume
 
@@ -34,29 +34,30 @@ downloaded into `/tmp/acats` from simonjwright/ACATS during this
 session. `ada_corpus.py --skip-b-tests` filters intentionally-invalid
 B-tests (1876 files); the remaining 2849 are A/C/D/E/L tests.
 
-## What still fails (7 ACATS)
+## What still fails (5 ACATS)
 
 	3	malformed source — non-ASCII bytes in `a22006c`, `a2a031a`,
 	    `c2a021b` that no Ada compiler accepts.
 	2	range attribute as range constraint
 	    (`X : Integer range A1'Range(2)`, `Y : Integer range F'Range`).
-	    Adding `<name> 'range' <name>` to <subtype_indication>
-	    produces 4 SEMI shift/reduce conflicts.
-	1	bare case-expression as call argument
-	    (`Convert (case Selector is when 0 => Jan, when others => Tom)`)
-	    — bare-`case` in <expr_or_assoc> conflicts on COMMA between
-	    extending case_alternatives and the list separator.
-	1	aspect_spec on `type_decl` after discriminants — documented
-	    as conflicting with the derived-type ``with record`` extension.
+	    Adding `<name> 'range' <name>` (or <simple_expr>) to
+	    <subtype_indication> reproducibly produces 4 SEMI shift/reduce
+	    conflicts at `subtype X is T range Y` boundaries that no
+	    available uplox directive can resolve. Restricting to
+	    `<name> TICK 'range' ...` would also reduce/reduce-conflict
+	    with the existing <name> TICK <attribute_designator> rule
+	    (since `'range'` is a valid attribute_designator).
 
-Net session: **+81 ACATS files (96.9% → 99.8%)**. GNAT runtime
+Net session: **+83 ACATS files (96.9% → 99.8%)**. GNAT runtime
 unchanged at 97.8% (every fail is malformed source).
 
 ## Things uplox would need for further coverage
 
-* **LR(2) lookahead** — would close bare case-as-call-arg (~1 file)
-  and aspect_spec after discriminants (~1 file). Generic renaming
-  used to need this; landed via grammar restructure instead.
+* **`%reduce` directive** (or LR(2) lookahead) — would close the
+  range-attribute-as-range-constraint pair (~2 files). Generic
+  renaming, bare case-as-call-arg, and aspect-spec after discriminants
+  used to need LR(2); all three landed via grammar restructure
+  instead.
 * **Context-sensitive lex hooks** — same as before; the
   `disambiguate_apostrophe` workaround in `ada_corpus.py` could
   go away.
@@ -65,6 +66,8 @@ unchanged at 97.8% (every fail is malformed source).
 ## Session commits
 
 ```
+7662d7d ada_full: subpool allocator + array-decl aspect_spec (+2 ACATS, 99.8% → 99.8%)
+87833a8 ada_full: bare case-expr as call argument (+1 ACATS, 99.8% → 99.8%)
 c38ca83 ada_full: generic renaming via overriding/formal-part split (+7 ACATS, 99.5% → 99.8%)
 2a4f63e ada_full: note empirical generic-renaming conflict count after split
 6307a88 ada_full: goto with dotted label, raise after short-circuit (+2 ACATS, 99.4% → 99.5%)
