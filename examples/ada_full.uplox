@@ -665,8 +665,14 @@ PIPE       = '|'
 
 <component_list>   : <component_list> <component_decl>
                    | <component_list> <pragma>
+                   | 'null' SEMI
                    |
                    ;
+# RM 3.8(4): an empty record uses ``null;`` as its component_list —
+# ``record null; end record``. The bare ``null;`` is a complete
+# component_list (mutually exclusive with the component sequence
+# above), but adding it as one alternative is conflict-free because
+# 'null' is not a valid start for any component_decl.
 
 <component_decl>   : <ident_list> COLON <subtype_indication> <init_opt> SEMI
                    | <ident_list> COLON 'aliased' <subtype_indication> <init_opt> SEMI
@@ -779,6 +785,7 @@ PIPE       = '|'
                    | <accept_stmt>
                    | <select_stmt>
                    | <requeue_stmt>
+                   | <terminate_stmt>
                    ;
 
 # Exception raising. ``raise;`` is a re-raise inside a handler;
@@ -799,6 +806,14 @@ PIPE       = '|'
 <requeue_stmt>     : 'requeue' <name> SEMI
                    | 'requeue' <name> 'with' 'abort' SEMI
                    ;
+
+# RM 9.7.1: ``terminate;`` is a select_alternative — only meaningful
+# inside ``select ... or terminate; end select;``. We model it as a
+# stmt rather than a select-only alternative because <select_stmt>
+# uses <stmt_seq> for its alternatives; allowing it everywhere is
+# syntactically loose but semantically correct in the only context
+# the corpus uses it.
+<terminate_stmt>   : 'terminate' SEMI ;
 
 # ``accept E [(params)] [do stmts end E];``. The entry name is
 # restricted to a bare IDENT — allowing the full ``<name>`` form
@@ -874,7 +889,11 @@ PIPE       = '|'
 # (``X in A | B | C``) be parsed unambiguously by <relation> below.
 
 # Loops: plain ``loop ... end loop;``, ``while`` and ``for`` heads.
-<loop_stmt>        : <iteration_scheme> 'loop' <stmt_seq> 'end' 'loop' <opt_loop_label> SEMI ;
+<loop_stmt>        : <iteration_scheme> 'loop' <stmt_seq> 'end' 'loop' <opt_loop_label> SEMI
+                   | IDENT COLON <iteration_scheme> 'loop' <stmt_seq> 'end' 'loop' <opt_loop_label> SEMI
+                   ;
+# Loop label prefix (RM 5.5): ``Label : while X loop ... end loop Label;``
+# uses the same IDENT COLON shape as block_stmt above.
 
 # Iteration: ``while expr``, classic ``for I in [reverse] R``, and
 # Ada 2012 element-iteration ``for E of [reverse] A``.
@@ -907,7 +926,13 @@ PIPE       = '|'
 
 <block_stmt>       : 'declare' <decl_part> 'begin' <handled_stmt_seq> 'end' SEMI
                    | 'begin' <handled_stmt_seq> 'end' SEMI
+                   | IDENT COLON 'declare' <decl_part> 'begin' <handled_stmt_seq> 'end' <opt_designator> SEMI
+                   | IDENT COLON 'begin' <handled_stmt_seq> 'end' <opt_designator> SEMI
                    ;
+# Block label (RM 5.6): ``Label : declare ... begin ... end Label;``
+# or ``Label : begin ... end Label;``. The IDENT COLON prefix doesn't
+# collide with assignment (which uses ASSIGN, ``:=``) or with ordinary
+# name-as-statement (call) shapes since neither continues with COLON.
 
 # ===========================================================================
 # Expressions
