@@ -147,6 +147,8 @@ PIPE       = '|'
 
 <context_item>     : 'with' <ident_list> SEMI
                    | 'use'  <ident_list> SEMI
+                   | 'use' 'type' <ident_list> SEMI
+                   | 'use' 'all' 'type' <ident_list> SEMI
                    ;
 
 <library_unit>     : <subprogram_decl>
@@ -237,10 +239,14 @@ PIPE       = '|'
                    | IDENT ARROW BOX
                    | INT_LIT ARROW <expr>
                    | CHAR_LIT ARROW <expr>
+                   | STRING_LIT ARROW <expr>
+                   | STRING_LIT ARROW BOX
                    | 'others' ARROW <expr>
                    | 'others' ARROW BOX
                    | BOX
                    ;
+# STRING_LIT named-association covers operator-symbol formals in
+# generic instantiations: ``new Pkg ("=" => Equ."=", "+" => ...)``.
 
 # ===========================================================================
 # Subprograms
@@ -447,6 +453,7 @@ PIPE       = '|'
 
 <use_clause>       : 'use' <ident_list> SEMI
                    | 'use' 'type' <ident_list> SEMI
+                   | 'use' 'all' 'type' <ident_list> SEMI
                    ;
 
 # ``Pi : constant := 3.14;`` — number declaration without explicit type.
@@ -780,7 +787,14 @@ PIPE       = '|'
 # COLON …`` (object decl). uada80 callers needing the binding can
 # rewrite it as a separate ``when E => declare X : … begin …;`` block.
 <handler>          : 'when' <discrete_choice_list> ARROW <stmt_seq>
+                   | 'when' IDENT COLON <discrete_choice_list> ARROW <stmt_seq>
                    ;
+# Choice parameter (RM 11.2): ``when E : Some_Exception => ...`` —
+# binds the exception occurrence to E inside the handler. The IDENT
+# COLON prefix is unique because <discrete_choice_list> only ever
+# appears after WHEN-ARROW context; an IDENT followed by COLON
+# can't be the start of a discrete choice (which would expect
+# operators or PIPE/ARROW after the IDENT, not COLON).
 
 <stmt>             : <labeled_stmt>
                    | <unlabeled_stmt>
@@ -883,7 +897,18 @@ PIPE       = '|'
 
 <return_stmt>      : 'return' SEMI
                    | 'return' <expr> SEMI
+                   | 'return' IDENT COLON <subtype_indication> SEMI
+                   | 'return' IDENT COLON <subtype_indication> ASSIGN <expr> SEMI
+                   | 'return' IDENT COLON <subtype_indication> 'do' <handled_stmt_seq> 'end' 'return' SEMI
+                   | 'return' IDENT COLON <subtype_indication> ASSIGN <expr> 'do' <handled_stmt_seq> 'end' 'return' SEMI
+                   | 'return' IDENT COLON 'constant' <subtype_indication> ASSIGN <expr> SEMI
+                   | 'return' IDENT COLON 'aliased' <subtype_indication> SEMI
+                   | 'return' IDENT COLON 'aliased' <subtype_indication> ASSIGN <expr> SEMI
                    ;
+# Extended return statement (Ada 2005, RM 6.5): allows the function
+# to name the returned object and optionally include a body that
+# operates on it before yielding. The simple ``return expr;`` and
+# ``return;`` forms remain the common case.
 
 <if_stmt>          : 'if' <expr> 'then' <stmt_seq> <elsif_part> <else_part> 'end' 'if' SEMI ;
 
