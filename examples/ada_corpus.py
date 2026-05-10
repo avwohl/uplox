@@ -66,6 +66,22 @@ def lowercase_keywords(text: str) -> str:
     return "".join(out)
 
 
+# Apostrophe disambiguation. The CHAR_LIT regex `'<char>'` greedily
+# matches against `Foo'(X)` because the closing apostrophe of the
+# next char literal supplies the third char of the match (so `'('a'`
+# tokenizes as CHAR_LIT="(" + leftover `a'`). RM 2.4 says an
+# apostrophe immediately following an identifier-completing token is
+# always a TICK (attribute prefix), never a char-literal start. We
+# insert a space after such an apostrophe so the lexer falls back to
+# the TICK token via longest-match.
+def disambiguate_apostrophe(text: str) -> str:
+    # Identifier-completing chars: letters, digits, underscores, RPAREN,
+    # and a closing apostrophe of a char literal or string-literal quote.
+    # Excluding `>` because `>>` (RSHIFT) would be a label tail and is
+    # not a valid attribute prefix in any context we care about.
+    return re.sub(r"([A-Za-z0-9_)])'(?=[^\s'])", r"\1' ", text)
+
+
 _ERR_LINE = re.compile(r"line (\d+), column (\d+)")
 _SCAN_ERR_LINE = re.compile(r"<input>:(\d+):(\d+)")
 
@@ -185,7 +201,7 @@ def main(argv: list[str]) -> int:
     for i, p in enumerate(files):
         text = p.read_text(encoding="utf-8", errors="replace")
         try:
-            text2 = lowercase_keywords(text)
+            text2 = disambiguate_apostrophe(lowercase_keywords(text))
         except Exception as e:
             fails.append((str(p), f"preprocess error: {e}", ""))
             buckets["preprocess error"] += 1
