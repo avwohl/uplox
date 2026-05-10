@@ -101,6 +101,22 @@ COLON      = ':'
 DOT        = '.'
 PIPE       = '|'
 
+# Yacc-style shift preference for shift/reduce conflicts on these
+# tokens. See docs/grammar_format.md for the contract.
+#
+#   pragma   — at unit boundaries the parser can't tell whether a
+#              pragma trails the previous unit (RM 10.1.1 standalone
+#              pragma) or leads the next unit's context_clause
+#              (RM 10.1.2). Both interpretations are valid parses;
+#              this is structurally a dangling-else ambiguity. Shift
+#              preference makes pragmas join the next context_clause,
+#              which matches the dominant ACATS shape.
+#   with     — after ``type T is new Parent``, the parser can't tell
+#              ``with record`` (extension) from ``with Aspect_Mark =>``
+#              (aspect_spec) without lookahead-2.
+%shift
+KW_pragma KW_with
+
 %rules
 
 # ===========================================================================
@@ -149,7 +165,12 @@ PIPE       = '|'
                    | 'use'  <ident_list> SEMI
                    | 'use' 'type' <ident_list> SEMI
                    | 'use' 'all' 'type' <ident_list> SEMI
+                   | <pragma>
                    ;
+# Pragma in context_clause is the dominant ACATS shape (``with X;
+# pragma Foo (X); package P is ...``). Co-existing with <one_unit> ->
+# <pragma> creates a shift/reduce on KW_pragma at unit boundaries
+# that LALR(1) can't resolve — see %shift KW_pragma below.
 
 <library_unit>     : <subprogram_decl>
                    | <subprogram_body>
@@ -524,7 +545,9 @@ PIPE       = '|'
 # non-derived integer/array types — uada80 can recover them via
 # pragmas if needed.
 <type_decl>        : 'type' IDENT 'is' <type_definition> SEMI
+                   | 'type' IDENT 'is' <type_definition> <aspect_spec> SEMI
                    | 'type' IDENT <discriminant_part> 'is' <type_definition> SEMI
+                   | 'type' IDENT <discriminant_part> 'is' <type_definition> <aspect_spec> SEMI
                    | 'type' IDENT SEMI                              # incomplete type
                    | 'type' IDENT <discriminant_part> SEMI          # incomplete with discrims
                    ;
@@ -1110,8 +1133,12 @@ PIPE       = '|'
 # Mandatory enclosing parens disambiguate from the for-loop statement.
 <quantified_expr>  : LPAREN 'for' 'all' IDENT 'in' <discrete_range> ARROW <expr> RPAREN
                    | LPAREN 'for' 'some' IDENT 'in' <discrete_range> ARROW <expr> RPAREN
+                   | LPAREN 'for' 'all' IDENT 'in' 'reverse' <discrete_range> ARROW <expr> RPAREN
+                   | LPAREN 'for' 'some' IDENT 'in' 'reverse' <discrete_range> ARROW <expr> RPAREN
                    | LPAREN 'for' 'all' IDENT 'of' <name> ARROW <expr> RPAREN
                    | LPAREN 'for' 'some' IDENT 'of' <name> ARROW <expr> RPAREN
+                   | LPAREN 'for' 'all' IDENT 'of' 'reverse' <name> ARROW <expr> RPAREN
+                   | LPAREN 'for' 'some' IDENT 'of' 'reverse' <name> ARROW <expr> RPAREN
                    ;
 
 # Ada 2012 conditional expression: ``(if X then Y [elsif … then …]
@@ -1213,6 +1240,12 @@ PIPE       = '|'
                    | 'generic' <generic_formal_part> 'package' <name> 'is' <decl_part> <private_part_opt> 'end' <opt_designator> SEMI
                    | 'generic' <generic_formal_part> 'package' <name> <aspect_spec> 'is' <decl_part> <private_part_opt> 'end' <opt_designator> SEMI
                    ;
+# Generic renaming (RM 8.5.5) is *not* supported here — adding it
+# requires resolving a 15-conflict shift/reduce on KW_package after
+# ``generic`` between the regular and renaming forms, which %shift
+# cannot disambiguate without breaking all the regular generic decls
+# (the renaming form would over-match). Needs LR(2) lookahead or a
+# grammar-level disambiguator.
 
 <generic_formal_part> : <generic_formal_part> <generic_formal>
                       |
