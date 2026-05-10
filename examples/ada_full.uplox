@@ -532,6 +532,7 @@ KW_pragma KW_with
                    | <ident_list> COLON <object_qualifiers> <subtype_indication> 'renames' <name> SEMI
                    | <ident_list> COLON <object_qualifiers> <subtype_indication> 'renames' <qualified_expr> SEMI
                    | <ident_list> COLON <object_qualifiers> <array_type_def> <init_opt> SEMI
+                   | <ident_list> COLON <object_qualifiers> <array_type_def> <init_opt> <aspect_spec> SEMI
                    ;
 
 <object_qualifiers> : 'aliased' 'constant'
@@ -1285,7 +1286,13 @@ KW_pragma KW_with
 <allocator>        : 'new' <name> TICK LPAREN <expr> RPAREN
                    | 'new' <name> TICK <aggregate>
                    | 'new' <name>
+                   | 'new' LPAREN <expr> RPAREN <name>
+                   | 'new' LPAREN <expr> RPAREN <name> TICK LPAREN <expr> RPAREN
+                   | 'new' LPAREN <expr> RPAREN <name> TICK <aggregate>
                    ;
+# Subpool allocator (Ada 2012, RM 4.8): ``new (Handle) T`` and the
+# qualified variants. The leading ``(Handle)`` selects a subpool of
+# the access type's storage pool.
 
 # ``T'(expr)`` qualified expression / type conversion, plus
 # ``T'aggregate`` (RM 4.7) for forms like ``String'(1 => Value)`` or
