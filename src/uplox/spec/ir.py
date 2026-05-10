@@ -111,3 +111,10 @@ class GrammarIR:
     # and similar cases where the ε-reduction is genuinely never wanted on
     # that lookahead.
     shift_terminals: set[str] = field(default_factory=set)
+    # Terminals listed under ``%reduce``. Shift/reduce conflicts on any of these
+    # are silently resolved in favour of reduce — the dual of %shift. Use when
+    # a longer reduction is genuinely the right answer and the competing shift
+    # would over-extend (e.g. closing a non-terminal whose followset includes
+    # the conflicting terminal, where the shift target is reachable only by
+    # an LALR state-merge artifact).
+    reduce_terminals: set[str] = field(default_factory=set)

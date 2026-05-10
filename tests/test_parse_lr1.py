@@ -253,3 +253,89 @@ S = 's'
 """
     table = build(src)
     assert table.conflicts == []
+
+
+def test_reduce_directive_resolves_dangling_else_in_favor_of_reduce():
+    # %reduce is the dual of %shift: it silently resolves shift/reduce
+    # in favour of reduce. Demonstrate on the same dangling-else grammar.
+    baseline = build(_DANGLING_ELSE)
+    assert any(c.terminal == "ELSE" for c in baseline.conflicts), \
+        "sanity: baseline grammar should have the dangling-else conflict"
+
+    src_with_reduce = _DANGLING_ELSE + "\n%reduce ELSE\n"
+    table = build(src_with_reduce)
+    assert table.conflicts == []
+
+    baseline_conflict_state = next(
+        c.state for c in baseline.conflicts if c.terminal == "ELSE"
+    )
+    resolved = table.action.get((baseline_conflict_state, "ELSE"))
+    assert isinstance(resolved, ReduceAction), \
+        f"expected reduce on ELSE at state {baseline_conflict_state}, got {resolved!r}"
+
+
+def test_reduce_directive_only_silences_listed_terminals():
+    src = _DANGLING_ELSE + "\n%reduce IF\n"
+    table = build(src)
+    assert any(c.terminal == "ELSE" for c in table.conflicts)
+
+
+def test_reduce_directive_does_not_resolve_reduce_reduce():
+    src = """
+%grammar rr
+%tokens
+A = 'a'
+B = 'b'
+
+%rules
+<s> : <x> B | <y> B ;
+<x> : A ;
+<y> : A ;
+%reduce A
+%reduce B
+"""
+    table = build(src)
+    rr = [c for c in table.conflicts if c.kind() == "reduce/reduce"]
+    assert rr, "expected r/r conflict to survive %reduce"
+
+
+def test_reduce_directive_validates_terminal_name():
+    import pytest
+    from uplox.parse.grammar import GrammarError
+    src = _DANGLING_ELSE + "\n%reduce NOT_A_TERMINAL\n"
+    with pytest.raises(GrammarError, match="NOT_A_TERMINAL"):
+        build(src)
+
+
+def test_reduce_directive_resolves_keyword_alias():
+    src = """
+%grammar amb_kw_red
+%keyword_prefix KW_
+%keywords
+if then else
+
+%tokens
+S = 's'
+
+%rules
+<stmt> : 'if' <cond> 'then' <stmt>
+     | 'if' <cond> 'then' <stmt> 'else' <stmt>
+     | S
+     ;
+<cond> : S ;
+%reduce else
+"""
+    table = build(src)
+    assert table.conflicts == []
+
+
+def test_shift_and_reduce_on_same_terminal_is_rejected():
+    # A terminal can't be both %shift and %reduce — that would be
+    # contradictory. Either the spec reader (same-name string) or the
+    # grammar compiler (after keyword-alias resolution) must reject it.
+    import pytest
+    from uplox.parse.grammar import GrammarError
+    from uplox.spec.reader import ReaderError
+    src = _DANGLING_ELSE + "\n%shift ELSE\n%reduce ELSE\n"
+    with pytest.raises((ReaderError, GrammarError), match="ELSE"):
+        build(src)

@@ -15,11 +15,14 @@ They are collected into a list on the returned :class:`LRTable`; callers
 (e.g. the CLI) decide how to surface them. ``uplox check`` will print every
 conflict before erroring out.
 
-The one exception is ``%shift``: terminals listed in the grammar's ``%shift``
-section have shift/reduce conflicts silently resolved in favour of shift at
-table-build time. This is the yacc-style escape hatch for cases where the
-LALR(1) lookahead is one token short — the canonical example is the
-dangling-else ambiguity. See :func:`_record_action`.
+Two exceptions are ``%shift`` and ``%reduce``: terminals listed in those
+sections have shift/reduce conflicts silently resolved in favour of shift
+or reduce respectively at table-build time. ``%shift`` is the yacc-style
+escape hatch for cases where the LALR(1) lookahead is one token short —
+the canonical example is the dangling-else ambiguity. ``%reduce`` is the
+dual, used when an LALR state-merge artefact offers a spurious shift on a
+terminal that is genuinely in the followset of the to-be-reduced
+non-terminal. See :func:`_record_action`.
 
 Phase 6's GLR extension reuses this collection unchanged: it stops trying to
 disambiguate at table-build time and instead remembers all conflicting actions,
@@ -295,6 +298,13 @@ def _record_action(table: LRTable, state: int, terminal: str, action: Action) ->
             table.action[key] = action
             return
         if isinstance(action, ReduceAction) and isinstance(existing, ShiftAction):
+            return
+    # %reduce escape hatch: dual of %shift — prefer reduce over shift.
+    if terminal in table.grammar.reduce_terminals:
+        if isinstance(action, ReduceAction) and isinstance(existing, ShiftAction):
+            table.action[key] = action
+            return
+        if isinstance(action, ShiftAction) and isinstance(existing, ReduceAction):
             return
     # Conflict — record it, keep the first action (deterministic) and move on.
     found = next(

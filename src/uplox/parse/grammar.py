@@ -70,6 +70,10 @@ class Grammar:
     """Terminals on which a shift/reduce conflict should be silently
     resolved in favour of shift (yacc-style shift preference). Populated
     from the IR's ``%shift`` section."""
+    reduce_terminals: set[str] = field(default_factory=set)
+    """Terminals on which a shift/reduce conflict should be silently
+    resolved in favour of reduce (the dual of ``shift_terminals``).
+    Populated from the IR's ``%reduce`` section."""
 
     def is_terminal(self, sym: str) -> bool:
         return sym in self.terminals
@@ -158,6 +162,24 @@ def compile_grammar(ir: GrammarIR) -> Grammar:
                     f"%shift entry {sym!r} is not a declared terminal"
                 )
         grammar.shift_terminals.add(resolved)
+
+    # Validate %reduce terminals the same way (and reject any that also appear
+    # in %shift, in case the keyword-alias resolution introduced an overlap).
+    for sym in ir.reduce_terminals:
+        resolved = sym
+        if sym not in terminal_names:
+            alias = ir.keyword_aliases.get(sym)
+            if alias is not None and alias in terminal_names:
+                resolved = alias
+            else:
+                raise GrammarError(
+                    f"%reduce entry {sym!r} is not a declared terminal"
+                )
+        if resolved in grammar.shift_terminals:
+            raise GrammarError(
+                f"terminal {resolved!r} listed in both %shift and %reduce"
+            )
+        grammar.reduce_terminals.add(resolved)
 
     # Production 0 is always the augmented start: $start -> S
     grammar.productions.append(

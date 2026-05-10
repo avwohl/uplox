@@ -77,7 +77,7 @@ def _strip_comment(line: str) -> str:
 # ---- Top-level reader --------------------------------------------------------
 
 
-_SECTIONS = ("grammar", "options", "tokens", "hooks", "rules", "keywords", "shift")
+_SECTIONS = ("grammar", "options", "tokens", "hooks", "rules", "keywords", "shift", "reduce")
 _SECTION_RE = re.compile(r"\s*%(" + "|".join(_SECTIONS) + r")\b\s*(.*)$")
 _KEYWORD_PREFIX_RE = re.compile(r"\s*%keyword_prefix\s+(\S+)\s*$")
 
@@ -121,6 +121,8 @@ def read_source(text: str, filename: str = "<source>") -> GrammarIR:
             _parse_keywords(ir, section_buf, filename)
         elif section == "shift":
             _parse_shift(ir, section_buf, filename)
+        elif section == "reduce":
+            _parse_reduce(ir, section_buf, filename)
         elif section == "rules":
             text = "\n".join(t for _l, t in section_buf)
             ir.options["__rules_text__"] = text
@@ -294,6 +296,28 @@ def _parse_shift(ir: GrammarIR, lines: list[tuple[int, str]], filename: str) -> 
                     f"{filename}:{lineno}: %shift entry {word!r} is not a valid identifier"
                 )
             ir.shift_terminals.add(word)
+
+
+def _parse_reduce(ir: GrammarIR, lines: list[tuple[int, str]], filename: str) -> None:
+    """Parse a ``%reduce`` section: dual of ``%shift``. Each listed terminal
+    is added to ``ir.reduce_terminals``; shift/reduce conflicts on these
+    terminals are silently resolved in favour of the (longer) reduce.
+
+    Use when the LALR table over-eagerly offers a shift that would extend
+    a different non-terminal whose state was merged into this one — the
+    reduce is what the grammar actually intends. A terminal cannot appear
+    in both ``%shift`` and ``%reduce``."""
+    for lineno, line in lines:
+        for word in line.split():
+            if not _KEYWORD_NAME_RE.fullmatch(word):
+                raise ReaderError(
+                    f"{filename}:{lineno}: %reduce entry {word!r} is not a valid identifier"
+                )
+            if word in ir.shift_terminals:
+                raise ReaderError(
+                    f"{filename}:{lineno}: terminal {word!r} listed in both %shift and %reduce"
+                )
+            ir.reduce_terminals.add(word)
 
 
 def _parse_keywords(ir: GrammarIR, lines: list[tuple[int, str]], filename: str) -> None:
