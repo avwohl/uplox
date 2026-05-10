@@ -227,10 +227,18 @@ KW_pragma KW_with
                    | <name> DOT 'null'
                    | <name> DOT CHAR_LIT
                    | <name> LPAREN <expr_or_assoc_list> RPAREN
+                   | <name> LPAREN 'case' <expr> 'is' <case_expr_alternatives> RPAREN
                    | <name> TICK <attribute_designator>
                    | <qualified_expr> DOT 'all'
                    | <qualified_expr> DOT IDENT
                    ;
+# Bare case-expression as a function-call argument:
+# ``Convert (case Selector is when 0 => Jan, when others => Tom)``.
+# Added as a dedicated <name> alternative (rather than extending
+# <expr_or_assoc> with bare-case) because the latter shape would
+# trigger a COMMA shift/reduce between extending the case_alternatives
+# and the call-argument list separator. With this dedicated shape the
+# RPAREN/COMMA decision is unambiguous.
 # RM 4.1 / 6.1: a direct_name can be an operator_symbol — a string
 # literal naming an operator (``"+"``, ``"<="``, ``"and"``). Allows
 # operator-symbol function calls like ``"+" (X, Y)`` and operator
