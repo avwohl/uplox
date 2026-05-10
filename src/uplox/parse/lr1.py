@@ -10,10 +10,16 @@ visit symbols in sorted order, so two runs produce the same state numbering.
 Conflicts
 ---------
 
-Shift/reduce and reduce/reduce conflicts are not silently resolved. They are
-collected into a list on the returned :class:`LRTable`; callers (e.g. the CLI)
-decide how to surface them. For Phase 3, ``uplox check`` will print every
-conflict before erroring out — there is no implicit shift-prefer rule in v0.
+Shift/reduce and reduce/reduce conflicts are not silently resolved by default.
+They are collected into a list on the returned :class:`LRTable`; callers
+(e.g. the CLI) decide how to surface them. ``uplox check`` will print every
+conflict before erroring out.
+
+The one exception is ``%shift``: terminals listed in the grammar's ``%shift``
+section have shift/reduce conflicts silently resolved in favour of shift at
+table-build time. This is the yacc-style escape hatch for cases where the
+LALR(1) lookahead is one token short — the canonical example is the
+dangling-else ambiguity. See :func:`_record_action`.
 
 Phase 6's GLR extension reuses this collection unchanged: it stops trying to
 disambiguate at table-build time and instead remembers all conflicting actions,
@@ -270,7 +276,11 @@ def _compute_default_reductions(table: LRTable) -> None:
 
 
 def _record_action(table: LRTable, state: int, terminal: str, action: Action) -> None:
-    """Record ``action`` in ACTION[state, terminal], collecting any conflict."""
+    """Record ``action`` in ACTION[state, terminal], collecting any conflict.
+
+    Shift/reduce conflicts on a terminal listed in ``%shift`` are silently
+    resolved in favour of shift (the canonical dangling-else fix). All other
+    conflicts are recorded for the caller to surface."""
     key = (state, terminal)
     existing = table.action.get(key)
     if existing is None:
@@ -279,6 +289,13 @@ def _record_action(table: LRTable, state: int, terminal: str, action: Action) ->
     # Same action twice (e.g. two items giving the same shift target) is fine.
     if _actions_equal(existing, action):
         return
+    # %shift escape hatch: silently prefer shift over reduce on this terminal.
+    if terminal in table.grammar.shift_terminals:
+        if isinstance(action, ShiftAction) and isinstance(existing, ReduceAction):
+            table.action[key] = action
+            return
+        if isinstance(action, ReduceAction) and isinstance(existing, ShiftAction):
+            return
     # Conflict — record it, keep the first action (deterministic) and move on.
     found = next(
         (c for c in table.conflicts if c.state == state and c.terminal == terminal),

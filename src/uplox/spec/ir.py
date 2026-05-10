@@ -105,3 +105,9 @@ class GrammarIR:
     # Bare-name -> synthesised token name. ``%keywords`` lists populate this so
     # bare keyword references on rule RHS resolve back to the prefixed token.
     keyword_aliases: dict[str, str] = field(default_factory=dict)
+    # Terminals listed under ``%shift``. Shift/reduce conflicts on any of these
+    # are silently resolved in favour of shift at LR-table-build time. Use
+    # sparingly — yacc-style shift-prefer is the standard fix for dangling-else
+    # and similar cases where the ε-reduction is genuinely never wanted on
+    # that lookahead.
+    shift_terminals: set[str] = field(default_factory=set)

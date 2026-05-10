@@ -151,3 +151,105 @@ def test_simple_unambiguous_grammar_has_few_states():
     # Augmented start + initial closure + after-shift + accept reduction... 4 states tops.
     assert len(table.states) <= 4
     assert table.conflicts == []
+
+
+_DANGLING_ELSE = """
+%grammar amb
+%tokens
+IF    = 'if'
+THEN  = 'then'
+ELSE  = 'else'
+S     = 's'
+
+%rules
+<stmt> : IF <cond> THEN <stmt>
+     | IF <cond> THEN <stmt> ELSE <stmt>
+     | S
+     ;
+<cond> : S ;
+"""
+
+
+def test_shift_directive_resolves_dangling_else_in_favor_of_shift():
+    # Without %shift the dangling-else grammar produces one s/r conflict on ELSE.
+    # With %shift ELSE the conflict is silently resolved by preferring shift —
+    # the canonical yacc-style fix.
+    baseline = build(_DANGLING_ELSE)
+    assert any(c.terminal == "ELSE" for c in baseline.conflicts), \
+        "sanity check: baseline grammar should have the dangling-else conflict"
+
+    src_with_shift = _DANGLING_ELSE + "\n%shift ELSE\n"
+    table = build(src_with_shift)
+    assert table.conflicts == []
+
+    # In the state that previously had the conflict, the resolution is shift
+    # (not reduce). Find a state that has the ELSE conflict in baseline and
+    # check the post-resolution table records a shift there.
+    baseline_conflict_state = next(
+        c.state for c in baseline.conflicts if c.terminal == "ELSE"
+    )
+    resolved = table.action.get((baseline_conflict_state, "ELSE"))
+    assert isinstance(resolved, ShiftAction), \
+        f"expected shift on ELSE at state {baseline_conflict_state}, got {resolved!r}"
+
+
+def test_shift_directive_only_silences_listed_terminals():
+    # If we mark a *different* terminal as %shift, the dangling-else conflict
+    # on ELSE is still reported.
+    src = _DANGLING_ELSE + "\n%shift IF\n"
+    table = build(src)
+    assert any(c.terminal == "ELSE" for c in table.conflicts)
+
+
+def test_shift_directive_does_not_resolve_reduce_reduce():
+    # Reduce/reduce conflicts are NOT covered by %shift — only s/r are.
+    src = """
+%grammar rr
+%tokens
+A = 'a'
+B = 'b'
+
+%rules
+<s> : <x> B | <y> B ;
+<x> : A ;
+<y> : A ;
+%shift A
+%shift B
+"""
+    table = build(src)
+    rr = [c for c in table.conflicts if c.kind() == "reduce/reduce"]
+    assert rr, "expected r/r conflict to survive %shift"
+
+
+def test_shift_directive_validates_terminal_name():
+    # Listing an undeclared name in %shift must error.
+    import pytest
+    from uplox.parse.grammar import GrammarError
+    src = _DANGLING_ELSE + "\n%shift NOT_A_TERMINAL\n"
+    with pytest.raises(GrammarError, match="NOT_A_TERMINAL"):
+        build(src)
+
+
+def test_shift_directive_resolves_keyword_alias():
+    # %shift accepts the bare keyword spelling (which the keyword_prefix
+    # synthesises into a prefixed token name); the resolution happens at
+    # compile_grammar time.
+    src = """
+%grammar amb_kw
+%keyword_prefix KW_
+%keywords
+if then else
+
+%tokens
+S = 's'
+
+%rules
+<stmt> : 'if' <cond> 'then' <stmt>
+     | 'if' <cond> 'then' <stmt> 'else' <stmt>
+     | S
+     ;
+<cond> : S ;
+%shift else
+"""
+    table = build(src)
+    assert table.conflicts == []

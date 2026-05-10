@@ -15,6 +15,7 @@ sections and one-shot directives:
 %keywords         (optional)
 %tokens
 %hooks            (optional)
+%shift            (optional)
 %rules
 ```
 
@@ -172,9 +173,38 @@ the regex syntax never asserts code-point boundaries.
 
 LR(1) conflicts are reported as errors with the conflicting items, the
 look-ahead set, and source positions of the offending productions. There
-is no implicit shift-prefer rule — ambiguous grammars must be made
-unambiguous, or built with conflicts preserved and parsed via the GLR
-runtime (`uplox parse --glr`).
+is no implicit shift-prefer rule by default — ambiguous grammars must be
+made unambiguous, listed under `%shift` (see below), or built with
+conflicts preserved and parsed via the GLR runtime (`uplox parse --glr`).
+
+## `%shift`
+
+Optional. Lists terminals on which shift/reduce conflicts should be
+silently resolved in favour of shift, yacc-style. Reduce/reduce
+conflicts are *not* affected and will still surface as errors.
+
+```
+%shift
+ELSE
+KW_pragma KW_with
+```
+
+Whitespace separates entries; line breaks are insignificant. Each entry
+must resolve to a declared terminal — either a `%tokens` name or a
+`%keywords` spelling (the latter is mapped through the keyword-prefix
+alias).
+
+Use sparingly. The intended use case is the dangling-else family of
+ambiguities, where LALR(1) lookahead is one token short and the
+greedy-shift interpretation is uniformly correct. For most grammar
+ambiguities, restructuring the productions is the right fix.
+
+When a listed terminal participates in a shift/reduce conflict, the
+shift is recorded and the conflict is dropped from the table's
+`conflicts` list — `uplox check` will not flag it. This means a typo in
+`%shift` (a terminal that never actually conflicts) is silent. Run with
+the `%shift` line removed first to confirm the conflict you intend to
+silence really exists.
 
 ## Lexer feedback (typedef-name and friends)
 

@@ -66,6 +66,10 @@ class Grammar:
     :func:`compile_grammar` once the grammar's FIRST map is built. Pulls
     the per-iteration ``first_of_sequence`` cost out of the hot LR(1)
     closure loop — see :mod:`uplox.parse.lr1`._closure."""
+    shift_terminals: set[str] = field(default_factory=set)
+    """Terminals on which a shift/reduce conflict should be silently
+    resolved in favour of shift (yacc-style shift preference). Populated
+    from the IR's ``%shift`` section."""
 
     def is_terminal(self, sym: str) -> bool:
         return sym in self.terminals
@@ -139,6 +143,21 @@ def compile_grammar(ir: GrammarIR) -> Grammar:
         terminals=set(terminal_names),
     )
     grammar.non_terminals = set(rule_names) | {AUGMENTED_START}
+
+    # Validate %shift terminals against the resolved terminal set. We check
+    # the post-resolution names so users can list either a raw token name
+    # (``IF``) or a keyword-prefix-synthesised name (``KW_if``).
+    for sym in ir.shift_terminals:
+        resolved = sym
+        if sym not in terminal_names:
+            alias = ir.keyword_aliases.get(sym)
+            if alias is not None and alias in terminal_names:
+                resolved = alias
+            else:
+                raise GrammarError(
+                    f"%shift entry {sym!r} is not a declared terminal"
+                )
+        grammar.shift_terminals.add(resolved)
 
     # Production 0 is always the augmented start: $start -> S
     grammar.productions.append(

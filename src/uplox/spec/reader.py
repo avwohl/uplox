@@ -77,7 +77,7 @@ def _strip_comment(line: str) -> str:
 # ---- Top-level reader --------------------------------------------------------
 
 
-_SECTIONS = ("grammar", "options", "tokens", "hooks", "rules", "keywords")
+_SECTIONS = ("grammar", "options", "tokens", "hooks", "rules", "keywords", "shift")
 _SECTION_RE = re.compile(r"\s*%(" + "|".join(_SECTIONS) + r")\b\s*(.*)$")
 _KEYWORD_PREFIX_RE = re.compile(r"\s*%keyword_prefix\s+(\S+)\s*$")
 
@@ -119,6 +119,8 @@ def read_source(text: str, filename: str = "<source>") -> GrammarIR:
             _parse_hooks(ir, section_buf, filename)
         elif section == "keywords":
             _parse_keywords(ir, section_buf, filename)
+        elif section == "shift":
+            _parse_shift(ir, section_buf, filename)
         elif section == "rules":
             text = "\n".join(t for _l, t in section_buf)
             ir.options["__rules_text__"] = text
@@ -273,6 +275,25 @@ def _parse_hooks(ir: GrammarIR, lines: list[tuple[int, str]], filename: str) -> 
 
 
 _KEYWORD_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _parse_shift(ir: GrammarIR, lines: list[tuple[int, str]], filename: str) -> None:
+    """Parse a ``%shift`` section: whitespace-separated terminal token names,
+    possibly across multiple lines. Each listed terminal is added to
+    ``ir.shift_terminals``; the LR-table builder later resolves shift/reduce
+    conflicts on these terminals in favour of shift, silently.
+
+    This is the yacc-style ``%nonassoc``-with-shift-preference escape hatch
+    for cases where the grammar's intent is unambiguous but LALR(1) lookahead
+    is one token short — the canonical example is the dangling-else
+    ambiguity, where shifting ``ELSE`` is always the right answer."""
+    for lineno, line in lines:
+        for word in line.split():
+            if not _KEYWORD_NAME_RE.fullmatch(word):
+                raise ReaderError(
+                    f"{filename}:{lineno}: %shift entry {word!r} is not a valid identifier"
+                )
+            ir.shift_terminals.add(word)
 
 
 def _parse_keywords(ir: GrammarIR, lines: list[tuple[int, str]], filename: str) -> None:
