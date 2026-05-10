@@ -1,101 +1,77 @@
-# Ada front-end status — 2026-05-10
+# Ada front-end status — 2026-05-10 (afternoon, on Mac)
 
 ## Coverage
 
-	GNAT runtime	97.8% (1072/1096)
-	ACATS C/L/E/D	89.2% (2541/2849)
+	GNAT runtime	97.8% (1072/1096)	maxed (all 24 fails malformed source)
+	ACATS C/L/E/D	99.5% (2835/2849)	14 fails left
 
-All session work is committed and pushed (current head `2eb4c07`).
-Latest build bundle: `/tmp/ada_full_v22.json`. Grammar is now 29053
-states; uplox builds take ~41 min on this machine. Cost-per-file
-landed crossed ~14 min in the v22 round — practical mining wall.
+All session work is committed (head `6307a88`). Latest build bundle:
+`/tmp/ada_full_v34.json` (24 MB). Grammar: 653 productions, 49467
+states, 0 conflicts. uplox check ~10–15 s on Mac M-series; build
+~10–20 min depending on state count; build peak RSS ~2.1 GB.
 
 ## Resume
 
-```bash
-cd /home/wohl/src/uplox
-uplox check examples/ada_full.uplox     # ~10-12 min on the big grammar
-time uplox build examples/ada_full.uplox -o /tmp/ada_full_vN.json   # ~30-36 min
-python examples/ada_corpus.py /tmp/ada_full_vN.json /home/wohl/src/uada80/adalib
-python /tmp/run_acats.py    /tmp/ada_full_vN.json /home/wohl/src/uada80/tests/acats/tests
-```
+	cd /Users/wohl/src/uplox
+	/tmp/memcap.sh 24576 uplox check examples/ada_full.uplox
+	/tmp/memcap.sh 24576 uplox build  examples/ada_full.uplox -o /tmp/ada_full_vN.json
+	/tmp/memcap.sh 24576 python3 examples/ada_corpus.py /tmp/ada_full_vN.json /Users/wohl/src/uada80/adalib --save-summary /tmp/gnat_summary_vN.txt
+	/tmp/memcap.sh 24576 python3 examples/ada_corpus.py /tmp/ada_full_vN.json /tmp/acats/tests --skip-b-tests --save-summary /tmp/acats_summary_vN.txt --save-fails /tmp/acats_fails_vN.txt
 
-## What still fails
+`/tmp/memcap.sh` is a 24 GB RSS watchdog — macOS doesn't enforce
+ulimit -v, so a polled killer is the only safety net. Source kept
+in `/tmp/memcap.sh` (regenerate from this file's git history if lost).
 
-### GNAT runtime (24 files, all corpus issues)
+## Corpora on this Mac
 
-	12	`digits` used as identifier
-	 4	empty based literal `##`
-	 3	`rem` used as identifier
-	 2	tick / attribute (1 stray apostrophe, 1 attribute clause in stmt context)
-	 1	`entry` / `delta` / `false` used as identifier (1 each)
+	GNAT runtime	/Users/wohl/src/uada80/adalib                1096 files
+	ACATS 4G        /tmp/acats/tests                            2849 non-B
+	ACATS source    https://github.com/simonjwright/ACATS      master @ 2024-12-31
 
-All 24 are GNAT corpus files that misuse Ada reserved words as
-identifiers or have malformed numeric literals — no compiler accepts
-them. Effectively maxed out.
+The local `/Users/wohl/src/uada80/{acats,tests/acats}` are NOT the
+full corpus (only 79 ACATS support files). The full corpus was
+downloaded into `/tmp/acats` from simonjwright/ACATS during this
+session. `ada_corpus.py --skip-b-tests` filters intentionally-invalid
+B-tests (1876 files); the remaining 2849 are A/C/D/E/L tests.
 
-### ACATS (308 fails — the realistic ceiling for this grammar)
+## What still fails (14 ACATS)
 
-LR-blocked clusters (would need uplox engine changes or major
-restructuring):
+	7	generic renaming (`generic package X renames Y;`,
+	    `generic function F renames G;`) — 15 conflicts when added
+	    naively; existing comment notes %shift cannot disambiguate
+	    KW_package/KW_function after `generic` between regular and
+	    renaming forms without LR(2) lookahead.
+	3	malformed source — non-ASCII bytes in `a22006c`, `a2a031a`,
+	    `c2a021b` that no Ada compiler accepts.
+	2	range attribute as range constraint
+	    (`X : Integer range A1'Range(2)`, `Y : Integer range F'Range`).
+	    Adding `<name> 'range' <name>` to <subtype_indication>
+	    produces 4 SEMI shift/reduce conflicts.
+	1	bare case-expression as call argument
+	    (`Convert (case Selector is when 0 => Jan, when others => Tom)`)
+	    — bare-`case` in <expr_or_assoc> conflicts on COMMA between
+	    extending case_alternatives and the list separator.
+	1	aspect_spec on `type_decl` after discriminants — documented
+	    as conflicting with the derived-type ``with record`` extension.
 
-	~192	pragma between with/use and library_unit (RM 10.1.2) — the
-	    	v17 grammar restructure made `<one_unit> -> <pragma>` a
-	    	standalone unit, which is conflict-free but doesn't accept
-	    	context-clause pragmas. Adding pragma BACK to `<context_item>`
-	    	produces a 1-2-conflict shift/reduce on KW_pragma at unit
-	    	boundaries that LALR-1 can't disambiguate without lookahead-2
-	    	or a precedence/prefer directive (uplox v0 has neither).
-	~31 	aspect_spec on `type_decl` — explicitly noted in the existing
-	    	rule comment as conflicting with the derived-type
-	    	``with record`` extension form.
-	~10 	entry family with discrete-range parameter (`entry E (1..2);`)
-	    	— the existing comment notes this conflicts with the regular
-	    	`entry E (params)` formal-part shape.
-	~6  	generic renaming (`generic package X renames Y;`) — produces
-	    	15 conflicts when added; the `generic` prefix can't
-	    	distinguish renaming from generic-decl on KW_package
-	    	lookahead alone.
-	~5  	`reverse` quantifier in quantified expression (caused 7674
-	    	conflicts when attempted).
-
-Tractable but non-trivial residual gaps (each needs careful LALR
-factoring):
-
-	~19 	deep / mixed extension aggregates with allocators
-	~13 	index constraint with subtype indication on access type
-	    	(`type P is access I_5_ARRAY (I_5 range 0 .. 6)`)
-	~5  	bare conditional inside qualified expression
-	    	(`Month'(if X then A elsif ... else ...)`)
+Net session: **+74 ACATS files (96.9% → 99.5%)**. GNAT runtime
+unchanged at 97.8% (every fail is malformed source).
 
 ## Things uplox would need for further coverage
 
-* **Context-sensitive lex hooks** — already worked around for the
-  `Character_Range'(...)` shape via `disambiguate_apostrophe()` in
-  the corpus driver. uplox v0 regex has no lookbehind and the
-  token-filter hook can re-tag but not un-consume input.
-* **Token splitting** — useful for shapes the regex over-consumes.
-  Currently tokens are atomic from the parser's view.
-* **Precedence / prefer-shift directives** — would let the
-  context-pragma case land without LALR factoring gymnastics.
+* **LR(2) lookahead** — would close generic renaming (~7 files) and
+  bare case-as-call-arg (~1 file).
+* **Context-sensitive lex hooks** — same as before; the
+  `disambiguate_apostrophe` workaround in `ada_corpus.py` could
+  go away.
+* **macOS RLIMIT_AS support** — would let us drop the watchdog.
 
-## Session commits this run
+## Session commits
 
 ```
-2eb4c07 ada_full: extension aggregate with positional body (+3 ACATS, 89.1% → 89.2%)
-77a353f ada_full: range-attr fix, multi-label, DOT char, pipe-discrim (+11 ACATS, 88.7% → 89.1%)
-ee1d91c ada_full: enum keyword literals, range attribute (+12 ACATS, 88.3% → 88.7%)
-8392111 ada_full: subprogram-body aspect, subtype delta/digits, DOT keyword names, quantified expr (+40 ACATS, 86.9% → 88.3%)
-ed51d28 ada_full: extended return, choice param, use type, op-string assoc (+120 ACATS, 82.7% → 86.9%)
-059e246 ada_full: more ACATS gaps (+48 files, 81.0% → 82.7%)
-0ff8c6d ada_full: operator-symbol names + based reals (+86 ACATS, +1 GNAT, 81.0% / 97.8%)
-2caa42e ada_full: colon-based ints + guarded select alts (+26 ACATS, 77.0% → 78.0%)
-cfb3675 ada_full: mixed pos+named aggregates, subtype aspect_spec (+30 ACATS, 76.0% → 77.0%)
-24e10f9 ada_full: block/loop labels, terminate, null record (+377 ACATS, 62.8% → 76.0%)
-0e047ce ada_full: subunit declarations (+52 ACATS, 60.9% → 62.8%)
-b618303 ada_corpus: pre-pass disambiguates TICK from CHAR_LIT (+1 GNAT, 97.6 → 97.7%)
-36a96b8 ada_full: trailing pragma + qualified-aggregate allocator (+18 GNAT, 96.0 → 97.6%)
-... earlier session: 92.3% → 96.0% on GNAT runtime
+6307a88 ada_full: goto with dotted label, raise after short-circuit (+2 ACATS, 99.4% → 99.5%)
+2b70c2f ada_full: entry families and accept-with-family-index (+28 ACATS, 98.5% → 99.4%)
+09709a5 ada_full: qualified-expr extensions and progenitor lists (+4 ACATS, 98.3% → 98.5%)
+ef595a8 ada_full: more low-risk additions (+5 ACATS, 98.1% → 98.3%)
+811a818 ada_full: replace WIP with low-risk additions (+34 ACATS, 96.9% → 98.1%)
 ```
-
-Net session: **GNAT 92.3% → 97.8% (+60 files); ACATS 60.9% → 89.2% (+805 files)**.
