@@ -465,7 +465,14 @@ PIPE       = '|'
 # Type & subtype declarations
 # ===========================================================================
 
-<subtype_decl>     : 'subtype' IDENT 'is' <subtype_indication> SEMI ;
+<subtype_decl>     : 'subtype' IDENT 'is' <subtype_indication> SEMI
+                   | 'subtype' IDENT 'is' <subtype_indication> <aspect_spec> SEMI
+                   ;
+# Aspect spec on a subtype is fine since <subtype_indication>'s end
+# tokens (IDENT/RPAREN/INT_LIT/etc.) don't shadow the ``with`` of
+# aspect_spec. For type_decl the same trick collides with the
+# derived-type ``with record`` extension, so aspect specs on
+# integer/array type decls remain unsupported.
 
 # Type declarations. Aspect specifications on type decls are folded
 # into ``<derived_tail>`` (and into ``<private_type_def>`` /
@@ -1069,10 +1076,15 @@ PIPE       = '|'
 # disambiguate; that's enforced by the choice list rule.
 <aggregate>        : LPAREN <agg_positional_two_plus> RPAREN
                    | LPAREN <agg_named_list> RPAREN
+                   | LPAREN <expr> COMMA <agg_named_list> RPAREN
                    | LPAREN <expr> 'with' <agg_named_list> RPAREN
                    | LPAREN <expr> 'with' 'null' 'record' RPAREN
                    | LPAREN 'null' 'record' RPAREN
                    ;
+# Mixed positional+named aggregate (RM 4.3): ``(A, F => B)`` (1 pos
+# + named) is its own alternative; the multi-positional + named form
+# ``(A, B, ..., F => Z)`` is reachable via <agg_positional_tail>'s
+# ``<expr> COMMA <agg_named_list>`` extension below.
 # ``(null record)`` (RM 4.3.1) is the empty record aggregate, used as
 # the value of a null-record type.
 
@@ -1081,6 +1093,7 @@ PIPE       = '|'
 
 <agg_positional_tail> : <expr>
                       | <expr> COMMA <agg_positional_tail>
+                      | <expr> COMMA <agg_named_list>
                       ;
 
 <agg_named_list>   : <agg_named_assoc>
