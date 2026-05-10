@@ -117,6 +117,15 @@ PIPE       = '|'
 %shift
 KW_pragma KW_with
 
+# %reduce SEMI: needed by the new <subtype_indication> -> <name> 'range'
+# <simple_expr> alternative below. The competing shift on SEMI is an LALR
+# state-merge artefact (SEMI is not actually in followset of the
+# <name>/<simple_expr> chain in this position; the merge surfaces it from
+# an unrelated `<name> SEMI` production). %reduce closes the
+# subtype_indication and lets the surrounding decl shift SEMI cleanly.
+%reduce
+SEMI
+
 %rules
 
 # ===========================================================================
@@ -850,8 +859,10 @@ KW_pragma KW_with
 # Ada 2005 — restricts an access subtype to never alias null.
 <subtype_indication> : <name>
                      | <name> 'range' <simple_expr> DOTDOT <simple_expr>
+                     | <name> 'range' <simple_expr>
                      | 'not' 'null' <name>
                      | 'not' 'null' <name> 'range' <simple_expr> DOTDOT <simple_expr>
+                     | 'not' 'null' <name> 'range' <simple_expr>
                      | 'not' 'null' 'access' <subtype_indication>
                      | 'not' 'null' 'access' 'all' <subtype_indication>
                      | 'not' 'null' 'access' 'constant' <subtype_indication>
