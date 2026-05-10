@@ -1358,8 +1358,11 @@ KW_pragma KW_with
 # requires resolving a 15-conflict shift/reduce on KW_package after
 # ``generic`` between the regular and renaming forms, which %shift
 # cannot disambiguate without breaking all the regular generic decls
-# (the renaming form would over-match). Needs LR(2) lookahead or a
-# grammar-level disambiguator.
+# (the renaming form would over-match). Splitting the formal_part into
+# empty vs non-empty halves the conflict count to 10 (now on
+# overriding_opt -> ε for procedure/function), but eliminating those
+# requires a deeper restructure of <subprogram_spec>. Needs LR(2)
+# lookahead or a grammar-level disambiguator.
 
 <generic_formal_part> : <generic_formal_part> <generic_formal>
                       |
