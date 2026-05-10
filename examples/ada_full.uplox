@@ -162,6 +162,10 @@ KW_pragma KW_with
                    ;
 
 <context_item>     : 'with' <ident_list> SEMI
+                   | 'limited' 'with' <ident_list> SEMI
+                   | 'private' 'with' <ident_list> SEMI
+                   | 'limited' 'private' 'with' <ident_list> SEMI
+                   | 'private' 'limited' 'with' <ident_list> SEMI
                    | 'use'  <ident_list> SEMI
                    | 'use' 'type' <ident_list> SEMI
                    | 'use' 'all' 'type' <ident_list> SEMI
@@ -748,6 +752,7 @@ KW_pragma KW_with
 
 <component_list>   : <component_list> <component_decl>
                    | <component_list> <pragma>
+                   | <component_list> <variant_part>
                    | 'null' SEMI
                    |
                    ;
@@ -756,6 +761,19 @@ KW_pragma KW_with
 # component_list (mutually exclusive with the component sequence
 # above), but adding it as one alternative is conflict-free because
 # 'null' is not a valid start for any component_decl.
+
+# Variant part (RM 3.8.1): ``case Discriminant is when Choices =>
+# components; ... end case;``. Each variant body is itself a
+# component_list (so nested variants are supported via the
+# left-recursion above).
+<variant_part>     : 'case' <name> 'is' <variant_list> 'end' 'case' SEMI ;
+
+<variant_list>     : <variant>
+                   | <variant_list> <variant>
+                   ;
+
+<variant>          : 'when' <discrete_choice_list> ARROW <component_list>
+                   ;
 
 <component_decl>   : <ident_list> COLON <subtype_indication> <init_opt> SEMI
                    | <ident_list> COLON 'aliased' <subtype_indication> <init_opt> SEMI
