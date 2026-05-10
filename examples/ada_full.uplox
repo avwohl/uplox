@@ -1108,7 +1108,7 @@ KW_pragma KW_with
                    | 'exit' IDENT 'when' <expr> SEMI
                    ;
 
-<goto_stmt>        : 'goto' IDENT SEMI ;
+<goto_stmt>        : 'goto' <name> SEMI ;
 
 <block_stmt>       : 'declare' <decl_part> 'begin' <handled_stmt_seq> 'end' SEMI
                    | 'begin' <handled_stmt_seq> 'end' SEMI
@@ -1135,7 +1135,16 @@ KW_pragma KW_with
                    | <expr> 'or' <relation>
                    | <expr> 'or' 'else' <relation>
                    | <expr> 'xor' <relation>
+                   | <expr> 'and' 'then' 'raise' <name>
+                   | <expr> 'and' 'then' 'raise' <name> 'with' <simple_expr>
+                   | <expr> 'or' 'else' 'raise' <name>
+                   | <expr> 'or' 'else' 'raise' <name> 'with' <simple_expr>
                    ;
+# Short-circuit with raise on the RHS (RM 11.3 raise_expression as
+# operand of a short-circuit_form) — common in defensive code:
+# ``(Cond or else raise Bad with "...")``. Use <simple_expr> for the
+# message expression, not <expr>, to dodge the binary-operator swallow
+# (raise X with Y and Z would otherwise greedy-extend the inner expr).
 
 <relation>         : <simple_expr>
                    | <simple_expr> EQ  <simple_expr>
