@@ -228,6 +228,8 @@ KW_pragma KW_with
                    | <name> DOT CHAR_LIT
                    | <name> LPAREN <expr_or_assoc_list> RPAREN
                    | <name> TICK <attribute_designator>
+                   | <qualified_expr> DOT 'all'
+                   | <qualified_expr> DOT IDENT
                    ;
 # RM 4.1 / 6.1: a direct_name can be an operator_symbol — a string
 # literal naming an operator (``"+"``, ``"<="``, ``"and"``). Allows
@@ -516,6 +518,7 @@ KW_pragma KW_with
 <object_decl>      : <ident_list> COLON <object_qualifiers> <subtype_indication> <init_opt> SEMI
                    | <ident_list> COLON <object_qualifiers> <subtype_indication> <init_opt> <aspect_spec> SEMI
                    | <ident_list> COLON <object_qualifiers> <subtype_indication> 'renames' <name> SEMI
+                   | <ident_list> COLON <object_qualifiers> <subtype_indication> 'renames' <qualified_expr> SEMI
                    | <ident_list> COLON <object_qualifiers> <array_type_def> <init_opt> SEMI
                    ;
 
@@ -642,6 +645,8 @@ KW_pragma KW_with
                    | 'new' <subtype_indication> 'digits' <expr> 'range' <simple_expr> DOTDOT <simple_expr>
                    | 'new' <subtype_indication> 'with' <derived_tail>
                    | 'abstract' 'new' <subtype_indication> 'with' <derived_tail>
+                   | 'new' <subtype_indication> 'and' <progenitor_list> 'with' <derived_tail>
+                   | 'abstract' 'new' <subtype_indication> 'and' <progenitor_list> 'with' <derived_tail>
                    ;
 # Delta / digits constraints on a derived fixed-point or floating
 # type (RM 3.5.9): ``type T is new Parent delta 0.1 range L .. H;``.
@@ -696,12 +701,17 @@ KW_pragma KW_with
                    ;
 
 # Interfaces: ``type I is [limited|synchronized|tagged] interface
-# [and parent_list]``.
+# [and parent_list]``. RM 3.9.4 specifies an `and`-separated list of
+# interface_subtype_mark, not a comma list.
 <interface_type_def> : 'interface'
-                     | 'interface' 'and' <ident_list>
+                     | 'interface' 'and' <progenitor_list>
                      | <interface_kind> 'interface'
-                     | <interface_kind> 'interface' 'and' <ident_list>
+                     | <interface_kind> 'interface' 'and' <progenitor_list>
                      ;
+
+<progenitor_list>  : <name>
+                   | <progenitor_list> 'and' <name>
+                   ;
 
 <interface_kind>   : 'limited'
                    | 'synchronized'
@@ -1216,6 +1226,8 @@ KW_pragma KW_with
                    ;
 
 <else_expr_opt>    : 'else' <expr>
+                   | 'else' 'raise' <name>
+                   | 'else' 'raise' <name> 'with' <expr>
                    |
                    ;
 
@@ -1262,9 +1274,16 @@ KW_pragma KW_with
                    | <name> TICK LPAREN 'raise' <name> RPAREN
                    | <name> TICK LPAREN 'raise' <name> 'with' <expr> RPAREN
                    | <qualified_expr> LPAREN <expr_or_assoc_list> RPAREN
+                   | <qualified_expr> TICK <attribute_designator>
                    ;
 # Indexing of a qualified expression: ``String'(E)(1)``. After T'(E),
 # treat further (idx) as an indexed component on the qualified result.
+# Chained attribute on qualified prefix: ``New_Enum'(E1)'Image``
+# (RM 4.1.4 — qualified_expression may be a name).
+# Explicit deref ``Paragraph_Text'(E).all`` and selected component
+# ``Paragraph_Text'(E).Field`` are <name> extensions below — that
+# lets the result be used as an assignment LHS (which uses <name>),
+# not just as a primary in an expression.
 # T'(if ...) and T'(case ...) — qualified expression containing a bare
 # conditional/case. The qualified-expression's parens stand in for the
 # conditional's normally-required parens (RM 4.5.7).
