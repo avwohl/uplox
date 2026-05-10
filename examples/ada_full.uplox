@@ -67,7 +67,7 @@ STRING_LIT = /"([^"\n]|"")*"/
 # separators. Real literals are decimal-only here; based reals are
 # rare and deferred.
 INT_LIT    = /[0-9][0-9_]*([eE][+-]?[0-9_]+)?|[0-9]+#[0-9A-Fa-f][0-9A-Fa-f_]*#([eE][+-]?[0-9_]+)?|[0-9]+:[0-9A-Fa-f][0-9A-Fa-f_]*:([eE][+-]?[0-9_]+)?/
-REAL_LIT   = /[0-9][0-9_]*\.[0-9][0-9_]*([eE][+-]?[0-9_]+)?/
+REAL_LIT   = /[0-9][0-9_]*\.[0-9][0-9_]*([eE][+-]?[0-9_]+)?|[0-9]+#[0-9A-Fa-f][0-9A-Fa-f_]*\.[0-9A-Fa-f][0-9A-Fa-f_]*#([eE][+-]?[0-9_]+)?|[0-9]+:[0-9A-Fa-f][0-9A-Fa-f_]*\.[0-9A-Fa-f][0-9A-Fa-f_]*:([eE][+-]?[0-9_]+)?/
 
 # Identifiers — letters, digits, underscores; must start with a letter.
 IDENT      = /[A-Za-z][A-Za-z0-9_]*/
@@ -189,12 +189,18 @@ PIPE       = '|'
 # ===========================================================================
 
 <name>             : IDENT
+                   | STRING_LIT
                    | <name> DOT IDENT
                    | <name> DOT STRING_LIT
                    | <name> DOT 'all'
                    | <name> LPAREN <expr_or_assoc_list> RPAREN
                    | <name> TICK <attribute_designator>
                    ;
+# RM 4.1 / 6.1: a direct_name can be an operator_symbol — a string
+# literal naming an operator (``"+"``, ``"<="``, ``"and"``). Allows
+# operator-symbol function calls like ``"+" (X, Y)`` and operator
+# renames; the bare-STRING_LIT case is also reached via <primary>
+# directly, so this overlap is harmless for ordinary string operands.
 
 # Attribute designators are normally identifiers but a handful of
 # reserved words are also valid (``T'Range``, ``T'Access``,
@@ -304,7 +310,6 @@ PIPE       = '|'
 # string-literal designators (``end "+";``) are accepted too. The
 # semantic phase verifies the closing designator matches the opener.
 <opt_designator>   : <name>
-                   | STRING_LIT
                    |
                    ;
 
@@ -1017,7 +1022,6 @@ PIPE       = '|'
                    | INT_LIT
                    | REAL_LIT
                    | CHAR_LIT
-                   | STRING_LIT
                    | 'null'
                    | 'true'
                    | 'false'
