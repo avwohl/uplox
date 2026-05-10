@@ -496,7 +496,12 @@ PIPE       = '|'
                    | 'subtype' IDENT 'is' <name> 'delta' <expr> 'range' <simple_expr> DOTDOT <simple_expr> SEMI
                    | 'subtype' IDENT 'is' <name> 'digits' <expr> SEMI
                    | 'subtype' IDENT 'is' <name> 'digits' <expr> 'range' <simple_expr> DOTDOT <simple_expr> SEMI
+                   | 'subtype' IDENT 'is' <name> 'range' <name> TICK 'range' SEMI
                    ;
+# Range attribute as range constraint (RM 3.5): ``subtype I is T range
+# A1'Range;``. Lives at <subtype_decl> not <subtype_indication> for
+# the same reason as delta/digits — the trailing ``range`` keyword
+# would create ambiguity with the integer type def's ``range`` form.
 # Aspect spec on a subtype is fine since <subtype_indication>'s end
 # tokens (IDENT/RPAREN/INT_LIT/etc.) don't shadow the ``with`` of
 # aspect_spec. For type_decl the same trick collides with the
@@ -677,7 +682,13 @@ PIPE       = '|'
 
 <enum_literal>     : IDENT
                    | CHAR_LIT
+                   | 'true'
+                   | 'false'
                    ;
+# RM 3.5.1: enum_literal_specification is identifier | character_literal.
+# In practice uada80 corpus has user enum types redefining ``True`` /
+# ``False`` (e.g. ``type B is (False, True);``); allow these reserved
+# words as literals here so the type def parses.
 
 # ``range L .. H`` or ``mod 256`` for plain integer types; ``range <>``
 # is the generic formal "any integer type" placeholder.
