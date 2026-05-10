@@ -3,12 +3,12 @@
 ## Coverage
 
 	GNAT runtime	97.8% (1072/1096)	maxed (all 24 fails malformed source)
-	ACATS C/L/E/D	99.8% (2844/2849)	5 fails left, all unfixable or LR-blocked
+	ACATS C/L/E/D	99.9% (2846/2849)	3 fails left, all malformed source
 
-All session work is committed (head `7662d7d`). Latest build bundle:
-`/tmp/ada_full_v39.json` (25 MB). Grammar: 669 productions, 53565
-states, 0 conflicts. uplox check ~30 s on Mac M-series; build
-~15–25 min depending on state count; build peak RSS ~2.5 GB.
+All session work is committed (head `ef8a783`). Latest build bundle:
+`/tmp/ada_full_v40.json` (28 MB). Grammar: 671 productions, 58611
+states, 0 conflicts. uplox check ~45 s on Mac M-series; build
+~25–30 min on this size; build peak RSS ~2.7 GB.
 
 ## Resume
 
@@ -34,38 +34,27 @@ downloaded into `/tmp/acats` from simonjwright/ACATS during this
 session. `ada_corpus.py --skip-b-tests` filters intentionally-invalid
 B-tests (1876 files); the remaining 2849 are A/C/D/E/L tests.
 
-## What still fails (5 ACATS)
+## What still fails (3 ACATS — at the LR-grammar ceiling)
 
 	3	malformed source — non-ASCII bytes in `a22006c`, `a2a031a`,
-	    `c2a021b` that no Ada compiler accepts.
-	2	range attribute as range constraint
-	    (`X : Integer range A1'Range(2)`, `Y : Integer range F'Range`).
-	    Adding `<name> 'range' <name>` (or <simple_expr>) to
-	    <subtype_indication> reproducibly produces 4 SEMI shift/reduce
-	    conflicts at `subtype X is T range Y` boundaries that no
-	    available uplox directive can resolve. Restricting to
-	    `<name> TICK 'range' ...` would also reduce/reduce-conflict
-	    with the existing <name> TICK <attribute_designator> rule
-	    (since `'range'` is a valid attribute_designator).
+	    `c2a021b` that no Ada compiler accepts. Belong in xfail.
 
-Net session: **+83 ACATS files (96.9% → 99.8%)**. GNAT runtime
+Net session: **+85 ACATS files (96.9% → 99.9%)**. GNAT runtime
 unchanged at 97.8% (every fail is malformed source).
 
 ## Things uplox would need for further coverage
 
-* **`%reduce` directive** (or LR(2) lookahead) — would close the
-  range-attribute-as-range-constraint pair (~2 files). Generic
-  renaming, bare case-as-call-arg, and aspect-spec after discriminants
-  used to need LR(2); all three landed via grammar restructure
-  instead.
-* **Context-sensitive lex hooks** — same as before; the
-  `disambiguate_apostrophe` workaround in `ada_corpus.py` could
-  go away.
-* **macOS RLIMIT_AS support** — would let us drop the watchdog.
+* **Context-sensitive lex hooks** — would let us drop the
+  `disambiguate_apostrophe` workaround in `ada_corpus.py`. Not on
+  the critical path for any currently-failing test.
+* **macOS RLIMIT_AS support** — would let us drop the watchdog
+  (the build never came near the 24 GB cap; 2.7 GB peak).
 
 ## Session commits
 
 ```
+ef8a783 ada_full: range-attribute as range constraint via %reduce (+2 ACATS, 99.8% → 99.9%)
+b06c7a9 %reduce directive: yacc-style reduce-preference for s/r conflicts
 7662d7d ada_full: subpool allocator + array-decl aspect_spec (+2 ACATS, 99.8% → 99.8%)
 87833a8 ada_full: bare case-expr as call argument (+1 ACATS, 99.8% → 99.8%)
 c38ca83 ada_full: generic renaming via overriding/formal-part split (+7 ACATS, 99.5% → 99.8%)
