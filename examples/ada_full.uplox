@@ -1172,6 +1172,8 @@ PIPE       = '|'
                    | LPAREN <expr> COMMA <agg_named_list> RPAREN
                    | LPAREN <expr> 'with' <agg_named_list> RPAREN
                    | LPAREN <expr> 'with' 'null' 'record' RPAREN
+                   | LPAREN <expr> 'with' <agg_positional_two_plus> RPAREN
+                   | LPAREN <expr> 'with' <expr> COMMA <agg_named_list> RPAREN
                    | LPAREN 'null' 'record' RPAREN
                    ;
 # Mixed positional+named aggregate (RM 4.3): ``(A, F => B)`` (1 pos
