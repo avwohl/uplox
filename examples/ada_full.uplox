@@ -28,6 +28,8 @@
 
 %grammar ada_full
 
+%define lr.type lalr
+
 %options
 start = compilation_unit
 
