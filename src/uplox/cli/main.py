@@ -23,7 +23,7 @@ from .. import UPLOX_SCHEMA_VERSION, __version__
 from ..lex.build import lex_from_ir
 from ..lex.scanner import Scanner
 from ..parse.grammar import GrammarError, compile_grammar
-from ..parse.lr1 import build_lr1
+from ..parse.lr1 import build_table
 from ..gen.c import emit_c
 from ..gen.cpp import emit_cpp
 from ..gen.lua import emit_lua
@@ -69,7 +69,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
     if not args.lex_only:
         try:
             grammar = compile_grammar(ir)
-            table = build_lr1(grammar)
+            table = build_table(grammar)
         except GrammarError as e:
             print(f"{args.source}: {e}", file=sys.stderr)
             return 1
@@ -169,7 +169,7 @@ def _cmd_check(args: argparse.Namespace) -> int:
     parser_conflicts = 0
     try:
         grammar = compile_grammar(ir)
-        table = build_lr1(grammar)
+        table = build_table(grammar)
         parser_conflicts = len(table.conflicts)
         if table.conflicts:
             print(f"{args.source}: {parser_conflicts} parser conflict(s):", file=sys.stderr)

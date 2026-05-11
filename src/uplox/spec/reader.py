@@ -80,6 +80,13 @@ def _strip_comment(line: str) -> str:
 _SECTIONS = ("grammar", "options", "tokens", "hooks", "rules", "keywords", "shift", "reduce")
 _SECTION_RE = re.compile(r"\s*%(" + "|".join(_SECTIONS) + r")\b\s*(.*)$")
 _KEYWORD_PREFIX_RE = re.compile(r"\s*%keyword_prefix\s+(\S+)\s*$")
+_DEFINE_RE = re.compile(r"\s*%define\s+([A-Za-z_][A-Za-z0-9_.]*)\s+(\S.*?)\s*$")
+
+# Known %define keys and their permitted values. ``None`` means any value is
+# accepted (free-form). Listed values are the canonical spelling — case matters.
+_DEFINE_VALUES: dict[str, set[str] | None] = {
+    "lr.type": {"canonical-lr", "lalr"},
+}
 
 
 def read_source(text: str, filename: str = "<source>") -> GrammarIR:
@@ -141,6 +148,29 @@ def read_source(text: str, filename: str = "<source>") -> GrammarIR:
                     f"{filename}:{lineno}: duplicate `%keyword_prefix` directive"
                 )
             ir.keyword_prefix = kp.group(1)
+            continue
+
+        # %define KEY VALUE — bison-style one-shot directive. Currently
+        # used only for `lr.type`; the dispatch is centralised so adding
+        # future keys (api.prefix, parse.error, etc.) is a one-liner.
+        dm = _DEFINE_RE.match(line)
+        if dm:
+            flush()
+            key = dm.group(1)
+            value = dm.group(2).strip()
+            allowed = _DEFINE_VALUES.get(key)
+            if allowed is None and key not in _DEFINE_VALUES:
+                raise ReaderError(
+                    f"{filename}:{lineno}: unknown %define key {key!r}; "
+                    f"known keys: {sorted(_DEFINE_VALUES)}"
+                )
+            if allowed is not None and value not in allowed:
+                raise ReaderError(
+                    f"{filename}:{lineno}: %define {key} value {value!r} "
+                    f"not one of {sorted(allowed)}"
+                )
+            if key == "lr.type":
+                ir.lr_type = value
             continue
 
         sm = _SECTION_RE.match(line)

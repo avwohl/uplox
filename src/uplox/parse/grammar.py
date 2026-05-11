@@ -74,6 +74,10 @@ class Grammar:
     """Terminals on which a shift/reduce conflict should be silently
     resolved in favour of reduce (the dual of ``shift_terminals``).
     Populated from the IR's ``%reduce`` section."""
+    lr_type: str = "canonical-lr"
+    """LR construction algorithm — ``canonical-lr`` (default) or
+    ``lalr``. Set by ``%define lr.type {value}``. Consumed by
+    :func:`uplox.parse.lr1.build_table` to dispatch construction."""
 
     def is_terminal(self, sym: str) -> bool:
         return sym in self.terminals
@@ -145,6 +149,7 @@ def compile_grammar(ir: GrammarIR) -> Grammar:
     grammar = Grammar(
         start_symbol=ir.start_symbol,
         terminals=set(terminal_names),
+        lr_type=ir.lr_type,
     )
     grammar.non_terminals = set(rule_names) | {AUGMENTED_START}
 

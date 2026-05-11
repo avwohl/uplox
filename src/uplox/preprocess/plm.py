@@ -50,7 +50,7 @@ from pathlib import Path
 from ..lex.build import balanced_tokens, lex_from_ir
 from ..lex.scanner import Scanner, Token
 from ..parse.grammar import compile_grammar
-from ..parse.lr1 import LRTable, build_lr1
+from ..parse.lr1 import LRTable, build_table
 from ..parse.runtime import HookRegistry, ParseContext, ParseNode, parse
 from ..spec.reader import read_file
 
@@ -92,7 +92,7 @@ def _build_plm_pre() -> tuple[Scanner, LRTable]:
         skip_tokens=frozenset(skip),
         balanced=balanced_tokens(ir),
     )
-    table = build_lr1(compile_grammar(ir))
+    table = build_table(compile_grammar(ir))
     return scanner, table
 
 

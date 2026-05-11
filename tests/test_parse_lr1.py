@@ -8,7 +8,9 @@ from uplox.parse.lr1 import (
     Conflict,
     ReduceAction,
     ShiftAction,
+    build_lalr1,
     build_lr1,
+    build_table,
 )
 from uplox.spec.reader import read_source
 
@@ -339,3 +341,118 @@ def test_shift_and_reduce_on_same_terminal_is_rejected():
     src = _DANGLING_ELSE + "\n%shift ELSE\n%reduce ELSE\n"
     with pytest.raises((ReaderError, GrammarError), match="ELSE"):
         build(src)
+
+
+# ---- %define lr.type / LALR(1) ----------------------------------------------
+
+
+def _build_with_lr_type(src_body: str, lr_type: str | None):
+    """Helper: build a table with the given lr_type; None = no directive
+    (i.e. default canonical-lr)."""
+    src = src_body
+    if lr_type is not None:
+        src += f"\n%define lr.type {lr_type}\n"
+    ir = read_source(src)
+    grammar = compile_grammar(ir)
+    return build_table(grammar)
+
+
+def test_lr_type_defaults_to_canonical_lr():
+    # No %define → grammar.lr_type stays canonical-lr → build_table picks
+    # build_lr1, matching legacy behaviour.
+    ir = read_source(_DANGLING_ELSE)
+    grammar = compile_grammar(ir)
+    assert grammar.lr_type == "canonical-lr"
+    canonical = build_lr1(grammar)
+    via_dispatcher = build_table(grammar)
+    assert len(canonical.states) == len(via_dispatcher.states)
+
+
+def test_lr_type_lalr_picks_lalr_path():
+    src = _DANGLING_ELSE + "\n%define lr.type lalr\n"
+    ir = read_source(src)
+    grammar = compile_grammar(ir)
+    assert grammar.lr_type == "lalr"
+    via_dispatcher = build_table(grammar)
+    direct = build_lalr1(grammar)
+    assert len(via_dispatcher.states) == len(direct.states)
+
+
+def test_lalr_collapses_states_for_dangling_else():
+    # The dangling-else grammar's canonical-LR(1) table has more states
+    # than its LALR(1) table because some states differ only in lookahead
+    # sets. Both should still expose the same one shift/reduce conflict
+    # on ELSE — the merge doesn't manufacture new conflicts here.
+    canonical = _build_with_lr_type(_DANGLING_ELSE, "canonical-lr")
+    lalr = _build_with_lr_type(_DANGLING_ELSE, "lalr")
+    assert len(lalr.states) <= len(canonical.states)
+    assert any(c.terminal == "ELSE" for c in canonical.conflicts)
+    assert any(c.terminal == "ELSE" for c in lalr.conflicts)
+
+
+def test_lalr_accepts_shift_directive():
+    # %shift still resolves the s/r in the merged table — the resolution
+    # happens at _record_action time, after the merge.
+    src = _DANGLING_ELSE + "\n%shift ELSE\n%define lr.type lalr\n"
+    table = build(src)
+    assert table.conflicts == []
+
+
+def test_lalr_accepts_reduce_directive():
+    src = _DANGLING_ELSE + "\n%reduce ELSE\n%define lr.type lalr\n"
+    table = build(src)
+    assert table.conflicts == []
+
+
+def test_lalr_smaller_than_canonical_on_calc():
+    # CALC has enough lookahead-only state divergence that LALR
+    # strictly shrinks it. Concrete inequality keeps the merge from
+    # silently degrading into a no-op.
+    canonical = _build_with_lr_type(CALC, "canonical-lr")
+    lalr = _build_with_lr_type(CALC, "lalr")
+    assert len(lalr.states) <= len(canonical.states)
+
+
+def test_define_unknown_key_rejected():
+    import pytest
+    from uplox.spec.reader import ReaderError
+    src = _DANGLING_ELSE + "\n%define no.such.key whatever\n"
+    with pytest.raises(ReaderError, match="unknown %define key"):
+        read_source(src)
+
+
+def test_define_lr_type_invalid_value_rejected():
+    import pytest
+    from uplox.spec.reader import ReaderError
+    src = _DANGLING_ELSE + "\n%define lr.type slr\n"
+    with pytest.raises(ReaderError, match="lr.type"):
+        read_source(src)
+
+
+def test_lalr_ada_full_subset_smoke():
+    # End-to-end: a small Ada-shaped grammar with a real shift/reduce
+    # ambiguity should LALR-build without crashing and the table's
+    # default reductions remain consistent with the canonical version's
+    # parse outcomes.
+    src = """
+%grammar mini
+
+%tokens
+ID    = /[A-Za-z_]+/
+SEMI  = ';'
+EQ    = '='
+WS    = /\\s+/    %skip
+
+%rules
+<unit> : <decl>
+       | <unit> <decl>
+       ;
+<decl> : ID SEMI
+       | ID EQ ID SEMI
+       ;
+"""
+    canonical = _build_with_lr_type(src, "canonical-lr")
+    lalr = _build_with_lr_type(src, "lalr")
+    assert canonical.conflicts == []
+    assert lalr.conflicts == []
+    assert len(lalr.states) <= len(canonical.states)

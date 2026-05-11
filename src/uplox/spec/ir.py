@@ -118,3 +118,8 @@ class GrammarIR:
     # the conflicting terminal, where the shift target is reachable only by
     # an LALR state-merge artifact).
     reduce_terminals: set[str] = field(default_factory=set)
+    # LR construction algorithm — set by ``%define lr.type {canonical-lr|lalr}``.
+    # ``canonical-lr`` (default) keeps states with different lookaheads separate;
+    # ``lalr`` merges states with the same LR(0) core, producing ~10x smaller
+    # tables at the cost of potentially-spurious reduce/reduce conflicts.
+    lr_type: str = "canonical-lr"

@@ -11,11 +11,13 @@ sections and one-shot directives:
 ```
 %grammar <name>
 %options          (optional)
+%define KEY VALUE (optional, one-shot, repeatable for distinct keys)
 %keyword_prefix   (optional, one-shot directive)
 %keywords         (optional)
 %tokens
 %hooks            (optional)
 %shift            (optional)
+%reduce           (optional)
 %rules
 ```
 
@@ -45,6 +47,49 @@ Recognised options:
 | `prefix_override`  | Override the symbol prefix (default: `<name>`).      |
 
 Unknown keys are an error — silent ignore would mask typos.
+
+## `%define KEY VALUE` (directive)
+
+Bison-style one-shot directive setting a single key to a single value.
+Each `%define` line is independent; repeat the directive for distinct keys:
+
+```
+%define lr.type lalr
+```
+
+Supported keys:
+
+| Key       | Values                | Default          | Effect                                      |
+|-----------|-----------------------|------------------|---------------------------------------------|
+| `lr.type` | `canonical-lr` `lalr` | `canonical-lr`   | LR table construction algorithm (see below) |
+
+Unknown keys are an error. Values are validated against the per-key set
+above; an unrecognised value rejects the build. Pick `lr.type lalr`
+when build time or bundle size start to hurt and you've verified your
+grammar is LALR-friendly (a quick A/B `uplox check` with and without
+the directive surfaces any LALR-only conflicts up-front). The
+`%shift` and `%reduce` escape hatches apply identically to both
+construction modes.
+
+### `lr.type` algorithm choice
+
+**`canonical-lr` (default)** keeps each LR(1) state distinct by its
+lookahead set. Tables are larger but every conflict reported by
+`uplox check` is a real LR(1) conflict — no merge artefacts.
+
+**`lalr`** post-processes the canonical table by collapsing states
+that share the same LR(0) core (items with lookaheads stripped),
+taking the union of lookahead sets per merged state. Tables are
+typically ~10× smaller; build times shrink proportionally. The cost
+is that LALR-merging can manufacture **reduce/reduce** conflicts that
+canonical LR(1) doesn't have — when two states with the same core
+were each unambiguous on their own lookahead, the merged state may
+have two competing reduces on the same lookahead. (Shift/reduce
+conflicts present in the canonical table are preserved.) When this
+happens, the right move is usually a small grammar restructure (e.g.
+splitting an empty production into explicit empty + non-empty halves);
+see the generic-renaming case in `examples/ada_full.uplox` for a
+worked example.
 
 ## `%keyword_prefix` (directive)
 
@@ -205,6 +250,38 @@ shift is recorded and the conflict is dropped from the table's
 `%shift` (a terminal that never actually conflicts) is silent. Run with
 the `%shift` line removed first to confirm the conflict you intend to
 silence really exists.
+
+## `%reduce`
+
+Optional. The dual of `%shift`: lists terminals on which shift/reduce
+conflicts should be silently resolved in favour of the (longer)
+reduce. Reduce/reduce conflicts are still surfaced as errors. A
+terminal listed in both `%shift` and `%reduce` is rejected.
+
+```
+%reduce
+SEMI
+```
+
+Same surface syntax as `%shift` (whitespace-separated entries, line
+breaks insignificant, `%keywords` aliases honoured).
+
+Use case: an LALR state-merge artefact (or genuine LR(1) ambiguity in
+a position the grammar can't easily restructure) offers a spurious
+shift on a terminal that is genuinely in the followset of the
+to-be-reduced non-terminal. `%reduce` closes the non-terminal and
+lets the surrounding decl shift the terminal cleanly.
+
+The canonical example in this repo is
+`<subtype_indication> -> <name> 'range' <simple_expr>` in
+`examples/ada_full.uplox`: at `subtype X is T range Y;` the SEMI
+shift would extend a different production whose state was merged in;
+`%reduce SEMI` closes the subtype indication first.
+
+Same warning as `%shift`: a typo in `%reduce` (a terminal that never
+actually conflicts) is silent. Land the new alternative WITHOUT the
+`%reduce` line first to confirm the conflict you intend to resolve
+really exists.
 
 ## Lexer feedback (typedef-name and friends)
 

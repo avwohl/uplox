@@ -248,6 +248,111 @@ def build_lr1(grammar: Grammar) -> LRTable:
     return table
 
 
+def build_lalr1(grammar: Grammar) -> LRTable:
+    """Build an LALR(1) parse table by merging canonical LR(1) states that
+    share the same LR(0) core.
+
+    Tables are typically ~10× smaller than canonical LR(1) (state count
+    proportional to LR(0) cores rather than ``cores × lookahead sets``).
+    The trade-off is that LALR-merging can synthesise reduce/reduce
+    conflicts that don't exist in canonical LR(1) — when two states with
+    the same core but different lookaheads merge, an item that was the
+    only reduce on its lookahead in each member may become one of two
+    competing reduces in the merged state.
+
+    The %shift / %reduce escape hatches still apply at conflict-resolution
+    time on the merged table.
+    """
+    canonical = build_lr1(grammar)
+    return _merge_to_lalr(canonical)
+
+
+def _merge_to_lalr(canonical: LRTable) -> LRTable:
+    """Collapse canonical LR(1) states that share the same LR(0) core."""
+    # 1. Compute the LR(0) core of each canonical state — the set of
+    #    (production, dot) pairs with lookaheads stripped.
+    cores: list[frozenset[tuple[int, int]]] = []
+    for items in canonical.states:
+        cores.append(frozenset((p, d) for (p, d, _la) in items))
+
+    # 2. Walk states in order, assigning each unique core a fresh new-state
+    #    ID. Renumbering preserves the start state at 0 because state 0's
+    #    core is encountered first.
+    new_id_for_core: dict[frozenset[tuple[int, int]], int] = {}
+    mapping: list[int] = [0] * len(canonical.states)
+    new_states: list[frozenset[Item]] = []
+    for state_id, core in enumerate(cores):
+        if core not in new_id_for_core:
+            new_id_for_core[core] = len(new_states)
+            # Merged item set = union of items across all states sharing the
+            # core (different lookaheads merge into the same set).
+            merged: set[Item] = set()
+            for member, member_core in enumerate(cores):
+                if member_core is core or member_core == core:
+                    merged.update(canonical.states[member])
+            new_states.append(frozenset(merged))
+        mapping[state_id] = new_id_for_core[core]
+
+    # 3. Build a fresh table and replay actions/gotos through the mapping.
+    #    _record_action handles the %shift/%reduce resolution and detects
+    #    any new conflicts the merge may have introduced.
+    new_table = LRTable(grammar=canonical.grammar)
+    new_table.states = new_states
+    new_table.start_state = mapping[canonical.start_state]
+
+    def _translate(act: Action) -> Action:
+        if isinstance(act, ShiftAction):
+            return ShiftAction(mapping[act.state])
+        return act
+
+    for (state_id, term), action in canonical.action.items():
+        _record_action(new_table, mapping[state_id], term, _translate(action))
+    # canonical.action holds only the *first* action at a conflicted
+    # (state, terminal); the competing actions live in canonical.conflicts.
+    # Replay both halves so post-merge conflict detection sees the full
+    # picture, and so any new shift/reduce conflicts the merge introduces
+    # are surfaced (or silenced by %shift/%reduce) consistently.
+    for conflict in canonical.conflicts:
+        new_state = mapping[conflict.state]
+        for action in conflict.actions:
+            _record_action(new_table, new_state, conflict.terminal, _translate(action))
+
+    for (state_id, nt), target in canonical.goto.items():
+        new_state = mapping[state_id]
+        new_target = mapping[target]
+        existing = new_table.goto.get((new_state, nt))
+        if existing is not None and existing != new_target:
+            # GOTO targets must agree across states with the same LR(0) core,
+            # because GOTO is determined by the core (no lookahead in
+            # play). If this fires, something is structurally wrong with
+            # the canonical table — assert rather than silently mis-merge.
+            raise AssertionError(
+                f"LALR merge: GOTO[{new_state}, {nt!r}] disagreement: "
+                f"{existing} vs {new_target}"
+            )
+        new_table.goto[(new_state, nt)] = new_target
+
+    _compute_default_reductions(new_table)
+    return new_table
+
+
+def build_table(grammar: Grammar) -> LRTable:
+    """Dispatcher — pick the LR construction algorithm from
+    ``grammar.lr_type``.
+
+    ``canonical-lr`` (default) → :func:`build_lr1`.
+    ``lalr``                  → :func:`build_lalr1`.
+    """
+    if grammar.lr_type == "canonical-lr":
+        return build_lr1(grammar)
+    if grammar.lr_type == "lalr":
+        return build_lalr1(grammar)
+    raise ValueError(
+        f"unknown grammar.lr_type {grammar.lr_type!r}; "
+        f"expected one of 'canonical-lr', 'lalr'"
+    )
+
+
 def _compute_default_reductions(table: LRTable) -> None:
     """Mark each state whose only actions are reduces by a single production.
 
