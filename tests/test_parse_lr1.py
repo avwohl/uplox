@@ -8,6 +8,7 @@ from uplox.parse.lr1 import (
     Conflict,
     ReduceAction,
     ShiftAction,
+    build_ielr1,
     build_lalr1,
     build_lr1,
     build_table,
@@ -427,6 +428,84 @@ def test_define_lr_type_invalid_value_rejected():
     src = _DANGLING_ELSE + "\n%define lr.type slr\n"
     with pytest.raises(ReaderError, match="lr.type"):
         read_source(src)
+
+
+# A grammar known to trigger an LALR-only reduce/reduce conflict that is
+# NOT a conflict in canonical LR(1). Adapted from Aho/Sethi/Ullman, ex. 4.47:
+#   S -> a A d | b B d | a B e | b A e
+#   A -> c
+#   B -> c
+# After reading `a c`, canonical LR(1) keeps two states distinct based on
+# their lookahead (`d` vs `e`); LALR merges them and the merged state has
+# both `A -> c .` and `B -> c .` ready to reduce on either lookahead → r/r.
+_ASU_447 = """
+%grammar asu447
+%tokens
+A  = 'a'
+B  = 'b'
+C  = 'c'
+D  = 'd'
+E  = 'e'
+
+%rules
+<S> : A <X> D
+    | B <Y> D
+    | A <Y> E
+    | B <X> E
+    ;
+<X> : C ;
+<Y> : C ;
+"""
+
+
+def test_lalr_introduces_spurious_conflict_on_asu447():
+    # Canonical LR(1) is conflict-free on this grammar; LALR is not.
+    canonical = build_lr1(compile_grammar(read_source(_ASU_447)))
+    lalr = build_lalr1(compile_grammar(read_source(_ASU_447)))
+    assert canonical.conflicts == [], \
+        "sanity: canonical LR(1) is conflict-free on ASU 4.47"
+    assert lalr.conflicts, \
+        "sanity: LALR(1) introduces a spurious r/r conflict on ASU 4.47"
+
+
+def test_ielr_eliminates_spurious_lalr_conflict_on_asu447():
+    ielr = build_ielr1(compile_grammar(read_source(_ASU_447)))
+    assert ielr.conflicts == [], \
+        "IELR(1) must match canonical LR(1)'s conflict count"
+
+
+def test_ielr_table_size_between_lalr_and_canonical():
+    # IELR is canonical-conflict-correct but LALR-sized when possible.
+    # On ASU 4.47, LALR has the spurious conflict, so IELR must split
+    # something — its state count should be > LALR's but <= canonical's.
+    grammar = compile_grammar(read_source(_ASU_447))
+    canonical = build_lr1(grammar)
+    lalr = build_lalr1(grammar)
+    ielr = build_ielr1(grammar)
+    assert len(lalr.states) <= len(ielr.states) <= len(canonical.states)
+
+
+def test_ielr_matches_lalr_on_lalr_friendly_grammar():
+    # When LALR introduces no spurious conflicts (the common case for
+    # well-formed grammars), IELR should produce the same table size
+    # as LALR — no states should need splitting.
+    canonical = build_lr1(compile_grammar(read_source(CALC)))
+    lalr = build_lalr1(compile_grammar(read_source(CALC)))
+    ielr = build_ielr1(compile_grammar(read_source(CALC)))
+    # Sanity: CALC is LALR-friendly.
+    assert len(lalr.conflicts) <= len(canonical.conflicts)
+    # Then IELR matches LALR.
+    assert len(ielr.states) == len(lalr.states)
+
+
+def test_define_lr_type_ielr_routes_through_dispatcher():
+    src = _DANGLING_ELSE + "\n%define lr.type ielr\n"
+    ir = read_source(src)
+    grammar = compile_grammar(ir)
+    assert grammar.lr_type == "ielr"
+    via_dispatcher = build_table(grammar)
+    direct = build_ielr1(grammar)
+    assert len(via_dispatcher.states) == len(direct.states)
 
 
 def test_lalr_ada_full_subset_smoke():

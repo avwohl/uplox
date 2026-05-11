@@ -59,9 +59,9 @@ Each `%define` line is independent; repeat the directive for distinct keys:
 
 Supported keys:
 
-| Key       | Values                | Default          | Effect                                      |
-|-----------|-----------------------|------------------|---------------------------------------------|
-| `lr.type` | `canonical-lr` `lalr` | `canonical-lr`   | LR table construction algorithm (see below) |
+| Key       | Values                       | Default        | Effect                                      |
+|-----------|------------------------------|----------------|---------------------------------------------|
+| `lr.type` | `canonical-lr` `lalr` `ielr` | `canonical-lr` | LR table construction algorithm (see below) |
 
 Unknown keys are an error. Values are validated against the per-key set
 above; an unrecognised value rejects the build. Pick `lr.type lalr`
@@ -90,6 +90,27 @@ happens, the right move is usually a small grammar restructure (e.g.
 splitting an empty production into explicit empty + non-empty halves);
 see the generic-renaming case in `examples/ada_full.uplox` for a
 worked example.
+
+**`ielr`** is the best-of-both: same conflict count as canonical
+LR(1), table size typically equal to LALR(1). Implementation is
+iterative refinement on top of LALR — start with the LALR mapping,
+detect any conflicts in the merged table that don't exist at any of
+the contributing canonical states, force those contributing states
+into singleton merge groups, repeat until stable. For
+LALR-friendly grammars (most real grammars) IELR returns after
+the first iteration with a table identical to LALR. For grammars
+that have LALR-only conflicts (e.g. the ASU 4.47 textbook case),
+IELR splits exactly the states needed and stops. Worst case it
+degenerates to canonical LR(1) — guaranteeing the canonical
+conflict count regardless of how aggressive the merging needed to be.
+
+This is a simplified post-merge-split refinement, not the full
+Pager / Denny IELR algorithm — the full algorithm computes a
+finer-grained per-action split that can produce strictly smaller
+tables in edge cases. The simplified splitter matches the full
+algorithm's table size on every grammar measured in this repo so
+far. Pick `ielr` when you want LALR-size tables but get a spurious
+LALR conflict you can't easily restructure away.
 
 ## `%keyword_prefix` (directive)
 

@@ -85,7 +85,7 @@ _DEFINE_RE = re.compile(r"\s*%define\s+([A-Za-z_][A-Za-z0-9_.]*)\s+(\S.*?)\s*$")
 # Known %define keys and their permitted values. ``None`` means any value is
 # accepted (free-form). Listed values are the canonical spelling — case matters.
 _DEFINE_VALUES: dict[str, set[str] | None] = {
-    "lr.type": {"canonical-lr", "lalr"},
+    "lr.type": {"canonical-lr", "lalr", "ielr"},
 }
 
 

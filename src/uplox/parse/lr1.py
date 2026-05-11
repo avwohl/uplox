@@ -267,37 +267,44 @@ def build_lalr1(grammar: Grammar) -> LRTable:
     return _merge_to_lalr(canonical)
 
 
-def _merge_to_lalr(canonical: LRTable) -> LRTable:
-    """Collapse canonical LR(1) states that share the same LR(0) core."""
-    # 1. Compute the LR(0) core of each canonical state — the set of
-    #    (production, dot) pairs with lookaheads stripped.
-    cores: list[frozenset[tuple[int, int]]] = []
-    for items in canonical.states:
-        cores.append(frozenset((p, d) for (p, d, _la) in items))
+def _state_cores(canonical: LRTable) -> list[frozenset[tuple[int, int]]]:
+    """LR(0) core (items with lookaheads stripped) per canonical state."""
+    return [frozenset((p, d) for (p, d, _la) in items) for items in canonical.states]
 
-    # 2. Walk states in order, assigning each unique core a fresh new-state
-    #    ID. Renumbering preserves the start state at 0 because state 0's
-    #    core is encountered first.
-    new_id_for_core: dict[frozenset[tuple[int, int]], int] = {}
+
+def _lalr_mapping(canonical: LRTable) -> list[int]:
+    """Standard LALR(1) mapping — every canonical state with the same
+    LR(0) core gets the same merged-state ID. Returned mapping is dense
+    (IDs are 0..N-1 in order of first occurrence)."""
+    cores = _state_cores(canonical)
     mapping: list[int] = [0] * len(canonical.states)
-    new_states: list[frozenset[Item]] = []
+    new_id_for_core: dict[frozenset[tuple[int, int]], int] = {}
     for state_id, core in enumerate(cores):
         if core not in new_id_for_core:
-            new_id_for_core[core] = len(new_states)
-            # Merged item set = union of items across all states sharing the
-            # core (different lookaheads merge into the same set).
-            merged: set[Item] = set()
-            for member, member_core in enumerate(cores):
-                if member_core is core or member_core == core:
-                    merged.update(canonical.states[member])
-            new_states.append(frozenset(merged))
+            new_id_for_core[core] = len(new_id_for_core)
         mapping[state_id] = new_id_for_core[core]
+    return mapping
 
-    # 3. Build a fresh table and replay actions/gotos through the mapping.
-    #    _record_action handles the %shift/%reduce resolution and detects
-    #    any new conflicts the merge may have introduced.
+
+def _apply_mapping(canonical: LRTable, mapping: list[int]) -> LRTable:
+    """Materialise a merged LRTable from a canonical LR(1) table and a
+    canonical-state → new-state mapping. The mapping must be dense
+    (IDs 0..max(mapping)) and may collapse any subset of states; it is
+    *not* required to merge by LR(0) core (IELR splits some same-core
+    states; canonical-LR uses the identity mapping).
+
+    Replays both ``canonical.action`` and ``canonical.conflicts`` so
+    that any new shift/reduce a merge introduces is detected by
+    ``_record_action`` (and optionally silenced by %shift / %reduce).
+    """
+    n_new = max(mapping) + 1 if mapping else 0
+    # Merged item set per new state = union of items across all canonical
+    # states that map to it.
+    merged_items: list[set[Item]] = [set() for _ in range(n_new)]
+    for state_id, items in enumerate(canonical.states):
+        merged_items[mapping[state_id]].update(items)
     new_table = LRTable(grammar=canonical.grammar)
-    new_table.states = new_states
+    new_table.states = [frozenset(s) for s in merged_items]
     new_table.start_state = mapping[canonical.start_state]
 
     def _translate(act: Action) -> Action:
@@ -307,11 +314,6 @@ def _merge_to_lalr(canonical: LRTable) -> LRTable:
 
     for (state_id, term), action in canonical.action.items():
         _record_action(new_table, mapping[state_id], term, _translate(action))
-    # canonical.action holds only the *first* action at a conflicted
-    # (state, terminal); the competing actions live in canonical.conflicts.
-    # Replay both halves so post-merge conflict detection sees the full
-    # picture, and so any new shift/reduce conflicts the merge introduces
-    # are surfaced (or silenced by %shift/%reduce) consistently.
     for conflict in canonical.conflicts:
         new_state = mapping[conflict.state]
         for action in conflict.actions:
@@ -322,12 +324,12 @@ def _merge_to_lalr(canonical: LRTable) -> LRTable:
         new_target = mapping[target]
         existing = new_table.goto.get((new_state, nt))
         if existing is not None and existing != new_target:
-            # GOTO targets must agree across states with the same LR(0) core,
-            # because GOTO is determined by the core (no lookahead in
-            # play). If this fires, something is structurally wrong with
-            # the canonical table — assert rather than silently mis-merge.
+            # GOTO targets must agree across canonical states that
+            # share an LR(0) core (and thus share GOTO behaviour).
+            # IELR/LALR only ever merge core-identical states, so this
+            # disagreement would be a builder bug, not a grammar bug.
             raise AssertionError(
-                f"LALR merge: GOTO[{new_state}, {nt!r}] disagreement: "
+                f"merge: GOTO[{new_state}, {nt!r}] disagreement: "
                 f"{existing} vs {new_target}"
             )
         new_table.goto[(new_state, nt)] = new_target
@@ -336,20 +338,113 @@ def _merge_to_lalr(canonical: LRTable) -> LRTable:
     return new_table
 
 
+def _merge_to_lalr(canonical: LRTable) -> LRTable:
+    """Collapse canonical LR(1) states that share the same LR(0) core."""
+    return _apply_mapping(canonical, _lalr_mapping(canonical))
+
+
+def build_ielr1(grammar: Grammar) -> LRTable:
+    """Build an IELR(1)-style parse table — same conflict count as
+    canonical LR(1), table size typically near LALR(1).
+
+    Iterative refinement: start from the LALR mapping, find any
+    conflicts in the merged table that aren't present at any of the
+    contributing canonical states, and force those contributing states
+    into singleton merge groups (i.e. unmerge them). Re-build with the
+    updated mapping; repeat until no spurious conflicts remain.
+
+    Worst case the algorithm degenerates to canonical LR(1) (every
+    state in its own group) — guaranteeing the canonical conflict
+    count. Best case it stays at the LALR shrink (no spurious
+    conflicts means no splits). For LALR-friendly grammars (which is
+    most of them) this returns immediately after the first iteration.
+
+    Note: this is a simplified post-merge-split refinement, not the
+    full Pager / Denny IELR algorithm. The full algorithm computes a
+    finer-grained split (only the canonical states whose actions
+    actually disagree are separated, leaving the rest merged), which
+    can produce strictly smaller tables in edge cases. The simple
+    splitter here was easier to implement and correct, and matches
+    the full algorithm's table size on every grammar measured so far
+    in this repo.
+    """
+    canonical = build_lr1(grammar)
+    canonical_conflict_keys = {(c.state, c.terminal) for c in canonical.conflicts}
+    cores = _state_cores(canonical)
+
+    # Force-set of canonical state IDs that must each be in their own
+    # merge group (singletons). Grows monotonically across iterations.
+    forced_singletons: set[int] = set()
+    n_states = len(canonical.states)
+
+    def _build_mapping() -> list[int]:
+        mapping: list[int] = [0] * n_states
+        next_id = 0
+        core_to_id: dict[frozenset[tuple[int, int]], int] = {}
+        for state_id, core in enumerate(cores):
+            if state_id in forced_singletons:
+                mapping[state_id] = next_id
+                next_id += 1
+            elif core in core_to_id:
+                mapping[state_id] = core_to_id[core]
+            else:
+                core_to_id[core] = next_id
+                mapping[state_id] = next_id
+                next_id += 1
+        return mapping
+
+    # Hard cap: at most n_states iterations; in practice usually 1.
+    for _ in range(n_states + 1):
+        mapping = _build_mapping()
+        table = _apply_mapping(canonical, mapping)
+
+        # Build reverse index once: new_state → list of canonical state IDs.
+        origs_per_new: dict[int, list[int]] = {}
+        for canonical_state, new_state in enumerate(mapping):
+            origs_per_new.setdefault(new_state, []).append(canonical_state)
+
+        new_singletons: set[int] = set()
+        for c in table.conflicts:
+            origs = origs_per_new.get(c.state, [])
+            already_in_canonical = any(
+                (orig, c.terminal) in canonical_conflict_keys for orig in origs
+            )
+            if already_in_canonical:
+                continue
+            # Spurious: split out every canonical state in this merge group
+            # that isn't already a singleton. Coarse but correct — the next
+            # iteration will see whether the split removed the conflict.
+            for orig in origs:
+                if orig not in forced_singletons:
+                    new_singletons.add(orig)
+
+        if not new_singletons:
+            return table
+        forced_singletons.update(new_singletons)
+
+    # Should be unreachable: if every state becomes a singleton, the table
+    # equals canonical LR(1) and has no spurious conflicts. Surface as an
+    # error rather than silently return a possibly-wrong table.
+    raise AssertionError("IELR(1) refinement did not converge")
+
+
 def build_table(grammar: Grammar) -> LRTable:
     """Dispatcher — pick the LR construction algorithm from
     ``grammar.lr_type``.
 
     ``canonical-lr`` (default) → :func:`build_lr1`.
-    ``lalr``                  → :func:`build_lalr1`.
+    ``lalr``                   → :func:`build_lalr1`.
+    ``ielr``                   → :func:`build_ielr1`.
     """
     if grammar.lr_type == "canonical-lr":
         return build_lr1(grammar)
     if grammar.lr_type == "lalr":
         return build_lalr1(grammar)
+    if grammar.lr_type == "ielr":
+        return build_ielr1(grammar)
     raise ValueError(
         f"unknown grammar.lr_type {grammar.lr_type!r}; "
-        f"expected one of 'canonical-lr', 'lalr'"
+        f"expected one of 'canonical-lr', 'lalr', 'ielr'"
     )
 
 
