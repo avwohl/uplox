@@ -3,7 +3,15 @@
 Usage:
     uplox build examples/ada_full.uplox -o /tmp/ada_full.json
     python examples/ada_corpus.py /tmp/ada_full.json <corpus_dir> \\
-        [--save-fails out.txt] [--save-summary out.txt]
+        [--save-fails out.txt] [--save-summary out.txt] \\
+        [--skip-b-tests] [--xfail-list examples/ada_full.xfail]
+
+``--xfail-list FILE`` excludes tests whose base name (without
+extension) appears in FILE. Lines starting with ``#`` and blank
+lines are ignored. Use this to drop tests known to be broken at
+the source level (e.g. non-ASCII bytes that no Ada compiler
+accepts) so the pass-rate reflects grammar coverage rather than
+corpus quality.
 
 Reports pass/fail counts and a categorized breakdown of failures based on
 the offending source line (not just the error message). The bucket
@@ -173,7 +181,7 @@ def main(argv: list[str]) -> int:
         return 2
     bundle_path = argv[1]
     corpus_dir = argv[2]
-    save_fails = save_summary = None
+    save_fails = save_summary = xfail_path = None
     skip_b_tests = False
     args = argv[3:]
     for i, a in enumerate(args):
@@ -183,6 +191,16 @@ def main(argv: list[str]) -> int:
             save_summary = args[i + 1]
         if a == "--skip-b-tests":
             skip_b_tests = True
+        if a == "--xfail-list" and i + 1 < len(args):
+            xfail_path = args[i + 1]
+
+    xfail_names: set[str] = set()
+    if xfail_path:
+        with open(xfail_path) as fh:
+            for line in fh:
+                line = line.split("#", 1)[0].strip()
+                if line:
+                    xfail_names.add(line)
 
     with open(bundle_path) as fh:
         bundle = json.load(fh)
@@ -200,7 +218,10 @@ def main(argv: list[str]) -> int:
     )
     if skip_b_tests:
         files = [p for p in files if not p.name[:1].lower() == "b"]
+    if xfail_names:
+        files = [p for p in files if p.stem not in xfail_names]
     n = len(files)
+    xfail_n = len(xfail_names)
     pass_n = 0
     fails: list[tuple[str, str, str]] = []
     buckets: Counter[str] = Counter()
@@ -245,10 +266,14 @@ def main(argv: list[str]) -> int:
         f"files: {n}",
         f"pass:  {pass_n} ({pct:.1f}%)",
         f"fail:  {len(fails)}",
+    ]
+    if xfail_n:
+        lines.append(f"xfail: {xfail_n} (excluded — see {xfail_path})")
+    lines.extend([
         f"time:  {elapsed:.1f}s",
         "",
         "buckets:",
-    ]
+    ])
     for name, cnt in buckets.most_common():
         lines.append(f"  {cnt:4d}  {name}")
         for f in by_bucket.get(name, [])[:3]:
