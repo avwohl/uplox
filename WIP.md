@@ -3,12 +3,12 @@
 ## Coverage
 
 	GNAT runtime	97.8% (1072/1096)	maxed (all 24 fails malformed source)
-	ACATS C/L/E/D	99.9% (2846/2849)	3 fails left, all malformed source
+	ACATS C/L/E/D	100.0% (2846/2846 + 3 xfail) raw 99.9% (2846/2849)
 
-All session work is committed (head `ef8a783`). Latest build bundle:
-`/tmp/ada_full_v40.json` (28 MB). Grammar: 671 productions, 58611
-states, 0 conflicts. uplox check ~45 s on Mac M-series; build
-~25–30 min on this size; build peak RSS ~2.7 GB.
+All session work is committed (head `fd58008`). Grammar runs LALR(1)
+via ``%define lr.type lalr`` — 671 productions, 1594 states, 0 conflicts,
+1.4 MB JSON, ~2 min build (vs canonical-LR's 58611 states / 28 MB / 25 min).
+Build peak RSS 2.9 GB.
 
 ## Resume
 
@@ -48,11 +48,20 @@ unchanged at 97.8% (every fail is malformed source).
   `disambiguate_apostrophe` workaround in `ada_corpus.py`. Not on
   the critical path for any currently-failing test.
 * **macOS RLIMIT_AS support** — would let us drop the watchdog
-  (the build never came near the 24 GB cap; 2.7 GB peak).
+  (the build never came near the 24 GB cap; 2.9 GB peak).
+* **IELR(1) construction** — only needed if a future grammar change
+  introduces an LALR-only conflict that the canonical-LR(1) table
+  doesn't have. ada_full and every other example grammar tried so
+  far is LALR-friendly without restructure, so this is purely
+  speculative for now.
 
 ## Session commits
 
 ```
+fd58008 Switch all conflict-free example grammars to LALR(1)
+a6a4d8d ada_full: switch to LALR(1) — 37x state shrink, identical parses
+dfe112c %define lr.type {canonical-lr|lalr}: selectable LR construction
+dc8a935 ada_full: xfail list for malformed-source ACATS tests (100.0% with xfail)
 ef8a783 ada_full: range-attribute as range constraint via %reduce (+2 ACATS, 99.8% → 99.9%)
 b06c7a9 %reduce directive: yacc-style reduce-preference for s/r conflicts
 7662d7d ada_full: subpool allocator + array-decl aspect_spec (+2 ACATS, 99.8% → 99.8%)
@@ -65,3 +74,26 @@ c38ca83 ada_full: generic renaming via overriding/formal-part split (+7 ACATS, 9
 ef595a8 ada_full: more low-risk additions (+5 ACATS, 98.1% → 98.3%)
 811a818 ada_full: replace WIP with low-risk additions (+34 ACATS, 96.9% → 98.1%)
 ```
+
+## LALR rollout (post-grammar-work session)
+
+Per-grammar canon → LALR shrink in states (all conflict-free, all switched
+unless noted):
+
+```
+ada_full        58611 →  1594   36.8x
+ada_subset       3574 →   417    8.6x
+c23              3395 →   549    6.2x
+plm_full         1312 →   296    4.4x
+plm_subset        741 →   198    3.7x
+calc                30 →   16    1.9x
+scoped              13 →   10    1.3x
+plm_pre             27 →   27    1.0x   (no shrink — left canonical)
+uplox_self          67 →   67    1.0x   (no shrink — left canonical)
+ambig_expr          18 →   10    1.8x   (intentional 8-conflict fixture — left canonical)
+```
+
+Every uada80 / uplox-grammar consumer should rebuild their bundles
+to pick up the new LALR-built tables. The schema is unchanged so
+older runtimes parse the new bundles fine — they just see a smaller
+state space.
