@@ -47,6 +47,8 @@
 
 %grammar c23
 
+
+%define lr.type lalr
 %options
 start = translation_unit
 

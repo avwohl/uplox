@@ -167,6 +167,7 @@ EXAMPLES_TO_TEST = [
     "plm_subset.uplox",
     "plm_full.uplox",
     "c23.uplox",
+    "ada_full.uplox",   # exercises %define, %shift, %reduce
     "uplox_self.uplox",  # The grammar parses *itself*.
 ]
 

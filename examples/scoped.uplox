@@ -4,6 +4,8 @@
 
 %grammar scoped
 
+
+%define lr.type lalr
 %tokens
 LBRACE = '{'
 RBRACE = '}'

@@ -39,6 +39,9 @@ PCT_HOOKS          = '%hooks'
 PCT_RULES          = '%rules'
 PCT_KEYWORDS       = '%keywords'
 PCT_KEYWORD_PREFIX = '%keyword_prefix'
+PCT_DEFINE         = '%define'
+PCT_SHIFT          = '%shift'
+PCT_REDUCE         = '%reduce'
 PCT_SKIP           = '%skip'
 PCT_HOOK           = '%hook'
 PCT_PREC           = '%prec'
@@ -63,6 +66,12 @@ NONTERM    = /<[A-Za-z_][A-Za-z0-9_]*>/
 # keyword spellings).
 IDENT      = /[A-Za-z_][A-Za-z0-9_]*/
 
+# %define keys and values may contain dots (`lr.type`) and hyphens
+# (`canonical-lr`). Declared after IDENT so plain identifiers still
+# prefer IDENT (longest-match ties broken by declaration order); only
+# kicks in when a token actually contains a `.` or `-`.
+DEFINE_NAME = /[A-Za-z_][A-Za-z0-9_.\-]*/
+
 # Action body: opaque target-language source. The DFA only recognises the
 # opening `{`; the runtime's %balanced extension extends the match by
 # counting nested `{`/`}` until depth returns to zero.
@@ -86,8 +95,27 @@ ACTION_BODY = '{' %balanced='}'
        | <hooks_section>
        | <keywords_section>
        | <keyword_prefix_directive>
+       | <define_directive>
+       | <shift_section>
+       | <reduce_section>
        | <rules_section>
        ;
+
+# --- %define KEY VALUE (one-shot directive) -------------------------------
+
+<define_directive> : PCT_DEFINE <name_or_define_name> <name_or_define_name> ;
+
+# Either a plain IDENT (when key/value has no dots/hyphens, e.g.
+# ``%define lr.type lalr`` lexes value=lalr as IDENT) or a DEFINE_NAME
+# (when it does, e.g. key=lr.type, value=canonical-lr).
+<name_or_define_name> : IDENT
+                      | DEFINE_NAME
+                      ;
+
+# --- %shift / %reduce sections --------------------------------------------
+
+<shift_section>  : PCT_SHIFT  <ident_seq> ;
+<reduce_section> : PCT_REDUCE <ident_seq> ;
 
 # --- options ---------------------------------------------------------------
 

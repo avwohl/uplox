@@ -38,6 +38,8 @@
 
 %grammar ada_subset
 
+
+%define lr.type lalr
 %options
 start = compilation_unit
 

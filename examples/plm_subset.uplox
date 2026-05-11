@@ -22,6 +22,8 @@
 
 %grammar plm_subset
 
+
+%define lr.type lalr
 %options
 start = module
 
