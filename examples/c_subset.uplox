@@ -1,0 +1,493 @@
+# C subset grammar with v3 AST annotations.
+#
+# Phase 2 of the uc_core migration: builds on c_expr.uplox by adding
+# statements, simple variable/function declarations, and a basic type
+# system (int/char/void plus pointers). Acceptance target is uc80's
+# hello.c and hello2.c — single-function programs with calls, pointer
+# parameters, while loops, and assignment.
+#
+# Out of scope (Phase 3 targets):
+#
+#   * Full C declarator syntax. The current pointer/array layer is a
+#     simplified pre-declarator: ``int *p, q`` only works as
+#     ``int *p; int q;``. The C declarator gymnastics
+#     (``int (*p)[3]``, ``int (*f(int))(int)``) require restructuring.
+#   * struct/union/enum, typedef, the typedef-name lexer hook.
+#   * Casts and sizeof(type) (the <type_name> chain).
+#   * Compound literals, _Generic, va_arg, offsetof, statement
+#     expressions, _Static_assert.
+#   * for / do-while / switch / case / goto / labels / asm.
+#
+# AST field names match ``uc_core/src/uc_core/ast.py`` exactly so the
+# eventual translator is a direct walk.
+
+%grammar c_subset
+
+
+%define lr.type lalr
+%options
+start = translation_unit
+
+%tokens
+WS         = /[ \t\r\n]+/   %skip
+LINE_COMMENT  = /\/\/[^\n]*/                     %skip
+BLOCK_COMMENT = /\/\*([^*]|\*+[^*\/])*\*+\//     %skip
+
+# Literals.
+INT_LIT    = /(0[xX][0-9A-Fa-f]+|0[0-7]*|[1-9][0-9]*)([uU]?(ll|LL|[lL])?|(ll|LL|[lL])[uU]?)?/
+FLOAT_LIT  = /([0-9]+\.[0-9]*([eE][+-]?[0-9]+)?|\.[0-9]+([eE][+-]?[0-9]+)?|[0-9]+[eE][+-]?[0-9]+)[fFlL]?/
+CHAR_LIT   = /'([^'\\\n]|\\.)'/
+STRING_LIT = /"([^"\\\n]|\\.)*"/
+
+# Keywords must precede IDENT — longest-match ties resolve in declaration order.
+# Type keywords first.
+KW_VOID    = 'void'
+KW_CHAR    = 'char'
+KW_SHORT   = 'short'
+KW_INT     = 'int'
+KW_LONG    = 'long'
+KW_FLOAT   = 'float'
+KW_DOUBLE  = 'double'
+KW_SIGNED  = 'signed'
+KW_UNSIGNED = 'unsigned'
+KW_BOOL    = 'bool'
+
+# Storage classes / qualifiers.
+KW_STATIC  = 'static'
+KW_EXTERN  = 'extern'
+KW_CONST   = 'const'
+KW_VOLATILE = 'volatile'
+
+# Control flow.
+KW_IF      = 'if'
+KW_ELSE    = 'else'
+KW_WHILE   = 'while'
+KW_RETURN  = 'return'
+KW_BREAK   = 'break'
+KW_CONTINUE = 'continue'
+
+# Literal keywords.
+KW_NULLPTR = 'nullptr'
+KW_TRUE    = 'true'
+KW_FALSE   = 'false'
+
+IDENT      = /[A-Za-z_][A-Za-z0-9_]*/
+
+# Multi-char operators first.
+LSHIFT_EQ  = '<<='
+RSHIFT_EQ  = '>>='
+ELLIPSIS   = '...'
+LSHIFT     = '<<'
+RSHIFT     = '>>'
+LOR        = '||'
+LAND       = '&&'
+EQ_EQ      = '=='
+NE_EQ      = '!='
+LE_EQ      = '<='
+GE_EQ      = '>='
+ARROW      = '->'
+INC_OP     = '++'
+DEC_OP     = '--'
+PLUS_EQ    = '+='
+MINUS_EQ   = '-='
+STAR_EQ    = '*='
+SLASH_EQ   = '/='
+PERCENT_EQ = '%='
+AMP_EQ     = '&='
+PIPE_EQ    = '|='
+CARET_EQ   = '^='
+
+ASSIGN     = '='
+QUESTION   = '?'
+COLON      = ':'
+SEMI       = ';'
+COMMA      = ','
+LPAREN     = '('
+RPAREN     = ')'
+LBRACKET   = '['
+RBRACKET   = ']'
+LBRACE     = '{'
+RBRACE     = '}'
+DOT        = '.'
+PLUS       = '+'
+MINUS      = '-'
+STAR       = '*'
+SLASH      = '/'
+PERCENT    = '%'
+AMP        = '&'
+PIPE       = '|'
+CARET      = '^'
+TILDE      = '~'
+BANG       = '!'
+LT         = '<'
+GT         = '>'
+
+# Punctuation has no AST significance. Structural keywords too — the
+# kind name encodes "this is an if / while / return" so the keyword
+# token itself carries no field-level information.
+%ast_drop
+LPAREN RPAREN LBRACKET RBRACKET LBRACE RBRACE
+SEMI COMMA COLON DOT QUESTION
+KW_IF KW_ELSE KW_WHILE KW_RETURN KW_BREAK KW_CONTINUE
+
+%rules
+
+# ===========================================================================
+# Top level
+# ===========================================================================
+
+<translation_unit> : <external_decls>@items   %ast=TranslationUnit
+                   |                          %ast=TranslationUnit
+                   ;
+
+<external_decls> %ast=list element=<external_decl>
+                : <external_decl>
+                | <external_decls> <external_decl>
+                ;
+
+# An external declaration is either a function definition (declarator
+# followed by a compound statement) or a declaration list ending in
+# semicolon. They share the same <type> <declarator> prefix; the
+# parser commits at the first token after the declarator (LBRACE ->
+# function definition; SEMI / ASSIGN / COMMA -> declaration). One
+# unified <external_decl> rule avoids the shift/reduce conflict that
+# would appear if function-definition and declaration had separate
+# top-level rules.
+<external_decl>?
+    : <type>@return_type <declarator>@declarator <compound_stmt>@body
+      %ast=FunctionDef
+    | <type>@type_spec <init_declarators>@declarators SEMI
+      %ast=Declaration
+    ;
+
+<init_declarators> %ast=list element=<init_declarator>
+    : <init_declarator>
+    | <init_declarators> COMMA <init_declarator>
+    ;
+
+# Two %ast= kinds — InitDeclarator vs InitDeclaratorWithInit — so the
+# AST plan can validate that each production carries a consistent
+# field set (the translator collapses both back to ucow's single
+# InitDeclarator with init=None when absent).
+<init_declarator>?
+    : <declarator>@declarator                             %ast=InitDeclarator
+    | <declarator>@declarator ASSIGN <initializer>@init   %ast=InitDeclaratorWithInit
+    ;
+
+# Declarator: pointer prefixes are modelled as a recursive wrap so an
+# empty-list reduction is unnecessary. ``int x`` parses as
+# ``Declarator(name=x)``. ``int *p`` parses as
+# ``PointerDeclarator(inner=Declarator(name=p))``. ``int **p`` chains:
+# PointerDeclarator(inner=PointerDeclarator(inner=Declarator(name=p))).
+# The translator unwinds the chain to set the var_type correctly
+# (each PointerDeclarator wraps the base type in PointerType).
+#
+# Function declarators are recognised here so the same form covers
+# function prototypes (in declarations) and function definitions (in
+# external_decl).
+<declarator>?
+    : IDENT@name                                                   %ast=Declarator
+    | STAR <declarator>@inner                                      %ast=PointerDeclarator
+    | IDENT@name LPAREN <param_list_opt>@params RPAREN              %ast=FnDeclarator
+    ;
+
+# Initializer: just an assignment-expression for the Phase 2 grammar.
+# Phase 3 will add brace-enclosed initializer lists.
+<initializer>?
+    : <assignment_expr>
+    ;
+
+# Parameter list. ``()`` is no params; ``(void)`` parses as a single
+# void parameter and the translator collapses that to no params (the
+# C idiom). Variadic (..., ELLIPSIS) deferred to Phase 3.
+<param_list_opt>
+    : <param_list>@params   %ast=_unwrap
+    |
+    ;
+
+<param_list> %ast=list element=<parameter>
+    : <parameter>
+    | <param_list> COMMA <parameter>
+    ;
+
+# Parameter: type followed by an optional declarator. We accept the
+# same declarator shape as top-level declarations so pointer params
+# work naturally (``char *s``).
+<parameter>
+    : <type>@param_type <declarator>@declarator   %ast=ParamDecl
+    | <type>@param_type                           %ast=ParamDeclAbstract
+    ;
+
+# ===========================================================================
+# Types (basic for Phase 2; const/volatile + signed/unsigned deferred)
+# ===========================================================================
+#
+# Phase 2 type-spec is a single basic-type keyword. Type qualifiers
+# (const/volatile) and full signedness modifiers create LR ambiguity
+# with the declarator's pointer/IDENT lookahead; deferred to Phase 3
+# along with the typedef-name lexer hook.
+#
+# Translator: each kind name maps to uc_core's BasicType with the
+# right ``name`` string (e.g. UnsignedIntType -> BasicType(name="int",
+# is_signed=False)).
+
+<type>?
+    : KW_VOID                       %ast=VoidType
+    | KW_CHAR                       %ast=CharType
+    | KW_SHORT                      %ast=ShortType
+    | KW_INT                        %ast=IntType
+    | KW_LONG                       %ast=LongType
+    | KW_FLOAT                      %ast=FloatType
+    | KW_DOUBLE                     %ast=DoubleType
+    | KW_BOOL                       %ast=BoolType
+    | KW_UNSIGNED                   %ast=UnsignedIntType   # bare ``unsigned`` = unsigned int
+    | KW_SIGNED                     %ast=IntType           # bare ``signed`` = int
+    ;
+
+# ===========================================================================
+# Statements
+# ===========================================================================
+
+<statement>?
+    : <compound_stmt>
+    | <expression_stmt>
+    | <if_stmt>
+    | <while_stmt>
+    | <return_stmt>
+    | <break_stmt>
+    | <continue_stmt>
+    ;
+
+<compound_stmt>
+    : LBRACE <block_items>@items RBRACE   %ast=CompoundStmt
+    | LBRACE RBRACE                       %ast=CompoundStmt
+    ;
+
+<block_items> %ast=list element=<block_item>
+    : <block_item>
+    | <block_items> <block_item>
+    ;
+
+<block_item>?
+    : <statement>
+    | <local_declaration>
+    ;
+
+# Local declaration inside a compound statement. Same shape as the
+# top-level declaration form in <external_decl>; we keep them
+# separate because the top-level rule already exists as part of
+# <external_decl>'s body and merging would re-introduce the function-
+# definition shift/reduce.
+<local_declaration>
+    : <type>@type_spec <init_declarators>@declarators SEMI   %ast=Declaration
+    ;
+
+<expression_stmt>
+    : <expr>@expr SEMI   %ast=ExpressionStmt
+    | SEMI               %ast=EmptyStmt
+    ;
+
+# Dangling-else: split into matched/unmatched non-terminals like the
+# C23 grammar does. Keeps LR(1) honest without %shift.
+<if_stmt>?
+    : <matched_if>
+    | <unmatched_if>
+    ;
+
+# Two %ast= kinds — IfStmt (no else) and IfStmtElse (with else) —
+# so the AST plan has consistent field sets per production. The
+# translator collapses both back to uc_core's single IfStmt with
+# else_branch=None when absent.
+<matched_if>?
+    : KW_IF LPAREN <expr>@condition RPAREN <matched>@then_branch
+      KW_ELSE <matched>@else_branch
+      %ast=IfStmtElse
+    ;
+
+<unmatched_if>?
+    : KW_IF LPAREN <expr>@condition RPAREN <statement>@then_branch
+      %ast=IfStmt
+    | KW_IF LPAREN <expr>@condition RPAREN <matched>@then_branch
+      KW_ELSE <unmatched_if>@else_branch
+      %ast=IfStmtElse
+    ;
+
+# A "matched" statement is one that can safely sit before an `else`.
+<matched>?
+    : <matched_if>
+    | <matched_non_if>
+    ;
+
+<matched_non_if>?
+    : <compound_stmt>
+    | <expression_stmt>
+    | <while_stmt_matched>
+    | <return_stmt>
+    | <break_stmt>
+    | <continue_stmt>
+    ;
+
+# Iteration also splits into matched/unmatched on its body so an `else`
+# inside doesn't accidentally bind to an outer `if`.
+<while_stmt>?
+    : <while_stmt_matched>
+    | <while_stmt_unmatched>
+    ;
+
+<while_stmt_matched>
+    : KW_WHILE LPAREN <expr>@condition RPAREN <matched>@body
+      %ast=WhileStmt
+    ;
+
+<while_stmt_unmatched>
+    : KW_WHILE LPAREN <expr>@condition RPAREN <unmatched_if>@body
+      %ast=WhileStmt
+    ;
+
+<return_stmt>
+    : KW_RETURN SEMI            %ast=ReturnStmt
+    | KW_RETURN <expr>@value SEMI   %ast=ReturnStmt
+    ;
+
+<break_stmt>    : KW_BREAK SEMI    %ast=BreakStmt ;
+<continue_stmt> : KW_CONTINUE SEMI %ast=ContinueStmt ;
+
+# ===========================================================================
+# Expressions (carried over from c_expr.uplox)
+# ===========================================================================
+
+<expr>?
+    : <assignment_expr>
+    ;
+
+<assignment_expr>?
+    : <conditional_expr>
+    | <unary_expr>@left ASSIGN@op     <assignment_expr>@right   %ast=BinaryOp
+    | <unary_expr>@left PLUS_EQ@op    <assignment_expr>@right   %ast=BinaryOp
+    | <unary_expr>@left MINUS_EQ@op   <assignment_expr>@right   %ast=BinaryOp
+    | <unary_expr>@left STAR_EQ@op    <assignment_expr>@right   %ast=BinaryOp
+    | <unary_expr>@left SLASH_EQ@op   <assignment_expr>@right   %ast=BinaryOp
+    | <unary_expr>@left PERCENT_EQ@op <assignment_expr>@right   %ast=BinaryOp
+    | <unary_expr>@left AMP_EQ@op     <assignment_expr>@right   %ast=BinaryOp
+    | <unary_expr>@left PIPE_EQ@op    <assignment_expr>@right   %ast=BinaryOp
+    | <unary_expr>@left CARET_EQ@op   <assignment_expr>@right   %ast=BinaryOp
+    | <unary_expr>@left LSHIFT_EQ@op  <assignment_expr>@right   %ast=BinaryOp
+    | <unary_expr>@left RSHIFT_EQ@op  <assignment_expr>@right   %ast=BinaryOp
+    ;
+
+<conditional_expr>?
+    : <logical_or_expr>
+    | <logical_or_expr>@condition QUESTION <expr>@true_expr COLON <conditional_expr>@false_expr
+      %ast=TernaryOp
+    ;
+
+<logical_or_expr>?
+    : <logical_and_expr>
+    | <logical_or_expr>@left LOR@op <logical_and_expr>@right   %ast=BinaryOp
+    ;
+
+<logical_and_expr>?
+    : <inclusive_or_expr>
+    | <logical_and_expr>@left LAND@op <inclusive_or_expr>@right   %ast=BinaryOp
+    ;
+
+<inclusive_or_expr>?
+    : <exclusive_or_expr>
+    | <inclusive_or_expr>@left PIPE@op <exclusive_or_expr>@right   %ast=BinaryOp
+    ;
+
+<exclusive_or_expr>?
+    : <and_expr>
+    | <exclusive_or_expr>@left CARET@op <and_expr>@right   %ast=BinaryOp
+    ;
+
+<and_expr>?
+    : <equality_expr>
+    | <and_expr>@left AMP@op <equality_expr>@right   %ast=BinaryOp
+    ;
+
+<equality_expr>?
+    : <relational_expr>
+    | <equality_expr>@left EQ_EQ@op <relational_expr>@right   %ast=BinaryOp
+    | <equality_expr>@left NE_EQ@op <relational_expr>@right   %ast=BinaryOp
+    ;
+
+<relational_expr>?
+    : <shift_expr>
+    | <relational_expr>@left LT@op    <shift_expr>@right   %ast=BinaryOp
+    | <relational_expr>@left GT@op    <shift_expr>@right   %ast=BinaryOp
+    | <relational_expr>@left LE_EQ@op <shift_expr>@right   %ast=BinaryOp
+    | <relational_expr>@left GE_EQ@op <shift_expr>@right   %ast=BinaryOp
+    ;
+
+<shift_expr>?
+    : <additive_expr>
+    | <shift_expr>@left LSHIFT@op <additive_expr>@right   %ast=BinaryOp
+    | <shift_expr>@left RSHIFT@op <additive_expr>@right   %ast=BinaryOp
+    ;
+
+<additive_expr>?
+    : <multiplicative_expr>
+    | <additive_expr>@left PLUS@op  <multiplicative_expr>@right   %ast=BinaryOp
+    | <additive_expr>@left MINUS@op <multiplicative_expr>@right   %ast=BinaryOp
+    ;
+
+<multiplicative_expr>?
+    : <unary_expr>
+    | <multiplicative_expr>@left STAR@op    <unary_expr>@right   %ast=BinaryOp
+    | <multiplicative_expr>@left SLASH@op   <unary_expr>@right   %ast=BinaryOp
+    | <multiplicative_expr>@left PERCENT@op <unary_expr>@right   %ast=BinaryOp
+    ;
+
+<unary_expr>?
+    : <postfix_expr>
+    | INC_OP@op <unary_expr>@operand   %ast=UnaryOp
+    | DEC_OP@op <unary_expr>@operand   %ast=UnaryOp
+    | AMP@op    <unary_expr>@operand   %ast=UnaryOp
+    | STAR@op   <unary_expr>@operand   %ast=UnaryOp
+    | PLUS@op   <unary_expr>@operand   %ast=UnaryOp
+    | MINUS@op  <unary_expr>@operand   %ast=UnaryOp
+    | TILDE@op  <unary_expr>@operand   %ast=UnaryOp
+    | BANG@op   <unary_expr>@operand   %ast=UnaryOp
+    ;
+
+<postfix_expr>?
+    : <primary_expr>
+    | <postfix_expr>@array LBRACKET <expr>@index RBRACKET           %ast=Index
+    | <postfix_expr>@func  LPAREN <argument_list_opt>@args RPAREN   %ast=Call
+    | <postfix_expr>@obj DOT IDENT@member                            %ast=Member
+    | <postfix_expr>@obj ARROW IDENT@member                          %ast=ArrowMember
+    | <postfix_expr>@operand INC_OP@op                               %ast=PostfixOp
+    | <postfix_expr>@operand DEC_OP@op                               %ast=PostfixOp
+    ;
+
+<argument_list_opt>
+    : <argument_list>@args   %ast=_unwrap
+    |
+    ;
+
+<argument_list> %ast=list element=<assignment_expr>
+    : <assignment_expr>
+    | <argument_list> COMMA <assignment_expr>
+    ;
+
+<primary_expr>?
+    : IDENT@name             %ast=Identifier
+    | INT_LIT@value          %ast=IntLiteral
+    | FLOAT_LIT@value        %ast=FloatLiteral
+    | CHAR_LIT@value         %ast=CharLiteral
+    | <string_literal>
+    | KW_NULLPTR             %ast=NullptrLiteral
+    | KW_TRUE@value          %ast=BoolLiteral
+    | KW_FALSE@value         %ast=BoolLiteral
+    | LPAREN <expr> RPAREN
+    ;
+
+<string_literal> %ast=list element=<string_piece>
+    : <string_piece>
+    | <string_literal> <string_piece>
+    ;
+
+<string_piece>?
+    : STRING_LIT@value   %ast=StringLiteral
+    ;
