@@ -208,9 +208,15 @@ to a single production.
   and `post_reduce` for every reduction of that production.
 * `{ … }` is the semantic action — opaque target-language source. uplox
   does not parse the contents; it copies the text verbatim into the JSON
-  bundle and leaves interpretation to the backend.
-* `$$`, `$1`, `$2`, … inside actions are passed through unchanged. Backends
-  rewrite them to language-appropriate accesses on the parser context stack.
+  bundle, where `$$` / `$1` / `$2` / … are preserved unchanged. No
+  current backend interprets the action body: the C / C++ / Lua emitters
+  ignore it and build a generic parse tree the host shapes after the
+  fact, and the Python runtime lets hosts register real Python callables
+  keyed by production index (also bypassing the body text). The action
+  body in `.uplox` source is therefore documentation today — useful for
+  conveying intent to readers. See [`semantics.md`](semantics.md) for
+  what the parser actually hands to your semantics and the patterns for
+  building an AST from it.
 
 An empty alternative is `|` followed immediately by `|` or `;` (the
 epsilon production). Lists like `<xs> : <xs> <x> | ;` are idiomatic.

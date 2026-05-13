@@ -123,8 +123,11 @@ Productions, in BNF-ish form:
 * `:` separates LHS from first alternative, `|` separates further
   alternatives, `;` ends the rule.
 * `{ ... }` is the **semantic action**. uplox copies the contents
-  verbatim into the JSON bundle; each backend rewrites `$$`, `$1`,
-  `$2`, ... into language-appropriate stack accesses.
+  verbatim into the JSON bundle as opaque text. The Python runtime
+  ignores the body and lets hosts register real callables keyed by
+  production index; the C / C++ / Lua backends ignore the body
+  entirely and emit a generic parse tree the host shapes after the
+  fact. See [`semantics.md`](semantics.md) for the full hand-off.
 
 ### Reading the precedence ladder
 

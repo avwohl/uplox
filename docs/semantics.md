@@ -144,9 +144,9 @@ new value:
         return rhs[1]                # '(' <expr> ')' -> inner
 
     actions = {
-        0: expr_binop,    # <expr> -> <expr> '+' <term>
-        1: expr_binop,    # <expr> -> <expr> '-' <term>
-        2: lift,          # <expr> -> <term>
+        1: expr_binop,    # <expr> -> <expr> '+' <term>
+        2: expr_binop,    # <expr> -> <expr> '-' <term>
+        3: lift,          # <expr> -> <term>
         ...
     }
 
@@ -154,7 +154,9 @@ new value:
 
 Production indices come from the grammar's compiled order — print
 `grammar.productions` to see them, or look at the
-`production` field on a default-built `ParseNode`.
+`production` field on a default-built `ParseNode`. Index 0 is
+always the augmented start production (`$start -> <your-start>`);
+your user productions begin at 1.
 
 You don't have to register an action for every production. Any
 production without an entry falls back to the default
@@ -292,9 +294,10 @@ its action should return the child unchanged:
            ;
 
 Without this lift, the AST gains a wrapper node per precedence
-level — five levels of `Expr(Term(Factor(Number(42))))` instead
-of one `Number(42)`. The wrapper nodes carry no information and
-make every downstream pass slower.
+level — `Expr(Term(Factor(Number(42))))` instead of one
+`Number(42)`. A real grammar's ladder is often 8+ levels deep
+(see `examples/plm_subset.uplox`); the wrapper nodes carry no
+information and make every downstream pass slower.
 
 ### Source positions: copy from the leftmost child
 

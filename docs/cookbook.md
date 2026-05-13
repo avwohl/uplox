@@ -72,8 +72,8 @@ clause, one empty:
 
 **Trap.** It's tempting to inline the optionality at the call site
 with two near-duplicate productions of the parent rule. Don't —
-your `<if_stmt>` rule then has 2N productions for N optional
-clauses, and every new optional clause doubles it. The
+your `<if_stmt>` rule then has 2^N productions for N independent
+optional clauses (each new clause doubles the count). The
 `<else_part>` indirection costs you one non-terminal and one
 extra reduction at parse time; you'll never regret it.
 
@@ -159,8 +159,8 @@ collapses the contents) and `post_reduce` (after).
 `post_reduce`. The Python runtime ships `uplox.hooks.scoped_table_hooks`
 as a turnkey helper.
 
-**See:** `examples/scoped.uplox` (smallest possible scope demo),
-`examples/c23.uplox` (compound statement opens a scope).
+**See:** `examples/scoped.uplox` (smallest possible scope demo,
+with `%hook=block_scope` on the `<block>` production).
 
 ## Comments and whitespace
 

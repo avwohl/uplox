@@ -19,16 +19,17 @@ when you switch construction algorithms.
 When `uplox check` finds conflicts, you get them itemised on stderr:
 
     examples/foo.uplox: 1 parser conflict(s):
-    shift/reduce conflict in state N on terminal T:
-      shift goes to state M
-      reduce by <lhs> -> <rhs>   (foo.uplox:line)
+    state 5 on 'STAR' (shift/reduce):
+      shift -> state 4
+      reduce by 1: e -> e PLUS e
 
-The two pieces of information that matter most:
+The three pieces of information that matter most:
 
-* **Kind** — shift/reduce or reduce/reduce.
-* **Terminal** — what lookahead triggered the conflict. The
-  terminal name is the key for `%shift` / `%reduce` if you end
-  up using them.
+* **Kind** — shift/reduce or reduce/reduce (the parenthesised tag).
+* **Terminal** — the quoted lookahead that triggered the conflict.
+  This is the key for `%shift` / `%reduce` if you end up using them.
+* **Production index and rule** — `reduce by 1: e -> e PLUS e`
+  identifies which rule the parser was considering closing.
 
 Shift/reduce on ELSE means dangling-else. Reduce/reduce in LALR
 mode usually means an LALR state-merge artefact (try

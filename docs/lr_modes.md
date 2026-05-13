@@ -72,11 +72,12 @@ For `ada_full` specifically, the same A/B looks like:
     states                      58611      1594
     JSON bundle                  28 MB    1.4 MB
     build time                ~25 min    ~2 min
-    peak RSS                    >10 GB    2.9 GB
 
 That's the operational cost of canonical LR(1) at the high end:
-a 28 MB bundle and a 25-minute build. LALR is the practical choice
-for any production-scale grammar.
+a 28 MB bundle and a 25-minute build (LALR's peak RSS during this
+build was 2.9 GB; canonical needs noticeably more, which is why
+the working setup runs under a memory watchdog). LALR is the
+practical choice for any production-scale grammar.
 
 For tiny grammars, the difference doesn't matter — `calc` goes
 from 30 to 16 states, building both in well under a second.
