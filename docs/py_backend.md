@@ -94,3 +94,42 @@ alongside `pip install uplox` (or vendor the runtime). The runtime is
 small (lexer + LR driver + hooks) and stable; the trade is "share the
 runtime" vs. "duplicate it per grammar". Python users almost always
 prefer share.
+
+## v3 auto-AST emission
+
+When the grammar carries v3 AST annotations (`?` on rule LHS,
+`%ast=Name` per alternative, `@field` on RHS positions, or the
+`%ast_drop` directive), the emitted module changes shape:
+
+* One `@dataclass(kw_only=True)` per distinct `%ast=Name`.
+* An `_Pos` dataclass with start+end positions, carried on every
+  node.
+* An `AstNode` `Union` of every node kind (or a single alias if the
+  grammar declares only one kind).
+* `parse(text) -> AstNode` — replaces the legacy `parse() -> ParseNode`.
+* `parse_cst(text) -> ParseNode` — the legacy parse-tree entry,
+  preserved for editor / debug consumers.
+
+```python
+import uplox_calc                          # v3 module
+ast = uplox_calc.parse("(1 + 2) * 3")      # AstNode
+isinstance(ast, uplox_calc.BinOp)          # True
+ast.lhs.lhs.value.text == "1"              # NumLit access through fields
+```
+
+Auto-derived field types:
+
+* Field whose source non-terminal has an empty alternative →
+  `Optional[X]` with `default=None`.
+* Field whose source non-terminal is a list rule
+  (`%ast=list element=<X>`) → `list[AstNode]` with
+  `default_factory=list` (never `Optional` — empty lists are
+  `[]`, never `None`).
+* Reserved `%ast=_unwrap` kind threads the inner `@field`
+  child up to the parent's slot.
+
+See `docs/proposals/auto_ast.md` for the full design and
+`docs/proposals/calc_annotated.md` for a worked walkthrough.
+
+Grammars without annotations emit the legacy module unchanged — the
+v3 surface is purely additive.
