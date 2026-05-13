@@ -135,6 +135,16 @@ implements the full classical hack on top of these primitives.
 
 ## Documentation
 
+Getting started:
+
+- [`docs/tutorial.md`](docs/tutorial.md) — your first uplox grammar, walking through `calc`.
+- [`docs/cookbook.md`](docs/cookbook.md) — recipes for common language features (precedence, optional clauses, nested if/then/else, scopes, identifiers vs keywords, lexer feedback).
+- [`docs/lr_modes.md`](docs/lr_modes.md) — picking `%define lr.type` (canonical-LR / LALR / IELR) with concrete state-count costs.
+- [`docs/conflict_resolution.md`](docs/conflict_resolution.md) — diagnosing conflicts, when to use `%shift` / `%reduce`, and when to restructure instead.
+- [`docs/semantics.md`](docs/semantics.md) — what the parser passes to semantic actions and how to use that interface to build an AST.
+
+Reference:
+
 - [`docs/grammar_format.md`](docs/grammar_format.md) — the `.uplox` DSL spec.
 - [`docs/c_backend.md`](docs/c_backend.md) — generated C API.
 - [`docs/cpp_backend.md`](docs/cpp_backend.md) — generated C++ API.
