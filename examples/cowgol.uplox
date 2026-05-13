@@ -1,0 +1,574 @@
+# Cowgol grammar — uplox first cut.
+#
+# Targets the language as implemented by the ucow Cowgol compiler
+# (../ucow). Cowgol is an Ada-inspired, strongly-typed language for
+# small systems (8080/Z80, 6502, 80386); ucow targets 8080/Z80 CP/M.
+#
+# Covers everything in ucow/COWGOL_LANGUAGE.md and ucow/src/parser.py:
+#
+#   * Top-level: include, sub (with @decl / @impl), record (with
+#     single-inheritance ``record A: B``), typedef, interface.
+#   * Statements: var / const decls (with optional type and / or
+#     initializer), if / elseif / else, while, infinite loop, case,
+#     return, break, continue, expression statements and assignments,
+#     tuple multi-assignment (``(a, b) := call();``), inline assembly
+#     via @asm.
+#   * Expressions: C-like precedence ladder — logical or / and / not,
+#     comparison, bitwise or / xor / and, shift, additive,
+#     multiplicative, ``as`` casts, unary, postfix (call / subscript /
+#     field), primaries (literals, identifiers, parens, init lists,
+#     dereference, @-operators).
+#   * Types: scalar (int8/uint8/int16/uint16/int32/uint32/intptr),
+#     ranged ``int(min, max)``, pointer ``[T]``, array ``T[n]`` / ``T[]``,
+#     named (records, typedefs), ``@sizeof X`` / ``@indexof X`` as
+#     type expressions.
+#   * Attributes: ``@extern("name")`` on subs, ``@at(n)`` or bare
+#     ``@(n)`` on record fields, ``implements Interface`` on subs.
+#
+# Out of scope (none of the above forces the issue):
+#
+#   * Macro-style includes — the ucow preprocessor expands these
+#     before the parser, so the grammar only sees post-expansion source.
+#   * String escape semantics — the lexer accepts standard \n / \t /
+#     \r / \\ / \" / \' / \0 (per ucow/src/lexer.py); the grammar
+#     treats the whole literal as a single STRING token.
+#
+# Conflict-resolution decisions:
+#
+#   * Cowgol's control-flow statements are fully bracketed (``end if;``,
+#     ``end loop;``, ``end case;``, ``end sub;``, ``end record;``) so
+#     there is no dangling-else and no need to split matched / unmatched
+#     statement non-terminals.
+#   * Tuple multi-assignment ``(a, b) := call();`` shares the LPAREN-
+#     headed start with a parenthesised primary ``(expr)``. The split
+#     happens at the LR(1) lookahead after the first inner expression:
+#     COMMA → tuple target, RPAREN → parenthesised expr.
+#   * Cowgol's @-words (``@asm``, ``@decl``, ``@impl``, ``@extern``,
+#     ``@at``, ``@sizeof``, ``@bytesof``, ``@indexof``, ``@next``,
+#     ``@prev``, ``@alias``) are lexed as distinct tokens via
+#     ``/@<word>\b/`` regexes — ``@`` is also kept as a standalone
+#     token for the alternate ``@(n)`` record-offset spelling.
+#     Word-bounding (\b) prevents ``@sizeofx`` from matching @sizeof.
+#   * ``int(min, max)`` ranged-integer types share their shape with a
+#     plain ``IDENT(args)`` call; the grammar accepts the wider form
+#     and the semantic phase rejects names other than ``int`` in type
+#     context. (ucow's parser does the same string check on ``int``.)
+#   * Reserved type keywords (``int8`` etc.) are declared via
+#     ``%keywords`` so that ``uint8`` doesn't lex as an IDENT inside
+#     a declaration's type-position.
+#
+# Lexer notes:
+#
+#   * Comments are ``#`` to end of line.
+#   * NUMBER covers Cowgol's full literal grammar: 0x / 0o / 0b / 0d
+#     prefixes, plain decimal, underscore separators inside digit runs.
+#     Character literals (``'A'``, ``'\n'``) come through as NUMBERs
+#     after the lexer evaluates them — ucow's lexer does exactly that
+#     (TokenType.NUMBER for char literals); we mirror that here by
+#     putting the char-literal regex into the NUMBER alternation.
+#   * STRING is double-quoted with C-style escapes.
+
+%grammar cowgol
+
+
+%define lr.type lalr
+%options
+start = program
+
+%keyword_prefix KW_
+%keywords
+and as break case const continue else elseif end if implements include
+interface is loop not or record return sub then typedef var when while nil
+int8 uint8 int16 uint16 int32 uint32 intptr
+
+%tokens
+# --- whitespace and comments ---------------------------------------------
+WS         = /[ \t\r\n]+/                            %skip
+COMMENT    = /#[^\n]*/                               %skip
+
+# --- @-keywords ----------------------------------------------------------
+# Each @-form is a distinct literal token. uplox's regex doesn't support
+# word boundaries, so ``@sizeofx`` would lex as ``@sizeof`` + ``x`` —
+# but cowgol rejects unknown @-operators anyway and ``@sizeofx`` doesn't
+# appear in real source.
+AT_BYTESOF = '@bytesof'
+AT_INDEXOF = '@indexof'
+AT_EXTERN  = '@extern'
+AT_SIZEOF  = '@sizeof'
+AT_ALIAS   = '@alias'
+AT_DECL    = '@decl'
+AT_IMPL    = '@impl'
+AT_NEXT    = '@next'
+AT_PREV    = '@prev'
+AT_ASM     = '@asm'
+AT_AT      = '@at'
+
+# --- numeric literals ----------------------------------------------------
+# Order: based literals first (longer prefix), then char literals
+# (which the host lexer evaluates to a number — see header notes), then
+# bare decimal. Underscores are permitted anywhere inside the digit run.
+NUMBER     = /0[xX][0-9A-Fa-f_]+|0[oO][0-7_]+|0[bB][01_]+|0[dD][0-9_]+|'(\\.|[^'\n])'|[0-9][0-9_]*/
+
+# --- string literals ------------------------------------------------------
+STRING     = /"(\\.|[^"\n])*"/
+
+# --- identifiers (after keywords so reserved words win at lex time) ------
+IDENT      = /[A-Za-z_][A-Za-z0-9_]*/
+
+# --- multi-char operators (before their single-char prefixes) ------------
+ASSIGN     = ':='
+EQ         = '=='
+NE         = '!='
+LE         = '<='
+GE         = '>='
+LSHIFT     = '<<'
+RSHIFT     = '>>'
+
+# --- single-char operators and delimiters --------------------------------
+PLUS       = '+'
+MINUS      = '-'
+STAR       = '*'
+SLASH      = '/'
+PERCENT    = '%'
+AMP        = '&'
+PIPE       = '|'
+CARET      = '^'
+TILDE      = '~'
+LT         = '<'
+GT         = '>'
+LPAREN     = '('
+RPAREN     = ')'
+LBRACKET   = '['
+RBRACKET   = ']'
+LBRACE     = '{'
+RBRACE     = '}'
+COMMA      = ','
+COLON      = ':'
+SEMI       = ';'
+DOT        = '.'
+AT         = '@'
+
+%rules
+
+# =========================================================================
+# Top level
+# =========================================================================
+
+<program>          : <top_items>
+                   |
+                   ;
+
+<top_items>        : <top_item>
+                   | <top_items> <top_item>
+                   ;
+
+<top_item>         : <include_decl>
+                   | <record_decl>
+                   | <typedef_decl>
+                   | <interface_decl>
+                   | <sub_form>
+                   | <stmt>
+                   ;
+
+<include_decl>     : KW_include STRING SEMI
+                   ;
+
+# =========================================================================
+# Subroutines
+# =========================================================================
+#
+# Three shapes share most of the structure:
+#   * ``sub Foo(...) is ... end sub;`` — full definition.
+#   * ``sub Foo(...) @extern("_foo");`` — declaration / external link.
+#   * ``@decl sub Foo(...);`` — explicit forward declaration.
+#   * ``@impl sub Foo is ... end sub;`` — implementation matching a prior
+#     ``@decl``. Per ucow's parser the impl form takes no parameter
+#     list — parameters are inherited from the matching ``@decl``.
+
+<sub_form>         : <sub_decl_or_def>
+                   | AT_DECL <sub_decl_only>
+                   | AT_IMPL <sub_impl>
+                   ;
+
+<sub_decl_or_def>  : KW_sub IDENT <sub_signature> <sub_attrs> <implements_opt> <sub_tail>
+                   ;
+
+<sub_decl_only>    : KW_sub IDENT <sub_signature> <sub_attrs> <implements_opt> SEMI
+                   ;
+
+<sub_impl>         : KW_sub IDENT <sub_attrs> <implements_opt> KW_is <sub_body> KW_end KW_sub SEMI
+                   ;
+
+<sub_signature>    : LPAREN <param_list_opt> RPAREN <returns_opt>
+                   |
+                   ;
+
+<param_list_opt>   : <param_list>
+                   |
+                   ;
+
+<param_list>       : <param>
+                   | <param_list> COMMA <param>
+                   ;
+
+<param>            : IDENT COLON <type>
+                   ;
+
+<returns_opt>      : COLON LPAREN <param_list> RPAREN
+                   |
+                   ;
+
+<sub_attrs>        : <sub_attrs> <sub_attr>
+                   |
+                   ;
+
+<sub_attr>         : AT_EXTERN LPAREN STRING RPAREN
+                   ;
+
+<implements_opt>   : KW_implements IDENT
+                   |
+                   ;
+
+<sub_tail>         : KW_is <sub_body> KW_end KW_sub SEMI
+                   | SEMI
+                   ;
+
+<sub_body>         : <sub_body_items>
+                   |
+                   ;
+
+<sub_body_items>   : <sub_body_item>
+                   | <sub_body_items> <sub_body_item>
+                   ;
+
+<sub_body_item>    : <record_decl>
+                   | <typedef_decl>
+                   | <interface_decl>
+                   | <sub_form>
+                   | <stmt>
+                   ;
+
+# =========================================================================
+# Records
+# =========================================================================
+
+<record_decl>      : KW_record IDENT <record_base_opt> KW_is <field_list> KW_end KW_record SEMI
+                   ;
+
+<record_base_opt>  : COLON IDENT
+                   |
+                   ;
+
+<field_list>       : <field_list> <field_decl>
+                   |
+                   ;
+
+<field_decl>       : IDENT <field_offset_opt> COLON <type> SEMI
+                   ;
+
+# ``@at(n)`` is the documented spelling; ucow's parser also accepts the
+# unprefixed ``@(n)`` form (see ucow/src/parser.py _parse_record).
+<field_offset_opt> : AT_AT LPAREN NUMBER RPAREN
+                   | AT LPAREN NUMBER RPAREN
+                   |
+                   ;
+
+# =========================================================================
+# Typedefs and interfaces
+# =========================================================================
+
+<typedef_decl>     : KW_typedef IDENT KW_is <type> SEMI
+                   ;
+
+<interface_decl>   : KW_interface IDENT LPAREN <param_list_opt> RPAREN <returns_opt> SEMI
+                   ;
+
+# =========================================================================
+# Types
+# =========================================================================
+#
+# A type is a base type with zero or more trailing array suffixes.
+# ``[T]`` is a pointer (base form); ``T[N]`` / ``T[]`` are arrays
+# (suffix form). They chain naturally: ``[uint8][5]`` is an array of 5
+# pointers, ``[uint8[10]]`` is a pointer to an array of 10 uint8.
+
+<type>             : <base_type> <array_suffixes>
+                   ;
+
+<base_type>        : <scalar_kw>
+                   | LBRACKET <type> RBRACKET                              # pointer
+                   | AT_SIZEOF IDENT                                       # @sizeof X (as type)
+                   | AT_INDEXOF IDENT                                      # @indexof X (as type)
+                   | IDENT                                                 # named type (record/typedef)
+                   | IDENT LPAREN <expr> COMMA <expr> RPAREN               # int(min, max) ranged-int
+                   ;
+
+<scalar_kw>        : KW_int8
+                   | KW_uint8
+                   | KW_int16
+                   | KW_uint16
+                   | KW_int32
+                   | KW_uint32
+                   | KW_intptr
+                   ;
+
+<array_suffixes>   : <array_suffixes> LBRACKET <expr> RBRACKET             # T[N]
+                   | <array_suffixes> LBRACKET RBRACKET                    # T[]   (size inferred)
+                   |
+                   ;
+
+# =========================================================================
+# Statements
+# =========================================================================
+#
+# Cowgol semicolons are required by convention and we require them here.
+# The if / while / loop / case statements are fully bracketed and need
+# no dangling-else split.
+
+<stmt>             : <var_decl>
+                   | <const_decl>
+                   | <if_stmt>
+                   | <while_stmt>
+                   | <loop_stmt>
+                   | <case_stmt>
+                   | <return_stmt>
+                   | <break_stmt>
+                   | <continue_stmt>
+                   | <asm_stmt>
+                   | <assign_or_call_stmt>
+                   ;
+
+<var_decl>         : KW_var IDENT <var_type_opt> <var_init_opt> SEMI
+                   ;
+
+<var_type_opt>     : COLON <type>
+                   |
+                   ;
+
+<var_init_opt>     : ASSIGN <expr>
+                   |
+                   ;
+
+<const_decl>       : KW_const IDENT ASSIGN <expr> SEMI
+                   ;
+
+<return_stmt>      : KW_return SEMI
+                   ;
+
+<break_stmt>       : KW_break SEMI
+                   ;
+
+<continue_stmt>    : KW_continue SEMI
+                   ;
+
+<asm_stmt>         : AT_ASM STRING <asm_more> SEMI
+                   ;
+
+# After the leading string, each additional part is either another
+# string or an expression. Since STRING is a valid <primary>, <expr>
+# covers both — the AST builder can keep the literal-vs-evaluated
+# distinction by looking at the token type.
+<asm_more>         : <asm_more> COMMA <expr>
+                   |
+                   ;
+
+# --- assignment / call / multi-assign -------------------------------------
+#
+# Three shapes share an LPAREN-headed prefix; they split on the LR(1)
+# lookahead after the first parsed expression:
+#
+#   * ``(a, b) := call();``   — tuple multi-assignment.
+#   * ``(expr);``             — parenthesised expression statement.
+#   * ``(expr).f := v;``      — assignment whose LHS happens to begin
+#                                with a parenthesised expression.
+#
+# The ``<expr> ASSIGN <expr>`` / ``<expr> SEMI`` shapes share the same
+# parse for the LHS; LR(1) commits on ASSIGN vs SEMI lookahead.
+
+<assign_or_call_stmt> : <expr> SEMI
+                      | <expr> ASSIGN <expr> SEMI
+                      | LPAREN <multi_target> RPAREN ASSIGN <expr> SEMI
+                      ;
+
+<multi_target>     : <expr> COMMA <expr>
+                   | <multi_target> COMMA <expr>
+                   ;
+
+# --- control flow ---------------------------------------------------------
+
+<if_stmt>          : KW_if <expr> KW_then <stmt_seq> <elseif_parts> <else_part> KW_end KW_if SEMI
+                   ;
+
+<elseif_parts>     : <elseif_parts> KW_elseif <expr> KW_then <stmt_seq>
+                   |
+                   ;
+
+<else_part>        : KW_else <stmt_seq>
+                   |
+                   ;
+
+<while_stmt>       : KW_while <expr> KW_loop <stmt_seq> KW_end KW_loop SEMI
+                   ;
+
+<loop_stmt>        : KW_loop <stmt_seq> KW_end KW_loop SEMI
+                   ;
+
+<case_stmt>        : KW_case <expr> KW_is <case_arms> KW_end KW_case SEMI
+                   ;
+
+<case_arms>        : <case_arm>
+                   | <case_arms> <case_arm>
+                   ;
+
+<case_arm>         : KW_when <expr_list> COLON <stmt_seq>
+                   | KW_when KW_else COLON <stmt_seq>
+                   ;
+
+<expr_list>        : <expr>
+                   | <expr_list> COMMA <expr>
+                   ;
+
+# Inside if / while / loop / case bodies, ucow's parser admits nested
+# sub definitions and local interface declarations (per
+# _parse_statement) but not nested records / typedefs.
+<stmt_seq>         : <stmt_seq_item> <stmt_seq>
+                   |
+                   ;
+
+<stmt_seq_item>    : <stmt>
+                   | <sub_form>
+                   | <interface_decl>
+                   ;
+
+# =========================================================================
+# Expressions
+# =========================================================================
+#
+# Precedence ladder (loose to tight), matching ucow/src/parser.py:
+#
+#     logical_or  ->  logical_and  ->  logical_not  ->  comparison
+#                 ->  bitwise_or   ->  bitwise_xor  ->  bitwise_and
+#                 ->  shift        ->  additive     ->  multiplicative
+#                 ->  cast (``as``) ->  unary        ->  postfix
+#                 ->  primary
+#
+# Cowgol forbids comparisons outside conditionals, but syntactically
+# they're plain binary operators — the type checker enforces the
+# "boolean only in conditionals" rule.
+
+<expr>             : <logical_or>
+                   ;
+
+<logical_or>       : <logical_or> KW_or <logical_and>
+                   | <logical_and>
+                   ;
+
+<logical_and>      : <logical_and> KW_and <logical_not>
+                   | <logical_not>
+                   ;
+
+<logical_not>      : KW_not <logical_not>
+                   | <comparison>
+                   ;
+
+<comparison>       : <bitwise_or>
+                   | <bitwise_or> EQ <bitwise_or>
+                   | <bitwise_or> NE <bitwise_or>
+                   | <bitwise_or> LT <bitwise_or>
+                   | <bitwise_or> LE <bitwise_or>
+                   | <bitwise_or> GT <bitwise_or>
+                   | <bitwise_or> GE <bitwise_or>
+                   ;
+
+<bitwise_or>       : <bitwise_or> PIPE <bitwise_xor>
+                   | <bitwise_xor>
+                   ;
+
+<bitwise_xor>      : <bitwise_xor> CARET <bitwise_and>
+                   | <bitwise_and>
+                   ;
+
+<bitwise_and>      : <bitwise_and> AMP <shift>
+                   | <shift>
+                   ;
+
+<shift>            : <shift> LSHIFT <additive>
+                   | <shift> RSHIFT <additive>
+                   | <additive>
+                   ;
+
+<additive>         : <additive> PLUS <multiplicative>
+                   | <additive> MINUS <multiplicative>
+                   | <multiplicative>
+                   ;
+
+<multiplicative>   : <multiplicative> STAR <cast>
+                   | <multiplicative> SLASH <cast>
+                   | <multiplicative> PERCENT <cast>
+                   | <cast>
+                   ;
+
+# ``expr as T`` — chains left-to-right: ``x as A as B`` parses as
+# ``((x as A) as B)``.
+<cast>             : <cast> KW_as <type>
+                   | <unary>
+                   ;
+
+# Unary operators: bitwise not (``~``), arithmetic minus (``-``),
+# address-of (``&``), and the @-prefixed expression operators
+# (@sizeof / @bytesof / @indexof / @next / @prev). Each takes a
+# nested <unary> so they chain: ``- @next p`` is fine.
+#
+# ``@bytesof`` additionally accepts a bare scalar-type keyword as its
+# operand (``@bytesof intptr``, ``@bytesof uint16``, etc.) — ucow's
+# parser special-cases the type-keyword tokens at this slot. The other
+# @-ops route through ``<unary>`` and rely on the type being a named
+# typedef / record reachable as an IDENT.
+<unary>            : MINUS <unary>
+                   | TILDE <unary>
+                   | AMP <unary>
+                   | AT_SIZEOF <unary>
+                   | AT_BYTESOF <unary>
+                   | AT_BYTESOF <scalar_kw>
+                   | AT_INDEXOF <unary>
+                   | AT_NEXT <unary>
+                   | AT_PREV <unary>
+                   | <postfix>
+                   ;
+
+<postfix>          : <primary>
+                   | <postfix> LPAREN <arg_list_opt> RPAREN              # f(args) / f()
+                   | <postfix> LBRACKET <expr> RBRACKET                  # arr[i]
+                   | <postfix> DOT IDENT                                 # rec.field
+                   ;
+
+<arg_list_opt>     : <arg_list>
+                   |
+                   ;
+
+<arg_list>         : <expr>
+                   | <arg_list> COMMA <expr>
+                   ;
+
+<primary>          : NUMBER
+                   | STRING
+                   | KW_nil
+                   | IDENT
+                   | LPAREN <expr> RPAREN                                # parenthesised
+                   | LBRACE <init_list_opt> RBRACE                       # { ... } init
+                   | LBRACKET <expr> RBRACKET                            # [expr] dereference
+                   ;
+
+# Brace-initializer for arrays / records. Trailing comma is allowed
+# (ucow/src/parser.py _parse_primary explicitly tolerates one).
+<init_list_opt>    : <init_list> <trailing_comma_opt>
+                   |
+                   ;
+
+<trailing_comma_opt> : COMMA
+                     |
+                     ;
+
+<init_list>        : <expr>
+                   | <init_list> COMMA <expr>
+                   ;
