@@ -126,6 +126,10 @@ implements the full classical hack on top of these primitives.
 ## Bundled example grammars
 
 - `calc` — arithmetic expressions, the smoke test.
+- `calc_ast` — same language as `calc`, annotated with the v3 auto-AST
+  surface (`%ast=`, `?`, `@field`, `%ast_drop`). Emitted Python module
+  produces typed `BinOp` / `NumLit` dataclasses instead of a generic
+  parse tree. See [`docs/proposals/calc_annotated.md`](docs/proposals/calc_annotated.md).
 - `ambig_expr` — classically ambiguous, exercises GLR.
 - `scoped` — block-scoped IDs, exercises hooks.
 - `plm_subset` — the first real grammar (Phase 5). Calc-style PL/M with declarations, IF/THEN/ELSE, DO blocks.

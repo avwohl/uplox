@@ -1,0 +1,51 @@
+# Calc with v3 AST annotations. Same language as calc.uplox; the
+# annotations make the parser emit typed BinOp / NumLit AST nodes
+# directly, replacing the parse-tree-then-lower pattern.
+#
+# Try it:
+#
+#     uplox build examples/calc_ast.uplox -o /tmp/calc_ast.json
+#     uplox emit  /tmp/calc_ast.json --target py --out /tmp/gen
+#     PYTHONPATH=/tmp/gen python3 -c '
+#     import uplox_calc
+#     ast = uplox_calc.parse("(1 + 2) * 3")
+#     print(ast)
+#     '
+#
+# Walkthrough: docs/proposals/calc_annotated.md.
+
+%grammar calc
+
+
+%define lr.type lalr
+%options
+start = expr
+
+%tokens
+NUMBER = /[0-9]+/
+PLUS   = '+'
+MINUS  = '-'
+STAR   = '*'
+SLASH  = '/'
+LPAREN = '('
+RPAREN = ')'
+WS     = /[ \t\n]+/   %skip
+
+# Punctuation that's never part of the AST.
+%ast_drop
+LPAREN RPAREN
+
+%rules
+<expr>?   : <expr>@lhs '+'@op <term>@rhs   %ast=BinOp
+          | <expr>@lhs '-'@op <term>@rhs   %ast=BinOp
+          | <term>
+          ;
+
+<term>?   : <term>@lhs '*'@op <factor>@rhs %ast=BinOp
+          | <term>@lhs '/'@op <factor>@rhs %ast=BinOp
+          | <factor>
+          ;
+
+<factor>? : NUMBER@value                   %ast=NumLit
+          | '(' <expr> ')'
+          ;
