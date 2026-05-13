@@ -204,6 +204,93 @@ def test_parse_command_rejects_lex_only_bundle(tmp_path, capsys):
     assert "no parse section" in err.lower()
 
 
+CALC_ANNOTATED_SRC = (
+    "%grammar calc\n"
+    "%define lr.type lalr\n"
+    "%options\n"
+    "start = expr\n"
+    "%tokens\n"
+    "NUMBER = /[0-9]+/\n"
+    "PLUS   = '+'\n"
+    "MINUS  = '-'\n"
+    "STAR   = '*'\n"
+    "SLASH  = '/'\n"
+    "LPAREN = '('\n"
+    "RPAREN = ')'\n"
+    "WS     = /[ \\t\\n]+/   %skip\n"
+    "%ast_drop\n"
+    "LPAREN RPAREN\n"
+    "%rules\n"
+    "<expr>?   : <expr>@lhs '+'@op <term>@rhs   %ast=BinOp\n"
+    "          | <expr>@lhs '-'@op <term>@rhs   %ast=BinOp\n"
+    "          | <term>\n"
+    "          ;\n"
+    "<term>?   : <term>@lhs '*'@op <factor>@rhs %ast=BinOp\n"
+    "          | <factor>\n"
+    "          ;\n"
+    "<factor>? : NUMBER@value                   %ast=NumLit\n"
+    "          | '(' <expr> ')'\n"
+    "          ;\n"
+)
+
+
+def test_build_writes_ast_section_for_annotated_grammar(tmp_path):
+    src = tmp_path / "calc.uplox"
+    src.write_text(CALC_ANNOTATED_SRC)
+    out = tmp_path / "calc.json"
+    rc = main(["build", str(src), "-o", str(out)])
+    assert rc == 0
+    bundle = json.loads(out.read_text())
+    assert bundle["ast"]["drop_tokens"] == ["LPAREN", "RPAREN"]
+    kind_names = [k["name"] for k in bundle["ast"]["node_kinds"]]
+    assert kind_names == ["BinOp", "NumLit"]
+
+
+def test_build_emits_empty_ast_for_unannotated_grammar(tmp_path):
+    """Back-compat: pre-v3 grammars produce `ast: {}` exactly as before."""
+    src = write_calc_grammar(tmp_path)
+    out = tmp_path / "calc.json"
+    rc = main(["build", str(src), "-o", str(out)])
+    assert rc == 0
+    bundle = json.loads(out.read_text())
+    assert bundle["ast"] == {}
+
+
+def test_check_reports_ast_kind_count_for_annotated_grammar(tmp_path, capsys):
+    src = tmp_path / "calc.uplox"
+    src.write_text(CALC_ANNOTATED_SRC)
+    rc = main(["check", str(src)])
+    assert rc == 0
+    msg = capsys.readouterr().out
+    assert "2 AST kinds" in msg
+
+
+def test_check_does_not_mention_ast_for_unannotated_grammar(tmp_path, capsys):
+    src = write_calc_grammar(tmp_path)
+    rc = main(["check", str(src)])
+    assert rc == 0
+    msg = capsys.readouterr().out
+    assert "AST kinds" not in msg
+
+
+def test_build_surfaces_ast_plan_error(tmp_path, capsys):
+    src = tmp_path / "bad.uplox"
+    src.write_text(
+        "%grammar t\n"
+        "%tokens\n"
+        "IDENT = /[A-Za-z_][A-Za-z0-9_]*/\n"
+        "WS    = /[ \\t\\n]+/   %skip\n"
+        "%rules\n"
+        "<r> : IDENT@a IDENT@a   %ast=R ;\n"
+    )
+    out = tmp_path / "out.json"
+    rc = main(["build", str(src), "-o", str(out)])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "assigned twice" in err
+    assert not out.exists()
+
+
 def test_check_reports_conflicts(tmp_path, capsys):
     src = tmp_path / "amb.uplox"
     src.write_text(

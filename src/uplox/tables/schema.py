@@ -9,7 +9,11 @@ A uplox bundle is a single JSON object with a fixed top-level shape:
       "meta":  { ... },
       "lex":   { ... },   // lexer DFA + token table; populated in Phase 2
       "parse": { ... },   // ACTION/GOTO/productions/start state; Phase 3
-      "ast":   { ... },   // node schema; Phase 4
+      "ast":   { ... },   // node schema + builder plan; Phase 4 placeholder,
+                          //   v3 auto-AST surface populates this when the
+                          //   grammar carries annotations (see
+                          //   uplox.tables.ast_section). Empty `{}` means
+                          //   "grammar is not in AST mode."
       "hooks": { ... }    // hook point declarations; Phase 4
     }
 

@@ -31,9 +31,11 @@ from ..gen.py import emit_py
 from ..parse.glr import GLRParseError, glr_from_lr, glr_parse
 from ..parse.glr.runtime import AmbiguityNode, GLRNode
 from ..parse.runtime import HookRegistry, ParseError, parse as run_parser
+from ..spec.ast_plan import AstPlanError, compile_ast_plan
 from ..spec.reader import ReaderError, read_file
 from ..lex.build import balanced_tokens
 from ..tables import (
+    ast_to_json,
     balanced_from_json,
     dfa_from_json,
     dfa_to_json,
@@ -83,6 +85,15 @@ def _cmd_build(args: argparse.Namespace) -> int:
                 print("", file=sys.stderr)
             return 1
         bundle["parse"] = table_to_json(table)
+
+        # Compile and serialise the AST plan. A grammar without v3
+        # annotations returns None and emits ``"ast": {}`` (back-compat).
+        try:
+            plan = compile_ast_plan(ir)
+        except AstPlanError as e:
+            print(f"{args.source}: {e}", file=sys.stderr)
+            return 1
+        bundle["ast"] = ast_to_json(plan)
 
     text = dump_bundle(bundle)
     if args.output == "-":
@@ -184,9 +195,18 @@ def _cmd_check(args: argparse.Namespace) -> int:
         print(f"{args.source}: {e}", file=sys.stderr)
         return 1
 
+    ast_summary = ""
+    try:
+        plan = compile_ast_plan(ir)
+    except AstPlanError as e:
+        print(f"{args.source}: {e}", file=sys.stderr)
+        return 1
+    if plan is not None:
+        ast_summary = f", {len(plan.node_kinds)} AST kinds"
+
     print(
         f"{args.source}: {ir.name} — {len(ir.tokens)} tokens, "
-        f"{len(ir.hooks)} hooks{parser_summary}"
+        f"{len(ir.hooks)} hooks{parser_summary}{ast_summary}"
     )
     return 1 if parser_conflicts else 0
 
