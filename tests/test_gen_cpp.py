@@ -18,8 +18,9 @@ from uplox.gen.cpp import emit_cpp
 from uplox.lex.build import lex_from_ir
 from uplox.parse.grammar import compile_grammar
 from uplox.parse.lr1 import build_lr1
+from uplox.spec.ast_plan import compile_ast_plan
 from uplox.spec.reader import read_source
-from uplox.tables import dfa_to_json, empty_bundle, table_to_json
+from uplox.tables import ast_to_json, dfa_to_json, empty_bundle, table_to_json
 
 
 CXX = shutil.which("c++") or shutil.which("g++")
@@ -514,3 +515,252 @@ int main(int argc, char** argv) {
     cxx_compile(driver, c, out=binary, include=tmp_path)
     r = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
     assert r.returncode != 0
+
+
+# ============================================================================
+# v3 auto-AST in C++
+# ============================================================================
+
+
+CALC_ANNOTATED = """
+%grammar calc
+%define lr.type lalr
+%options
+start = expr
+%tokens
+NUMBER = /[0-9]+/
+PLUS   = '+'
+MINUS  = '-'
+STAR   = '*'
+SLASH  = '/'
+LPAREN = '('
+RPAREN = ')'
+WS     = /[ \\t\\n]+/   %skip
+%ast_drop
+LPAREN RPAREN
+%rules
+<expr>?   : <expr>@lhs '+'@op <term>@rhs   %ast=BinOp
+          | <expr>@lhs '-'@op <term>@rhs   %ast=BinOp
+          | <term>
+          ;
+<term>?   : <term>@lhs '*'@op <factor>@rhs %ast=BinOp
+          | <term>@lhs '/'@op <factor>@rhs %ast=BinOp
+          | <factor>
+          ;
+<factor>? : NUMBER@value                   %ast=NumLit
+          | '(' <expr> ')'
+          ;
+"""
+
+
+def build_ast_bundle(src: str) -> dict:
+    ir = read_source(src)
+    dfa, tokens, skip = lex_from_ir(ir)
+    table = build_lr1(compile_grammar(ir))
+    bundle = empty_bundle(ir.name)
+    bundle["lex"] = dfa_to_json(dfa, tokens=tokens, skip=skip)
+    bundle["parse"] = table_to_json(table)
+    bundle["ast"] = ast_to_json(compile_ast_plan(ir))
+    return bundle
+
+
+def test_cpp_ast_header_declares_kinds(tmp_path):
+    bundle = build_ast_bundle(CALC_ANNOTATED)
+    h, _c = emit_to_cpp(tmp_path, bundle)
+    header = h.read_text()
+    assert "enum class AstKind" in header
+    assert "struct BinOp : AstNode" in header
+    assert "struct NumLit : AstNode" in header
+    assert "bool parse_ast()" in header
+    assert "ast_root()" in header
+
+
+def test_cpp_ast_compiles_clean(tmp_path):
+    bundle = build_ast_bundle(CALC_ANNOTATED)
+    _h, c = emit_to_cpp(tmp_path, bundle)
+    obj = tmp_path / "uplox_calc.o"
+    # Permit -Wall (unused list helpers); calc has no list rules.
+    cmd = [
+        CXX, "-std=c++17", "-Wall", "-c", "-O1",
+        "-I", str(tmp_path),
+        str(c), "-o", str(obj),
+    ]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+
+
+def test_cpp_ast_end_to_end_calc(tmp_path):
+    bundle = build_ast_bundle(CALC_ANNOTATED)
+    _h, c = emit_to_cpp(tmp_path, bundle)
+    driver = tmp_path / "main.cpp"
+    driver.write_text(r"""
+#include "uplox_calc.hpp"
+#include <cstdio>
+#include <string>
+using namespace uplox::calc;
+int main() {
+    Parser p("(1 + 2) * 3");
+    if (!p.parse_ast()) { fprintf(stderr, "parse: %s\n", p.error().c_str()); return 1; }
+    auto* root = p.ast_root();
+    if (root->kind != AstKind::BinOp) return 11;
+    auto* outer = static_cast<const BinOp*>(root);
+    if (std::string(outer->op->text) != "*") return 12;
+    if (outer->lhs->kind != AstKind::BinOp) return 13;
+    auto* inner = static_cast<const BinOp*>(outer->lhs);
+    if (std::string(inner->op->text) != "+") return 14;
+    if (outer->rhs->kind != AstKind::NumLit) return 15;
+    auto* nl = static_cast<const NumLit*>(outer->rhs);
+    if (std::string(nl->value->text) != "3") return 16;
+    printf("ok\n");
+    return 0;
+}
+""")
+    binary = tmp_path / "calc_ast"
+    cmd = [
+        CXX, "-std=c++17", "-Wall", "-O1",
+        "-I", str(tmp_path),
+        str(c), str(driver), "-o", str(binary),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True)
+    r = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() == "ok"
+
+
+COWGOL_MINI = """
+%grammar mini
+%options
+start = program
+%keyword_prefix KW_
+%keywords
+sub is end var return
+
+%tokens
+WS     = /[ \\t\\n]+/   %skip
+NUMBER = /[0-9]+/
+IDENT  = /[A-Za-z_][A-Za-z0-9_]*/
+COLON  = ':'
+COMMA  = ','
+SEMI   = ';'
+ASSIGN = ':='
+LPAREN = '('
+RPAREN = ')'
+
+%ast_drop
+LPAREN RPAREN COLON SEMI COMMA
+KW_sub KW_is KW_end KW_var KW_return
+
+%rules
+<program> : <items>@items   %ast=Program
+          |                  %ast=Program
+          ;
+
+<items> %ast=list element=<item>
+        : <item>
+        | <items> <item>
+        ;
+
+<item>? : <sub_decl>
+        | <stmt>
+        ;
+
+<sub_decl> : KW_sub IDENT@name LPAREN <param_list_opt>@params RPAREN
+             KW_is <body>@body KW_end KW_sub SEMI
+             %ast=SubDecl
+           ;
+
+<param_list_opt> : <params>@params   %ast=_unwrap
+                 |
+                 ;
+
+<params> %ast=list element=<param>
+         : <param>
+         | <params> COMMA <param>
+         ;
+
+<param> : IDENT@name COLON IDENT@type   %ast=Param ;
+
+<body> : <body_stmts>@stmts   %ast=_unwrap
+       |
+       ;
+
+<body_stmts> %ast=list element=<stmt>
+       : <stmt>
+       | <body_stmts> <stmt>
+       ;
+
+<stmt>? : <var_decl>
+        | <return_stmt>
+        ;
+
+<var_decl> : KW_var IDENT@name <var_init_opt>@init SEMI   %ast=VarDecl ;
+
+<var_init_opt> : ASSIGN NUMBER@value   %ast=_unwrap
+               |
+               ;
+
+<return_stmt> : KW_return SEMI   %ast=ReturnStmt ;
+"""
+
+
+def test_cpp_ast_lists_optionals_unwrap(tmp_path):
+    bundle = build_ast_bundle(COWGOL_MINI)
+    _h, c = emit_to_cpp(tmp_path, bundle)
+    driver = tmp_path / "main.cpp"
+    driver.write_text(r"""
+#include "uplox_mini.hpp"
+#include <cstdio>
+#include <string>
+using namespace uplox::mini;
+int main() {
+    Parser p(
+        "sub f(x: int8, y: int8) is\n"
+        "    var a := 1;\n"
+        "    var b;\n"
+        "    return;\n"
+        "end sub;\n"
+    );
+    if (!p.parse_ast()) { fprintf(stderr, "parse: %s\n", p.error().c_str()); return 1; }
+    auto* prog = static_cast<const Program*>(p.ast_root());
+    if (prog->items.size() != 1) return 11;
+    auto* sub = static_cast<const SubDecl*>(prog->items[0]);
+    if (std::string(sub->name->text) != "f") return 12;
+    if (sub->params.size() != 2) return 13;
+    auto* p0 = static_cast<const Param*>(sub->params[0]);
+    if (std::string(p0->name->text) != "x") return 14;
+    if (std::string(p0->type->text) != "int8") return 15;
+    if (sub->body.size() != 3) return 16;
+    auto* v1 = static_cast<const VarDecl*>(sub->body[0]);
+    if (std::string(v1->name->text) != "a") return 17;
+    if (v1->init == nullptr) return 18;
+    if (std::string(v1->init->text) != "1") return 19;
+    auto* v2 = static_cast<const VarDecl*>(sub->body[1]);
+    if (std::string(v2->name->text) != "b") return 20;
+    if (v2->init != nullptr) return 21;
+    if (sub->body[2]->kind != AstKind::ReturnStmt) return 22;
+    printf("ok\n");
+    return 0;
+}
+""")
+    binary = tmp_path / "mini_ast"
+    cmd = [
+        CXX, "-std=c++17", "-Wall", "-Werror", "-O1",
+        "-I", str(tmp_path),
+        str(c), str(driver), "-o", str(binary),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True)
+    r = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
+    assert r.returncode == 0, (
+        f"exit={r.returncode}, stdout={r.stdout!r}, stderr={r.stderr!r}"
+    )
+    assert r.stdout.strip() == "ok"
+
+
+def test_cpp_unannotated_grammar_emits_no_ast(tmp_path):
+    bundle = build_bundle(CALC)  # no annotations
+    h, c = emit_to_cpp(tmp_path, bundle)
+    header = h.read_text()
+    impl = c.read_text()
+    assert "AstKind" not in header
+    assert "parse_ast" not in header
+    assert "parse_ast" not in impl
