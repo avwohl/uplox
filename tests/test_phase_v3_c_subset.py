@@ -75,7 +75,7 @@ def test_function_with_int_param(tmp_path):
     assert params[0].declarator.name.text == "x"
     body = fn.body.items
     assert len(body) == 1
-    assert isinstance(body[0], mod.ReturnStmt)
+    assert isinstance(body[0], (mod.ReturnStmt, mod.ReturnStmtValue))
     assert isinstance(body[0].value, mod.BinaryOp)
     assert body[0].value.op.text == "*"
 
@@ -123,7 +123,7 @@ def test_hello_c_parses(tmp_path):
     assert isinstance(body[0], mod.ExpressionStmt)
     assert isinstance(body[0].expr, mod.Call)
     assert body[0].expr.func.name.text == "puts"
-    assert isinstance(body[1], mod.ReturnStmt)
+    assert isinstance(body[1], (mod.ReturnStmt, mod.ReturnStmtValue))
     assert isinstance(body[1].value, mod.IntLiteral)
 
 
@@ -144,7 +144,7 @@ def test_hello2_c_parses(tmp_path):
     assert len(body) == 3
     assert isinstance(body[0], mod.Declaration)
     assert isinstance(body[1], mod.WhileStmt)
-    assert isinstance(body[2], mod.ReturnStmt)
+    assert isinstance(body[2], (mod.ReturnStmt, mod.ReturnStmtValue))
     # The while condition: *s — UnaryOp(*, Identifier(s))
     cond = body[1].condition
     assert isinstance(cond, mod.UnaryOp) and cond.op.text == "*"
@@ -161,8 +161,8 @@ def test_if_else(tmp_path):
     stmt = fn.body.items[0]
     assert isinstance(stmt, mod.IfStmtElse)
     assert isinstance(stmt.condition, mod.BinaryOp)
-    assert isinstance(stmt.then_branch, mod.ReturnStmt)
-    assert isinstance(stmt.else_branch, mod.ReturnStmt)
+    assert isinstance(stmt.then_branch, (mod.ReturnStmt, mod.ReturnStmtValue))
+    assert isinstance(stmt.else_branch, (mod.ReturnStmt, mod.ReturnStmtValue))
 
 
 def test_if_without_else(tmp_path):
@@ -170,7 +170,7 @@ def test_if_without_else(tmp_path):
     ast = mod.parse("int f(int n) { if (n > 0) return 1; return 0; }")
     body = ast.items[0].body.items
     assert isinstance(body[0], mod.IfStmt)
-    assert isinstance(body[1], mod.ReturnStmt)
+    assert isinstance(body[1], (mod.ReturnStmt, mod.ReturnStmtValue))
 
 
 def test_while_loop_with_break_continue(tmp_path):

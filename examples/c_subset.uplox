@@ -62,9 +62,21 @@ KW_VOLATILE = 'volatile'
 KW_IF      = 'if'
 KW_ELSE    = 'else'
 KW_WHILE   = 'while'
+KW_DO      = 'do'
+KW_FOR     = 'for'
+KW_SWITCH  = 'switch'
+KW_CASE    = 'case'
+KW_DEFAULT = 'default'
+KW_GOTO    = 'goto'
 KW_RETURN  = 'return'
 KW_BREAK   = 'break'
 KW_CONTINUE = 'continue'
+
+# Aggregates / typedefs.
+KW_STRUCT  = 'struct'
+KW_UNION   = 'union'
+KW_ENUM    = 'enum'
+KW_ASM     = 'asm'
 
 # Literal keywords.
 KW_NULLPTR = 'nullptr'
@@ -128,7 +140,10 @@ GT         = '>'
 %ast_drop
 LPAREN RPAREN LBRACKET RBRACKET LBRACE RBRACE
 SEMI COMMA COLON DOT QUESTION
-KW_IF KW_ELSE KW_WHILE KW_RETURN KW_BREAK KW_CONTINUE
+KW_IF KW_ELSE KW_WHILE KW_DO KW_FOR
+KW_SWITCH KW_CASE KW_DEFAULT KW_GOTO
+KW_RETURN KW_BREAK KW_CONTINUE
+KW_STRUCT KW_UNION KW_ENUM KW_ASM
 
 %rules
 
@@ -158,6 +173,8 @@ KW_IF KW_ELSE KW_WHILE KW_RETURN KW_BREAK KW_CONTINUE
       %ast=FunctionDef
     | <type>@type_spec <init_declarators>@declarators SEMI
       %ast=Declaration
+    | <type>@type_spec SEMI
+      %ast=TypeDeclaration
     ;
 
 <init_declarators> %ast=list element=<init_declarator>
@@ -186,22 +203,66 @@ KW_IF KW_ELSE KW_WHILE KW_RETURN KW_BREAK KW_CONTINUE
 # function prototypes (in declarations) and function definitions (in
 # external_decl).
 <declarator>?
-    : IDENT@name                                                   %ast=Declarator
-    | STAR <declarator>@inner                                      %ast=PointerDeclarator
+    : IDENT@name                                                    %ast=Declarator
+    | STAR <declarator>@inner                                       %ast=PointerDeclarator
     | IDENT@name LPAREN <param_list_opt>@params RPAREN              %ast=FnDeclarator
+    | IDENT@name LBRACKET <conditional_expr>@size RBRACKET          %ast=ArrayDeclarator
+    | IDENT@name LBRACKET RBRACKET                                  %ast=ArrayDeclaratorUnsized
+    | IDENT@name LBRACKET <conditional_expr>@size RBRACKET <array_more_suffixes>@more
+      %ast=ArrayDeclaratorNd
     ;
 
-# Initializer: just an assignment-expression for the Phase 2 grammar.
-# Phase 3 will add brace-enclosed initializer lists.
+# Multi-dimensional arrays: ``int m[3][4]`` chains the [size] suffixes.
+# Modelled as a list of additional dimensions; the translator wraps
+# the type in nested ArrayTypes.
+<array_more_suffixes> %ast=list element=<array_suffix>
+    : <array_suffix>
+    | <array_more_suffixes> <array_suffix>
+    ;
+
+<array_suffix>?
+    : LBRACKET <conditional_expr>@size RBRACKET   %ast=ArrayDim
+    | LBRACKET RBRACKET                            %ast=ArrayDimUnsized
+    ;
+
+# Initializer: an assignment-expression OR a brace-enclosed initializer
+# list (with optional trailing comma per C99). Designated initializers
+# are accepted inside the list.
 <initializer>?
     : <assignment_expr>
+    | LBRACE <initializer_items>@items RBRACE              %ast=InitializerList
+    | LBRACE <initializer_items>@items COMMA RBRACE        %ast=InitializerList
+    | LBRACE RBRACE                                        %ast=InitializerList
+    ;
+
+<initializer_items> %ast=list element=<initializer_item>
+    : <initializer_item>
+    | <initializer_items> COMMA <initializer_item>
+    ;
+
+<initializer_item>?
+    : <initializer>
+    | <designator_list>@designators ASSIGN <initializer>@value   %ast=DesignatedInit
+    ;
+
+<designator_list> %ast=list element=<designator>
+    : <designator>
+    | <designator_list> <designator>
+    ;
+
+<designator>?
+    : DOT IDENT@field                            %ast=FieldDesignator
+    | LBRACKET <conditional_expr>@index RBRACKET %ast=IndexDesignator
     ;
 
 # Parameter list. ``()`` is no params; ``(void)`` parses as a single
 # void parameter and the translator collapses that to no params (the
-# C idiom). Variadic (..., ELLIPSIS) deferred to Phase 3.
+# C idiom). Trailing ``...`` marks the function as variadic; we model
+# it as a distinct kind so the consumer can set FunctionDecl.is_variadic.
 <param_list_opt>
-    : <param_list>@params   %ast=_unwrap
+    : <param_list>@params                            %ast=_unwrap
+    | <param_list>@params COMMA ELLIPSIS             %ast=VariadicParams
+    | ELLIPSIS                                       %ast=VariadicOnlyParams
     |
     ;
 
@@ -242,20 +303,96 @@ KW_IF KW_ELSE KW_WHILE KW_RETURN KW_BREAK KW_CONTINUE
     | KW_BOOL                       %ast=BoolType
     | KW_UNSIGNED                   %ast=UnsignedIntType   # bare ``unsigned`` = unsigned int
     | KW_SIGNED                     %ast=IntType           # bare ``signed`` = int
+    | <struct_or_union_spec>
+    | <enum_spec>
+    ;
+
+# struct/union: name + optional inline definition. Five shapes:
+#   struct S            -> StructRef (forward reference)
+#   struct S { ... }    -> StructDef (with definition)
+#   struct { ... }      -> StructAnon (anonymous, definition only)
+# Same three shapes for union, plus a fourth combining named + body.
+<struct_or_union_spec>?
+    : KW_STRUCT IDENT@name                                     %ast=StructRef
+    | KW_STRUCT IDENT@name LBRACE <struct_members>@members RBRACE   %ast=StructDef
+    | KW_STRUCT LBRACE <struct_members>@members RBRACE         %ast=StructAnon
+    | KW_UNION  IDENT@name                                     %ast=UnionRef
+    | KW_UNION  IDENT@name LBRACE <struct_members>@members RBRACE   %ast=UnionDef
+    | KW_UNION  LBRACE <struct_members>@members RBRACE         %ast=UnionAnon
+    ;
+
+<struct_members> %ast=list element=<struct_member>
+    : <struct_member>
+    | <struct_members> <struct_member>
+    ;
+
+# Struct member is a regular declaration shape. Bit-fields deferred.
+<struct_member>
+    : <type>@type_spec <init_declarators>@declarators SEMI   %ast=StructMember ;
+
+<enum_spec>?
+    : KW_ENUM IDENT@name                                     %ast=EnumRef
+    | KW_ENUM IDENT@name LBRACE <enum_values>@values RBRACE  %ast=EnumDef
+    | KW_ENUM LBRACE <enum_values>@values RBRACE             %ast=EnumAnon
+    | KW_ENUM IDENT@name LBRACE <enum_values>@values COMMA RBRACE  %ast=EnumDef
+    | KW_ENUM LBRACE <enum_values>@values COMMA RBRACE       %ast=EnumAnon
+    ;
+
+<enum_values> %ast=list element=<enum_value>
+    : <enum_value>
+    | <enum_values> COMMA <enum_value>
+    ;
+
+<enum_value>?
+    : IDENT@name                                  %ast=EnumValue
+    | IDENT@name ASSIGN <conditional_expr>@value  %ast=EnumValueWithInit
     ;
 
 # ===========================================================================
 # Statements
 # ===========================================================================
 
+# Statements split into matched / unmatched to handle dangling-else
+# cleanly. The discipline threads through every statement form that
+# contains an inner statement (if / while / for / switch / case /
+# default / label) — those each get a matched/unmatched pair. Forms
+# that end with SEMI or RBRACE are always "terminal" (matched).
 <statement>?
+    : <matched_stmt>
+    | <unmatched_stmt>
+    ;
+
+<matched_stmt>?
+    : <terminal_stmt>
+    | <matched_if>
+    | <matched_while>
+    | <matched_for>
+    | <matched_switch>
+    | <matched_case>
+    | <matched_default>
+    | <matched_label>
+    ;
+
+<unmatched_stmt>?
+    : <unmatched_if>
+    | <unmatched_while>
+    | <unmatched_for>
+    | <unmatched_switch>
+    | <unmatched_case>
+    | <unmatched_default>
+    | <unmatched_label>
+    ;
+
+# Terminal statements (no inner statement; always matched).
+<terminal_stmt>?
     : <compound_stmt>
     | <expression_stmt>
-    | <if_stmt>
-    | <while_stmt>
+    | <do_while_stmt>
     | <return_stmt>
     | <break_stmt>
     | <continue_stmt>
+    | <goto_stmt>
+    | <asm_stmt>
     ;
 
 <compound_stmt>
@@ -278,8 +415,9 @@ KW_IF KW_ELSE KW_WHILE KW_RETURN KW_BREAK KW_CONTINUE
 # separate because the top-level rule already exists as part of
 # <external_decl>'s body and merging would re-introduce the function-
 # definition shift/reduce.
-<local_declaration>
+<local_declaration>?
     : <type>@type_spec <init_declarators>@declarators SEMI   %ast=Declaration
+    | <type>@type_spec SEMI                                  %ast=TypeDeclaration
     ;
 
 <expression_stmt>
@@ -287,66 +425,118 @@ KW_IF KW_ELSE KW_WHILE KW_RETURN KW_BREAK KW_CONTINUE
     | SEMI               %ast=EmptyStmt
     ;
 
-# Dangling-else: split into matched/unmatched non-terminals like the
-# C23 grammar does. Keeps LR(1) honest without %shift.
-<if_stmt>?
-    : <matched_if>
-    | <unmatched_if>
-    ;
-
-# Two %ast= kinds — IfStmt (no else) and IfStmtElse (with else) —
-# so the AST plan has consistent field sets per production. The
-# translator collapses both back to uc_core's single IfStmt with
-# else_branch=None when absent.
-<matched_if>?
-    : KW_IF LPAREN <expr>@condition RPAREN <matched>@then_branch
-      KW_ELSE <matched>@else_branch
+# If/else statements. IfStmt (no else) and IfStmtElse (with else) are
+# distinct AST kinds so the plan compiler validates consistent field
+# sets per production; the translator folds both back to uc_core's
+# single IfStmt with else_branch=None when absent.
+<matched_if>
+    : KW_IF LPAREN <expr>@condition RPAREN <matched_stmt>@then_branch
+      KW_ELSE <matched_stmt>@else_branch
       %ast=IfStmtElse
     ;
 
 <unmatched_if>?
     : KW_IF LPAREN <expr>@condition RPAREN <statement>@then_branch
       %ast=IfStmt
-    | KW_IF LPAREN <expr>@condition RPAREN <matched>@then_branch
-      KW_ELSE <unmatched_if>@else_branch
+    | KW_IF LPAREN <expr>@condition RPAREN <matched_stmt>@then_branch
+      KW_ELSE <unmatched_stmt>@else_branch
       %ast=IfStmtElse
     ;
 
-# A "matched" statement is one that can safely sit before an `else`.
-<matched>?
-    : <matched_if>
-    | <matched_non_if>
-    ;
-
-<matched_non_if>?
-    : <compound_stmt>
-    | <expression_stmt>
-    | <while_stmt_matched>
-    | <return_stmt>
-    | <break_stmt>
-    | <continue_stmt>
-    ;
-
-# Iteration also splits into matched/unmatched on its body so an `else`
-# inside doesn't accidentally bind to an outer `if`.
-<while_stmt>?
-    : <while_stmt_matched>
-    | <while_stmt_unmatched>
-    ;
-
-<while_stmt_matched>
-    : KW_WHILE LPAREN <expr>@condition RPAREN <matched>@body
+<matched_while>
+    : KW_WHILE LPAREN <expr>@condition RPAREN <matched_stmt>@body
       %ast=WhileStmt
     ;
 
-<while_stmt_unmatched>
-    : KW_WHILE LPAREN <expr>@condition RPAREN <unmatched_if>@body
+<unmatched_while>
+    : KW_WHILE LPAREN <expr>@condition RPAREN <unmatched_stmt>@body
       %ast=WhileStmt
     ;
 
-<return_stmt>
-    : KW_RETURN SEMI            %ast=ReturnStmt
-    | KW_RETURN <expr>@value SEMI   %ast=ReturnStmt
+# do-while terminates with SEMI so it's always matched — the trailing
+# semicolon prevents the body from absorbing an outer ELSE.
+<do_while_stmt>
+    : KW_DO <statement>@body KW_WHILE LPAREN <expr>@condition RPAREN SEMI
+      %ast=DoWhileStmt
+    ;
+
+# for-loops split on matched/unmatched in the same way as if/while.
+# Three optional pieces between the semicolons: init, condition,
+# update. Each shape's present/absent variants get a distinct %ast=
+# name so field schemas stay consistent; translator folds them back to
+# uc_core's single ForStmt with Optional fields.
+<matched_for>
+    : KW_FOR LPAREN <for_init>@init <for_cond>@condition <for_update>@update RPAREN <matched_stmt>@body
+      %ast=ForStmt
+    ;
+
+<unmatched_for>
+    : KW_FOR LPAREN <for_init>@init <for_cond>@condition <for_update>@update RPAREN <unmatched_stmt>@body
+      %ast=ForStmt
+    ;
+
+# init: either a declaration (`for (int i = 0; ...)`) or an
+# expression statement (`for (i = 0; ...)`) or empty. SEMI is
+# consumed inside <for_init> / <for_cond>.
+<for_init>?
+    : SEMI                            %ast=EmptyForInit
+    | <expr>@expr SEMI                %ast=ForExprInit
+    | <type>@type_spec <init_declarators>@declarators SEMI
+      %ast=ForDeclInit
+    ;
+
+<for_cond>?
+    : SEMI                            %ast=EmptyForCond
+    | <expr>@expr SEMI                %ast=ForCond
+    ;
+
+<for_update>?
+    :                                 %ast=EmptyForUpdate
+    | <expr>@expr                     %ast=ForUpdate
+    ;
+
+# switch with matched/unmatched body so dangling-else nested inside
+# a case doesn't bind across the switch boundary.
+<matched_switch>
+    : KW_SWITCH LPAREN <expr>@expr RPAREN <matched_stmt>@body   %ast=SwitchStmt ;
+
+<unmatched_switch>
+    : KW_SWITCH LPAREN <expr>@expr RPAREN <unmatched_stmt>@body %ast=SwitchStmt ;
+
+# case / default / labels propagate the matched/unmatched discipline
+# through their inner statement so an unmatched if doesn't sneak past
+# them. Range case (`case A ... B:`) deferred.
+<matched_case>
+    : KW_CASE <conditional_expr>@value COLON <matched_stmt>@stmt   %ast=CaseStmt ;
+
+<unmatched_case>
+    : KW_CASE <conditional_expr>@value COLON <unmatched_stmt>@stmt %ast=CaseStmt ;
+
+<matched_default>
+    : KW_DEFAULT COLON <matched_stmt>@stmt   %ast=DefaultStmt ;
+
+<unmatched_default>
+    : KW_DEFAULT COLON <unmatched_stmt>@stmt %ast=DefaultStmt ;
+
+<matched_label>
+    : IDENT@label COLON <matched_stmt>@stmt   %ast=LabelStmt ;
+
+<unmatched_label>
+    : IDENT@label COLON <unmatched_stmt>@stmt %ast=LabelStmt ;
+
+<goto_stmt>
+    : KW_GOTO IDENT@label SEMI   %ast=GotoStmt ;
+
+# Inline asm. The C23 grammar accepts `asm("template" [: outputs [: inputs [: clobbers]]])`;
+# we model only the simple form here (template string, no operand
+# lists). The translator wraps the template into AsmStmt with empty
+# operand lists.
+<asm_stmt>
+    : KW_ASM LPAREN STRING_LIT@template RPAREN SEMI   %ast=AsmStmt ;
+
+<return_stmt>?
+    : KW_RETURN SEMI                  %ast=ReturnStmt
+    | KW_RETURN <expr>@value SEMI     %ast=ReturnStmtValue
     ;
 
 <break_stmt>    : KW_BREAK SEMI    %ast=BreakStmt ;
