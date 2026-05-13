@@ -22,8 +22,15 @@ from uplox.gen.c import emit_c
 from uplox.lex.build import lex_from_ir
 from uplox.parse.grammar import compile_grammar
 from uplox.parse.lr1 import build_lr1
+from uplox.spec.ast_plan import compile_ast_plan
 from uplox.spec.reader import read_source
-from uplox.tables import dfa_to_json, dump_bundle, empty_bundle, table_to_json
+from uplox.tables import (
+    ast_to_json,
+    dfa_to_json,
+    dump_bundle,
+    empty_bundle,
+    table_to_json,
+)
 
 
 CC = shutil.which("cc") or shutil.which("gcc")
@@ -725,3 +732,292 @@ int main(int argc, char **argv) {
     result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
     assert result.returncode != 0
     assert "unterminated" in result.stderr.lower()
+
+
+# ============================================================================
+# v3 auto-AST: emit a typed AST and exercise it through generated C.
+# ============================================================================
+
+
+CALC_ANNOTATED = """
+%grammar calc
+%define lr.type lalr
+%options
+start = expr
+%tokens
+NUMBER = /[0-9]+/
+PLUS   = '+'
+MINUS  = '-'
+STAR   = '*'
+SLASH  = '/'
+LPAREN = '('
+RPAREN = ')'
+WS     = /[ \\t\\n]+/   %skip
+%ast_drop
+LPAREN RPAREN
+%rules
+<expr>?   : <expr>@lhs '+'@op <term>@rhs   %ast=BinOp
+          | <expr>@lhs '-'@op <term>@rhs   %ast=BinOp
+          | <term>
+          ;
+<term>?   : <term>@lhs '*'@op <factor>@rhs %ast=BinOp
+          | <term>@lhs '/'@op <factor>@rhs %ast=BinOp
+          | <factor>
+          ;
+<factor>? : NUMBER@value                   %ast=NumLit
+          | '(' <expr> ')'
+          ;
+"""
+
+
+def build_calc_ast_bundle() -> dict:
+    ir = read_source(CALC_ANNOTATED)
+    dfa, tokens, skip = lex_from_ir(ir)
+    table = build_lr1(compile_grammar(ir))
+    bundle = empty_bundle(ir.name)
+    bundle["lex"] = dfa_to_json(dfa, tokens=tokens, skip=skip)
+    bundle["parse"] = table_to_json(table)
+    bundle["ast"] = ast_to_json(compile_ast_plan(ir))
+    return bundle
+
+
+def test_calc_ast_emits_typed_structs(tmp_path):
+    """Generated header declares BinOp / NumLit structs and the tagged union."""
+    bundle = build_calc_ast_bundle()
+    h, _c = emit_to(tmp_path, bundle)
+    header = h.read_text()
+    assert "uplox_calc_ast_kind" in header
+    assert "struct uplox_calc_ast_BinOp" in header
+    assert "struct uplox_calc_ast_NumLit" in header
+    assert "uplox_calc_parse_ast" in header
+    assert "UPLOX_CALC_AST_BIN_OP" in header
+    assert "UPLOX_CALC_AST_NUM_LIT" in header
+
+
+def test_calc_ast_compiles_clean(tmp_path):
+    bundle = build_calc_ast_bundle()
+    _h, c = emit_to(tmp_path, bundle)
+    obj = tmp_path / "uplox_calc.o"
+    # -Wall but not -Werror — calc has no list rules so the list
+    # helpers are unused. Production code with at least one list will
+    # clean up; calc is the degenerate case.
+    cmd = [
+        CC, "-Wall", "-O1",
+        "-I", str(tmp_path),
+        "-c", str(c), "-o", str(obj),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_calc_ast_end_to_end(tmp_path):
+    """Build the C, parse `(1 + 2) * 3`, check the AST shape."""
+    bundle = build_calc_ast_bundle()
+    _h, c = emit_to(tmp_path, bundle)
+    driver = tmp_path / "driver.c"
+    driver.write_text(r"""
+#include "uplox_calc.h"
+#include <stdio.h>
+#include <string.h>
+int main(void) {
+    const char *src = "(1 + 2) * 3";
+    uplox_calc_ctx *ctx = uplox_calc_create(src, (int)strlen(src));
+    uplox_calc_ast *ast;
+    if (uplox_calc_parse_ast(ctx, &ast) != 0) {
+        fprintf(stderr, "parse error: %s\n", uplox_calc_error(ctx));
+        return 1;
+    }
+    /* Outer * BinOp */
+    if (ast->kind != UPLOX_CALC_AST_BIN_OP) { fprintf(stderr, "outer not BinOp\n"); return 1; }
+    if (ast->u.bin_op.op->text[0] != '*') { fprintf(stderr, "outer op not *\n"); return 1; }
+    /* lhs is +-BinOp */
+    if (ast->u.bin_op.lhs->kind != UPLOX_CALC_AST_BIN_OP) { fprintf(stderr, "lhs not BinOp\n"); return 1; }
+    if (ast->u.bin_op.lhs->u.bin_op.op->text[0] != '+') { fprintf(stderr, "lhs op not +\n"); return 1; }
+    /* rhs is NumLit 3 */
+    if (ast->u.bin_op.rhs->kind != UPLOX_CALC_AST_NUM_LIT) { fprintf(stderr, "rhs not NumLit\n"); return 1; }
+    if (ast->u.bin_op.rhs->u.num_lit.value->text[0] != '3') { fprintf(stderr, "rhs not 3\n"); return 1; }
+    printf("ok\n");
+    uplox_calc_destroy(ctx);
+    return 0;
+}
+""")
+    binary = tmp_path / "calc_ast"
+    # Allow warnings (unused list helpers); rely on the assertions below.
+    cmd = [
+        CC, "-Wall", "-O1",
+        "-I", str(tmp_path),
+        str(c), str(driver), "-o", str(binary),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True)
+    result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "ok"
+
+
+# ---- v3 with lists, _unwrap, optionals --------------------------------------
+
+
+COWGOL_SAMPLE_GRAMMAR = """
+%grammar mini
+%options
+start = program
+%keyword_prefix KW_
+%keywords
+sub is end var return
+
+%tokens
+WS     = /[ \\t\\n]+/   %skip
+NUMBER = /[0-9]+/
+IDENT  = /[A-Za-z_][A-Za-z0-9_]*/
+COLON  = ':'
+COMMA  = ','
+SEMI   = ';'
+ASSIGN = ':='
+LPAREN = '('
+RPAREN = ')'
+
+%ast_drop
+LPAREN RPAREN COLON SEMI COMMA
+KW_sub KW_is KW_end KW_var KW_return
+
+%rules
+<program> : <items>@items   %ast=Program
+          |                  %ast=Program
+          ;
+
+<items> %ast=list element=<item>
+        : <item>
+        | <items> <item>
+        ;
+
+<item>? : <sub_decl>
+        | <stmt>
+        ;
+
+<sub_decl> : KW_sub IDENT@name LPAREN <param_list_opt>@params RPAREN
+             KW_is <body>@body KW_end KW_sub SEMI
+             %ast=SubDecl
+           ;
+
+<param_list_opt> : <params>@params   %ast=_unwrap
+                 |
+                 ;
+
+<params> %ast=list element=<param>
+         : <param>
+         | <params> COMMA <param>
+         ;
+
+<param> : IDENT@name COLON IDENT@type   %ast=Param ;
+
+<body>
+       : <body_stmts>@stmts   %ast=_unwrap
+       |
+       ;
+
+<body_stmts> %ast=list element=<stmt>
+       : <stmt>
+       | <body_stmts> <stmt>
+       ;
+
+<stmt>? : <var_decl>
+        | <return_stmt>
+        ;
+
+<var_decl> : KW_var IDENT@name <var_init_opt>@init SEMI   %ast=VarDecl ;
+
+<var_init_opt> : ASSIGN NUMBER@value   %ast=_unwrap
+               |
+               ;
+
+<return_stmt> : KW_return SEMI   %ast=ReturnStmt ;
+"""
+
+
+def build_mini_bundle() -> dict:
+    ir = read_source(COWGOL_SAMPLE_GRAMMAR)
+    dfa, tokens, skip = lex_from_ir(ir)
+    table = build_lr1(compile_grammar(ir))
+    bundle = empty_bundle(ir.name)
+    bundle["lex"] = dfa_to_json(dfa, tokens=tokens, skip=skip)
+    bundle["parse"] = table_to_json(table)
+    bundle["ast"] = ast_to_json(compile_ast_plan(ir))
+    return bundle
+
+
+def test_mini_ast_lists_optionals_unwrap(tmp_path):
+    """End-to-end with everything: lists, _unwrap (to token and to list),
+    auto-optional fields, multiple statement kinds, parameters."""
+    bundle = build_mini_bundle()
+    _h, c = emit_to(tmp_path, bundle)
+    driver = tmp_path / "driver.c"
+    driver.write_text(r"""
+#include "uplox_mini.h"
+#include <stdio.h>
+#include <string.h>
+int main(void) {
+    const char *src =
+        "sub f(x: int8, y: int8) is\n"
+        "    var a := 1;\n"
+        "    var b;\n"
+        "    return;\n"
+        "end sub;\n";
+    uplox_mini_ctx *ctx = uplox_mini_create(src, (int)strlen(src));
+    uplox_mini_ast *ast;
+    if (uplox_mini_parse_ast(ctx, &ast) != 0) {
+        fprintf(stderr, "parse error: %s\n", uplox_mini_error(ctx));
+        return 1;
+    }
+    if (ast->kind != UPLOX_MINI_AST_PROGRAM) return 11;
+    if (ast->u.program.items_count != 1) return 12;
+    uplox_mini_ast *sub = ast->u.program.items[0];
+    if (sub->kind != UPLOX_MINI_AST_SUB_DECL) return 13;
+    /* sub.name */
+    if (strncmp(sub->u.sub_decl.name->text, "f", 1) != 0) return 14;
+    /* sub.params is list[Param] of length 2 (auto-optional unwrap to list) */
+    if (sub->u.sub_decl.params_count != 2) return 15;
+    if (strncmp(sub->u.sub_decl.params[0]->u.param.name->text, "x", 1) != 0) return 16;
+    if (strncmp(sub->u.sub_decl.params[0]->u.param.type->text, "int8", 4) != 0) return 17;
+    /* sub.body is a list[stmt] (auto-optional unwrap to list) of length 3 */
+    if (sub->u.sub_decl.body_count != 3) return 18;
+    /* body[0] = VarDecl with init = NUMBER 1 (token via _unwrap) */
+    uplox_mini_ast *v1 = sub->u.sub_decl.body[0];
+    if (v1->kind != UPLOX_MINI_AST_VAR_DECL) return 19;
+    if (strncmp(v1->u.var_decl.name->text, "a", 1) != 0) return 20;
+    if (v1->u.var_decl.init == NULL) return 21;
+    if (v1->u.var_decl.init->text[0] != '1') return 22;
+    /* body[1] = VarDecl with init = NULL (empty alt -> auto-optional) */
+    uplox_mini_ast *v2 = sub->u.sub_decl.body[1];
+    if (v2->kind != UPLOX_MINI_AST_VAR_DECL) return 23;
+    if (strncmp(v2->u.var_decl.name->text, "b", 1) != 0) return 24;
+    if (v2->u.var_decl.init != NULL) return 25;
+    /* body[2] = ReturnStmt */
+    if (sub->u.sub_decl.body[2]->kind != UPLOX_MINI_AST_RETURN_STMT) return 26;
+    printf("ok\n");
+    uplox_mini_destroy(ctx);
+    return 0;
+}
+""")
+    binary = tmp_path / "mini_ast"
+    cmd = [
+        CC, "-Wall", "-Werror", "-O1",
+        "-I", str(tmp_path),
+        str(c), str(driver), "-o", str(binary),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True)
+    result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, (
+        f"exit={result.returncode}, stdout={result.stdout!r}, stderr={result.stderr!r}"
+    )
+    assert result.stdout.strip() == "ok"
+
+
+def test_unannotated_grammar_emits_no_ast_section(tmp_path):
+    """Back-compat: pre-v3 grammars emit no ast types or parse_ast."""
+    bundle = build_calc_bundle()
+    h, c = emit_to(tmp_path, bundle)
+    header = h.read_text()
+    impl = c.read_text()
+    assert "parse_ast" not in header
+    assert "ast_kind" not in header
+    assert "parse_ast" not in impl
