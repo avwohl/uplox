@@ -57,6 +57,12 @@ KW_STATIC  = 'static'
 KW_EXTERN  = 'extern'
 KW_CONST   = 'const'
 KW_VOLATILE = 'volatile'
+KW_RESTRICT = 'restrict'
+
+# C23 / operators that take a type-name argument.
+KW_SIZEOF        = 'sizeof'
+KW_ALIGNOF       = 'alignof'
+KW_STATIC_ASSERT = 'static_assert'
 
 # Control flow.
 KW_IF      = 'if'
@@ -175,6 +181,10 @@ KW_STRUCT KW_UNION KW_ENUM KW_ASM
       %ast=Declaration
     | <type>@type_spec SEMI
       %ast=TypeDeclaration
+    | KW_STATIC_ASSERT LPAREN <conditional_expr>@condition RPAREN SEMI
+      %ast=StaticAssert
+    | KW_STATIC_ASSERT LPAREN <conditional_expr>@condition COMMA STRING_LIT@message RPAREN SEMI
+      %ast=StaticAssertWithMessage
     ;
 
 <init_declarators> %ast=list element=<init_declarator>
@@ -293,6 +303,27 @@ KW_STRUCT KW_UNION KW_ENUM KW_ASM
 # is_signed=False)).
 
 <type>?
+    : <bare_type>
+    | <type_quals>@quals <bare_type>@base   %ast=QualifiedType
+    ;
+
+# A non-empty list of type qualifiers prefixing a bare type:
+# ``const int``, ``const volatile char``. ``int const`` (qualifier
+# after type) and qualifier composition with structs (``const struct
+# S``) work too — the qualifiers always go on the front. Pointer
+# qualifiers (``int *const``) are handled in the declarator path.
+<type_quals> %ast=list element=<type_qual>
+    : <type_qual>
+    | <type_quals> <type_qual>
+    ;
+
+<type_qual>?
+    : KW_CONST     %ast=ConstQual
+    | KW_VOLATILE  %ast=VolatileQual
+    | KW_RESTRICT  %ast=RestrictQual
+    ;
+
+<bare_type>?
     : KW_VOID                       %ast=VoidType
     | KW_CHAR                       %ast=CharType
     | KW_SHORT                      %ast=ShortType
@@ -305,6 +336,33 @@ KW_STRUCT KW_UNION KW_ENUM KW_ASM
     | KW_SIGNED                     %ast=IntType           # bare ``signed`` = int
     | <struct_or_union_spec>
     | <enum_spec>
+    ;
+
+# Type name: a complete type expression with no variable name.
+# Used in cast / sizeof(type) / compound literal contexts.
+# Simplified vs full C: only pointer and array abstract declarators
+# are supported; function-pointer abstracts (``int (*)(int)``) and
+# parenthesised abstracts are deferred to a future phase where the
+# typedef-name lex hook is wired up (LR(1) needs the hook to
+# disambiguate ``(IDENT)`` as cast vs parenthesised expression).
+<type_name>?
+    : <type>@base                                       %ast=TypeName
+    | <type>@base <abstract_declarator>@declarator      %ast=TypeNameWithDeclarator
+    ;
+
+# Abstract declarator: pointers and/or array suffixes. Modelled
+# recursively with the same prefix-pointer / array-suffix shape used
+# for regular declarators in Phase 2.
+# Split present/absent inner into distinct %ast= names so each
+# production has a consistent field set (translator collapses the
+# *Tail variants back to the base kind with inner=None).
+<abstract_declarator>?
+    : STAR                                                                  %ast=AbstractPointerTail
+    | STAR <abstract_declarator>@inner                                      %ast=AbstractPointer
+    | <type_quals>@quals STAR                                               %ast=AbstractPointerQualifiedTail
+    | <type_quals>@quals STAR <abstract_declarator>@inner                   %ast=AbstractPointerQualified
+    | LBRACKET <conditional_expr>@size RBRACKET                             %ast=AbstractArray
+    | LBRACKET RBRACKET                                                     %ast=AbstractArrayUnsized
     ;
 
 # struct/union: name + optional inline definition. Five shapes:
@@ -326,9 +384,25 @@ KW_STRUCT KW_UNION KW_ENUM KW_ASM
     | <struct_members> <struct_member>
     ;
 
-# Struct member is a regular declaration shape. Bit-fields deferred.
-<struct_member>
-    : <type>@type_spec <init_declarators>@declarators SEMI   %ast=StructMember ;
+# Struct members can be regular declarations, bit-fields, or nested
+# anonymous struct/union declarations (the type-only form).
+<struct_member>?
+    : <type>@type_spec <init_declarators>@declarators SEMI       %ast=StructMember
+    | <type>@type_spec <bit_field_decls>@declarators SEMI        %ast=StructBitFieldMember
+    | <type>@type_spec SEMI                                       %ast=StructAnonMember
+    ;
+
+# Bit-field declarator list: each entry is either a named bit-field
+# (``int x : 3;``) or an anonymous one (``int : 5;`` for padding).
+<bit_field_decls> %ast=list element=<bit_field_decl>
+    : <bit_field_decl>
+    | <bit_field_decls> COMMA <bit_field_decl>
+    ;
+
+<bit_field_decl>?
+    : <declarator>@declarator COLON <conditional_expr>@bit_width   %ast=BitFieldDecl
+    | COLON <conditional_expr>@bit_width                            %ast=AnonBitFieldDecl
+    ;
 
 <enum_spec>?
     : KW_ENUM IDENT@name                                     %ast=EnumRef
@@ -506,11 +580,19 @@ KW_STRUCT KW_UNION KW_ENUM KW_ASM
 # case / default / labels propagate the matched/unmatched discipline
 # through their inner statement so an unmatched if doesn't sneak past
 # them. Range case (`case A ... B:`) deferred.
-<matched_case>
-    : KW_CASE <conditional_expr>@value COLON <matched_stmt>@stmt   %ast=CaseStmt ;
+<matched_case>?
+    : KW_CASE <conditional_expr>@value COLON <matched_stmt>@stmt
+      %ast=CaseStmt
+    | KW_CASE <conditional_expr>@value ELLIPSIS <conditional_expr>@value_end COLON <matched_stmt>@stmt
+      %ast=CaseRangeStmt
+    ;
 
-<unmatched_case>
-    : KW_CASE <conditional_expr>@value COLON <unmatched_stmt>@stmt %ast=CaseStmt ;
+<unmatched_case>?
+    : KW_CASE <conditional_expr>@value COLON <unmatched_stmt>@stmt
+      %ast=CaseStmt
+    | KW_CASE <conditional_expr>@value ELLIPSIS <conditional_expr>@value_end COLON <unmatched_stmt>@stmt
+      %ast=CaseRangeStmt
+    ;
 
 <matched_default>
     : KW_DEFAULT COLON <matched_stmt>@stmt   %ast=DefaultStmt ;
@@ -527,12 +609,50 @@ KW_STRUCT KW_UNION KW_ENUM KW_ASM
 <goto_stmt>
     : KW_GOTO IDENT@label SEMI   %ast=GotoStmt ;
 
-# Inline asm. The C23 grammar accepts `asm("template" [: outputs [: inputs [: clobbers]]])`;
-# we model only the simple form here (template string, no operand
-# lists). The translator wraps the template into AsmStmt with empty
-# operand lists.
-<asm_stmt>
-    : KW_ASM LPAREN STRING_LIT@template RPAREN SEMI   %ast=AsmStmt ;
+# Inline asm. Full form: `asm("template" [: outputs [: inputs [: clobbers]]])`.
+# Each of the three sections is independently optional. We model the
+# distinct shapes as separate %ast= kinds; the translator collapses
+# them back to uc_core's single AsmStmt with three Optional operand
+# lists.
+<asm_stmt>?
+    : KW_ASM LPAREN STRING_LIT@template RPAREN SEMI
+      %ast=AsmStmt
+    | KW_ASM LPAREN STRING_LIT@template COLON <asm_op_list_opt>@outputs RPAREN SEMI
+      %ast=AsmStmtOut
+    | KW_ASM LPAREN STRING_LIT@template COLON <asm_op_list_opt>@outputs COLON <asm_op_list_opt>@inputs RPAREN SEMI
+      %ast=AsmStmtOutIn
+    | KW_ASM LPAREN STRING_LIT@template COLON <asm_op_list_opt>@outputs COLON <asm_op_list_opt>@inputs COLON <asm_clobber_list_opt>@clobbers RPAREN SEMI
+      %ast=AsmStmtOutInClobbers
+    ;
+
+# Operand list: zero or more (`"constraint" (expr)`) entries.
+<asm_op_list_opt>
+    : <asm_op_list>@ops   %ast=_unwrap
+    |
+    ;
+
+<asm_op_list> %ast=list element=<asm_op>
+    : <asm_op>
+    | <asm_op_list> COMMA <asm_op>
+    ;
+
+<asm_op>
+    : STRING_LIT@constraint LPAREN <expr>@expr RPAREN   %ast=AsmOperand ;
+
+# Clobber list: zero or more string literals.
+<asm_clobber_list_opt>
+    : <asm_clobber_list>@clobbers   %ast=_unwrap
+    |
+    ;
+
+<asm_clobber_list> %ast=list element=<asm_clobber>
+    : <asm_clobber>
+    | <asm_clobber_list> COMMA <asm_clobber>
+    ;
+
+<asm_clobber>?
+    : STRING_LIT@value   %ast=AsmClobber
+    ;
 
 <return_stmt>?
     : KW_RETURN SEMI                  %ast=ReturnStmt
@@ -623,22 +743,36 @@ KW_STRUCT KW_UNION KW_ENUM KW_ASM
     ;
 
 <multiplicative_expr>?
+    : <cast_expr>
+    | <multiplicative_expr>@left STAR@op    <cast_expr>@right   %ast=BinaryOp
+    | <multiplicative_expr>@left SLASH@op   <cast_expr>@right   %ast=BinaryOp
+    | <multiplicative_expr>@left PERCENT@op <cast_expr>@right   %ast=BinaryOp
+    ;
+
+# Cast: ``(type_name) cast_expr``. The LR(1) lookahead at LPAREN
+# cannot tell ``(type)`` from ``(expr)`` without help — real C uses
+# the typedef-name lex hook to mark IDENTs that are typenames. For
+# Phase 4 we restrict casts to types that begin with a type keyword
+# (KW_INT / KW_CHAR / ...) or a type qualifier — that's enough to
+# parse most casts in real code that doesn't use IDENT typedefs.
+<cast_expr>?
     : <unary_expr>
-    | <multiplicative_expr>@left STAR@op    <unary_expr>@right   %ast=BinaryOp
-    | <multiplicative_expr>@left SLASH@op   <unary_expr>@right   %ast=BinaryOp
-    | <multiplicative_expr>@left PERCENT@op <unary_expr>@right   %ast=BinaryOp
+    | LPAREN <type_name>@target_type RPAREN <cast_expr>@expr   %ast=Cast
     ;
 
 <unary_expr>?
     : <postfix_expr>
-    | INC_OP@op <unary_expr>@operand   %ast=UnaryOp
-    | DEC_OP@op <unary_expr>@operand   %ast=UnaryOp
-    | AMP@op    <unary_expr>@operand   %ast=UnaryOp
-    | STAR@op   <unary_expr>@operand   %ast=UnaryOp
-    | PLUS@op   <unary_expr>@operand   %ast=UnaryOp
-    | MINUS@op  <unary_expr>@operand   %ast=UnaryOp
-    | TILDE@op  <unary_expr>@operand   %ast=UnaryOp
-    | BANG@op   <unary_expr>@operand   %ast=UnaryOp
+    | INC_OP@op <unary_expr>@operand               %ast=UnaryOp
+    | DEC_OP@op <unary_expr>@operand               %ast=UnaryOp
+    | AMP@op    <cast_expr>@operand                %ast=UnaryOp
+    | STAR@op   <cast_expr>@operand                %ast=UnaryOp
+    | PLUS@op   <cast_expr>@operand                %ast=UnaryOp
+    | MINUS@op  <cast_expr>@operand                %ast=UnaryOp
+    | TILDE@op  <cast_expr>@operand                %ast=UnaryOp
+    | BANG@op   <cast_expr>@operand                %ast=UnaryOp
+    | KW_SIZEOF <unary_expr>@operand               %ast=SizeofExpr
+    | KW_SIZEOF LPAREN <type_name>@target_type RPAREN  %ast=SizeofType
+    | KW_ALIGNOF LPAREN <type_name>@target_type RPAREN %ast=AlignofType
     ;
 
 <postfix_expr>?
@@ -649,6 +783,10 @@ KW_STRUCT KW_UNION KW_ENUM KW_ASM
     | <postfix_expr>@obj ARROW IDENT@member                          %ast=ArrowMember
     | <postfix_expr>@operand INC_OP@op                               %ast=PostfixOp
     | <postfix_expr>@operand DEC_OP@op                               %ast=PostfixOp
+    | LPAREN <type_name>@target_type RPAREN LBRACE <initializer_items>@items RBRACE
+      %ast=CompoundLiteral
+    | LPAREN <type_name>@target_type RPAREN LBRACE RBRACE
+      %ast=CompoundLiteralEmpty
     ;
 
 <argument_list_opt>
