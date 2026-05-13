@@ -21,9 +21,9 @@ starts taking too long to build.
   state-merging artefacts. For grammars under ~200 productions
   this is fine.
 * **Switch to `lalr` when build time or bundle size start to hurt.**
-  ~10× smaller tables, ~10× faster builds, and most real grammars
-  are LALR-friendly with no restructuring. Verify with a quick A/B
-  `uplox check`.
+  Shrinks vary by grammar (2× on a calculator, 37× on `ada_full`;
+  see the table below), and most real grammars are LALR-friendly
+  with no restructuring. Verify with a quick A/B `uplox check`.
 * **Reach for `ielr` only if LALR introduces a spurious conflict
   you can't easily restructure away.** Same conflict count as
   canonical, table size typically equal to LALR.
@@ -115,12 +115,13 @@ again. If the conflict count is unchanged, LALR is safe.
 When LALR manufactures conflicts that canonical doesn't have, you
 have three options:
 
-1. **Restructure the grammar.** This is usually a small, local
-   change. The canonical example in this repo is the generic
-   renaming form in `examples/ada_full.uplox`, which originally
-   manufactured reduce/reduce conflicts under LALR and was fixed
-   by splitting an empty production into explicit empty + non-empty
-   halves (commit `c38ca83`).
+1. **Restructure the grammar.** Usually a small, local change —
+   splitting an empty production into explicit empty + non-empty
+   halves, factoring a common prefix, threading a discipline through
+   one extra non-terminal. `examples/ada_full.uplox` uses these
+   patterns extensively (see commits `c38ca83` and `a6a4d8d` — the
+   restructures introduced for canonical-LR(1) reasons turned out to
+   make the same grammar LALR-friendly).
 2. **Use `%shift` or `%reduce`.** See
    [`conflict_resolution.md`](conflict_resolution.md). The
    `KW_pragma` and `SEMI` directives in `ada_full.uplox` are the

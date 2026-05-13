@@ -75,15 +75,16 @@ by section.
 ### `%grammar calc`
 
 Names the grammar. This name becomes the prefix for every symbol the
-backends emit (`uplox_calc_ctx`, `calc_parse`, etc.). The name must
-match `[A-Za-z_][A-Za-z0-9_]*`.
+backends emit (`uplox_calc_ctx`, `uplox_calc_parse`, etc. — see
+[`c_backend.md`](c_backend.md) for the full naming scheme). The name
+must match `[A-Za-z_][A-Za-z0-9_]*`.
 
 ### `%define lr.type lalr`
 
-Picks the LR construction algorithm. For a grammar this small it
-doesn't matter — both canonical-LR(1) and LALR(1) produce
-single-digit-state tables. For anything larger you almost certainly
-want `lalr`; see [`lr_modes.md`](lr_modes.md).
+Picks the LR construction algorithm. For a grammar this small the
+choice barely matters — calc builds to 16 LALR states (30 under
+canonical LR(1)) either way. For anything larger you almost
+certainly want `lalr`; see [`lr_modes.md`](lr_modes.md).
 
 ### `%options`
 
@@ -147,10 +148,13 @@ to encode unary minus, etc.
 
 For a new grammar I'd start with:
 
-1. **Tokens first.** Get `%tokens` right and run `uplox check`. With
-   no rules the parser stage errors, but the lexer is still validated.
-2. **One rule, then build up.** Start with the start symbol matching
-   a single terminal; expand outward. `uplox check` after every step.
+1. **Tokens plus a one-line start rule.** `uplox check` requires
+   `%rules` to be non-empty (an empty rules section is a hard
+   error), so begin with the start non-terminal matching a single
+   terminal and grow outward. Once `check` reports stats without
+   errors, both the lexer and the LR builder have compiled cleanly.
+2. **Build up one rule at a time.** Re-run `uplox check` after every
+   step — the state count and conflict count are your guides.
 3. **Test against real input early.** Build to JSON, pipe a small
    sample through `uplox parse`. If you can't parse a one-line
    example, no amount of grammar-staring will help.

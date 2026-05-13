@@ -77,9 +77,9 @@ optional clauses (each new clause doubles the count). The
 `<else_part>` indirection costs you one non-terminal and one
 extra reduction at parse time; you'll never regret it.
 
-**See:** `<else_part>`, `<elsif_part>`, `<aspect_spec>` in
-`examples/ada_full.uplox`. The same grammar uses *dozens* of
-these `_opt` non-terminals; that's idiomatic.
+**See:** `<else_part>` and `<elsif_part>` in
+`examples/ada_full.uplox` (both have an empty alt). The same
+grammar uses ~60 `_opt` non-terminals — that's idiomatic.
 
 ## Nested if/then/else — the dangling-else problem
 
@@ -183,17 +183,24 @@ regex `/\*([^*]|\*+[^*\/])*\*+\//` works because it spells out
 Copy it from `plm_subset.uplox` or `c23.uplox`; don't try to
 reinvent it.
 
-**Trap: nested block comments.** uplox's regex can't count brace
-depth. For non-regular tokens like nested-comment-aware sources or
-target-language action bodies, use `%balanced=`:
+**Trap: non-regular tokens.** uplox's regex can't count depth. For
+content delimited by a *single-byte* open/close pair where you need
+to skip over nested instances — target-language action bodies, Lua
+long brackets, etc. — use `%balanced=`:
 
     ACTION = /\{/   %balanced='}'
 
 The DFA matches the opener; the runtime extends the match by
-counting nested (open, close) pairs until depth returns to zero.
+counting nested (open, close) **bytes** until depth returns to zero.
+Both open and close are single bytes, taken from the start of the
+DFA match and from the `%balanced=` argument respectively — so
+nested C-style block comments (`/* /* */ */`, multi-byte delimiters)
+are *not* covered by `%balanced=`. Languages with truly nested
+comments have to either accept the lex-level limitation or write
+their own pre-lex scan.
 
-**See:** `examples/uplox_self.uplox` uses `%balanced=` to lex action
-bodies in `.uplox` files.
+**See:** `examples/uplox_self.uplox` uses `%balanced='}'` to lex
+action bodies in `.uplox` files.
 
 ## String literals
 
@@ -215,7 +222,8 @@ is the host driver's job after the token is recognised.
 String contents are a regular language; keep them in the lexer.
 
 **See:** `STRING` in `examples/plm_subset.uplox` (PL/M doubled-quote
-form), `examples/c23.uplox` (C-style with backslash escapes).
+form) and `STRING_LIT` in `examples/c23.uplox` (C-style with
+backslash escapes and optional `u8`/`u`/`U`/`L` encoding prefixes).
 
 ## Identifiers vs keywords
 
