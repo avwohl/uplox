@@ -63,8 +63,8 @@ factor varies enormously with grammar shape:
     calc                     30      16     1.9x
     ambig_expr               18      10     1.8x   (8-conflict fixture)
     scoped                   13      10     1.3x
+    uplox_self               81      81     1.0x
     plm_pre                  27      27     1.0x
-    uplox_self               67      67     1.0x
 
 For `ada_full` specifically, the same A/B looks like:
 

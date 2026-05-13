@@ -141,8 +141,9 @@ recursion (`<expr> : <expr> '+' <term>`) gives you left-associative
 operators automatically.
 
 [`cookbook.md`](cookbook.md) has the long version: when to use left
-vs right recursion, how many rungs you need for a real language, how
-to encode unary minus, etc.
+vs right recursion, optional clauses, the dangling-else trap, and
+how a real-language precedence ladder looks (the PL/M ladder in
+`examples/plm_subset.uplox` runs eight levels deep).
 
 ## The minimum viable workflow
 
