@@ -61,26 +61,62 @@ class Symbol:
 
     ``name`` holds the bare identifier (for ``term``/``nonterm``) or the
     literal contents without quotes (for ``literal``).
+
+    ``field_name`` is set when the symbol carries an ``@field`` annotation
+    in the rule source (the v3 AST surface). The reader stores the bare
+    annotation; the AST plan compiler validates that the same field name
+    isn't reused inside one production and that ``%ast_drop`` tokens
+    aren't decorated. ``None`` means the position is unnamed (positional
+    or destined to be dropped).
     """
 
     name: str
     kind: str = "term"
     position: Optional[Position] = None
+    field_name: Optional[str] = None
 
 
 @dataclass
 class Production:
+    """One alternative in a rule.
+
+    ``ast_kind`` is set when the production carries an ``%ast=Name``
+    annotation. Special values: ``"_unwrap"`` (reserved kind — the rule
+    contributes its single ``@field``-annotated child to the parent's
+    slot rather than producing a node). All other values are user-supplied
+    node-kind names. ``None`` means no AST annotation on this alternative
+    — the alt is then either eligible for the ``?``-lift on its rule (if
+    set) or excluded from AST construction.
+    """
+
     rhs: list[Symbol] = field(default_factory=list)
     action: Optional[str] = None
     hook: Optional[str] = None
+    ast_kind: Optional[str] = None
     position: Optional[Position] = None
 
 
 @dataclass
 class Rule:
+    """A grammar rule (one LHS, one or more alternatives).
+
+    ``ast_lift`` mirrors a ``?`` after the LHS in the rule source. Any
+    alternative without an ``%ast=`` of its own and with exactly one
+    surviving child after ``%ast_drop`` filtering passes that child up
+    instead of wrapping. Alternatives with an explicit ``%ast=`` win
+    and the lift is silently no-op for those.
+
+    ``ast_list_element`` mirrors a rule-level ``%ast=list element=<X>``
+    annotation. When set, the generator treats this rule as a
+    list-shaped accumulator producing ``list[<X>]``; ``@field``
+    references to this rule's LHS from any parent become list fields.
+    """
+
     name: str
     productions: list[Production] = field(default_factory=list)
     position: Optional[Position] = None
+    ast_lift: bool = False
+    ast_list_element: Optional[str] = None
 
 
 @dataclass
@@ -123,3 +159,8 @@ class GrammarIR:
     # ``lalr`` merges states with the same LR(0) core, producing ~10x smaller
     # tables at the cost of potentially-spurious reduce/reduce conflicts.
     lr_type: str = "canonical-lr"
+    # Terminals listed under ``%ast_drop``: stripped from every AST node's
+    # child list at build time. Populated by the v3 AST surface; empty for
+    # grammars without any AST annotation. The set is consulted by the AST
+    # plan compiler — the LR / lexer pipeline ignores it.
+    ast_drop_tokens: set[str] = field(default_factory=set)

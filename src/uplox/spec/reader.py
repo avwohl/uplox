@@ -77,7 +77,17 @@ def _strip_comment(line: str) -> str:
 # ---- Top-level reader --------------------------------------------------------
 
 
-_SECTIONS = ("grammar", "options", "tokens", "hooks", "rules", "keywords", "shift", "reduce")
+_SECTIONS = (
+    "grammar",
+    "options",
+    "tokens",
+    "hooks",
+    "rules",
+    "keywords",
+    "shift",
+    "reduce",
+    "ast_drop",
+)
 _SECTION_RE = re.compile(r"\s*%(" + "|".join(_SECTIONS) + r")\b\s*(.*)$")
 _KEYWORD_PREFIX_RE = re.compile(r"\s*%keyword_prefix\s+(\S+)\s*$")
 _DEFINE_RE = re.compile(r"\s*%define\s+([A-Za-z_][A-Za-z0-9_.]*)\s+(\S.*?)\s*$")
@@ -130,6 +140,8 @@ def read_source(text: str, filename: str = "<source>") -> GrammarIR:
             _parse_shift(ir, section_buf, filename)
         elif section == "reduce":
             _parse_reduce(ir, section_buf, filename)
+        elif section == "ast_drop":
+            _parse_ast_drop(ir, section_buf, filename)
         elif section == "rules":
             text = "\n".join(t for _l, t in section_buf)
             ir.options["__rules_text__"] = text
@@ -350,6 +362,27 @@ def _parse_reduce(ir: GrammarIR, lines: list[tuple[int, str]], filename: str) ->
             ir.reduce_terminals.add(word)
 
 
+def _parse_ast_drop(ir: GrammarIR, lines: list[tuple[int, str]], filename: str) -> None:
+    """Parse an ``%ast_drop`` section: whitespace-separated terminal names.
+
+    Listed terminals are stripped from every AST node's child list at
+    build time. This is the v3 AST surface's punctuation-elimination
+    knob — same shape as ``%shift``/``%reduce``, different semantic
+    target (the AST plan, not the LR table).
+
+    Validation that each name resolves to a declared terminal is deferred
+    to the AST plan compiler; the reader only enforces the identifier
+    shape so typos like ``LPAREN ;`` are caught at read time.
+    """
+    for lineno, line in lines:
+        for word in line.split():
+            if not _KEYWORD_NAME_RE.fullmatch(word):
+                raise ReaderError(
+                    f"{filename}:{lineno}: %ast_drop entry {word!r} is not a valid identifier"
+                )
+            ir.ast_drop_tokens.add(word)
+
+
 def _parse_keywords(ir: GrammarIR, lines: list[tuple[int, str]], filename: str) -> None:
     """Parse a ``%keywords`` section: whitespace-separated bare identifiers,
     possibly across multiple lines. Synthesises one ``TokenDecl`` per name and
@@ -536,7 +569,65 @@ def _parse_one_rule(lex: _RulesLexer) -> Rule:
             f"expected `<name>` to start a rule, got {lex.peek()!r}"
         )
     name, pos = lex.take_nonterm()
+
+    # Optional v3 LHS annotations, in order: `?` then `%ast=list element=<X>`.
+    # Both are no-ops without the v3 AST surface — the rest of the pipeline
+    # ignores ast_lift / ast_list_element when there are no AST annotations
+    # anywhere else in the grammar.
+    ast_lift = False
+    ast_list_element: str | None = None
     lex.skip_ws_and_comments()
+    if lex.peek() == "?":
+        lex.take()
+        ast_lift = True
+        lex.skip_ws_and_comments()
+    if lex.peek() == "%":
+        directive_pos = lex.position()
+        lex.take()
+        kw, _ = lex.take_ident()
+        if kw != "ast":
+            raise ReaderError(
+                f"{lex.filename}:{directive_pos.line}:{directive_pos.column}: "
+                f"unknown rule LHS directive %{kw}; expected %ast=list"
+            )
+        lex.skip_ws_and_comments()
+        if lex.peek() != "=":
+            raise ReaderError(
+                f"{lex.filename}:{lex.line}:{lex.col}: expected '=' after %ast on rule LHS"
+            )
+        lex.take()
+        lex.skip_ws_and_comments()
+        kind, _ = lex.take_ident()
+        if kind != "list":
+            raise ReaderError(
+                f"{lex.filename}:{lex.line}:{lex.col}: "
+                f"rule LHS %ast=<kind> only accepts %ast=list (got {kind!r}); "
+                f"per-alternative kinds go on each alt"
+            )
+        lex.skip_ws_and_comments()
+        # element=<NonTerm> required.
+        ek_pos = lex.position()
+        ek_name, _ = lex.take_ident()
+        if ek_name != "element":
+            raise ReaderError(
+                f"{lex.filename}:{ek_pos.line}:{ek_pos.column}: "
+                f"expected `element=<NonTerm>` after %ast=list, got {ek_name!r}"
+            )
+        lex.skip_ws_and_comments()
+        if lex.peek() != "=":
+            raise ReaderError(
+                f"{lex.filename}:{lex.line}:{lex.col}: expected '=' after `element`"
+            )
+        lex.take()
+        lex.skip_ws_and_comments()
+        if lex.peek() != "<":
+            raise ReaderError(
+                f"{lex.filename}:{lex.line}:{lex.col}: "
+                f"expected `<NonTerm>` after `element=`"
+            )
+        ast_list_element, _ = lex.take_nonterm()
+        lex.skip_ws_and_comments()
+
     if lex.peek() != ":":
         raise ReaderError(
             f"{lex.filename}:{lex.line}:{lex.col}: expected ':' after rule name <{name}>"
@@ -551,7 +642,13 @@ def _parse_one_rule(lex: _RulesLexer) -> Rule:
             productions.append(_parse_production(lex))
         elif c == ";":
             lex.take()
-            return Rule(name=name, productions=productions, position=pos)
+            return Rule(
+                name=name,
+                productions=productions,
+                position=pos,
+                ast_lift=ast_lift,
+                ast_list_element=ast_list_element,
+            )
         else:
             raise ReaderError(
                 f"{lex.filename}:{lex.line}:{lex.col}: "
@@ -563,6 +660,7 @@ def _parse_production(lex: _RulesLexer) -> Production:
     rhs: list[Symbol] = []
     hook: str | None = None
     action: str | None = None
+    ast_kind: str | None = None
     prod_pos = lex.position()
     while True:
         lex.skip_ws_and_comments()
@@ -573,37 +671,90 @@ def _parse_production(lex: _RulesLexer) -> Production:
             keyword_pos = lex.position()
             lex.take()
             kw, _kw_pos = lex.take_ident()
-            if kw != "hook":
-                raise ReaderError(
-                    f"{lex.filename}:{keyword_pos.line}:{keyword_pos.column}: "
-                    f"unknown rule directive %{kw}; only %hook is supported"
-                )
-            lex.skip_ws_and_comments()
-            if lex.peek() != "=":
-                raise ReaderError(
-                    f"{lex.filename}:{lex.line}:{lex.col}: expected '=' after %hook"
-                )
-            lex.take()
-            lex.skip_ws_and_comments()
-            hook_name, _ = lex.take_ident()
-            hook = hook_name
-            continue
+            if kw == "hook":
+                lex.skip_ws_and_comments()
+                if lex.peek() != "=":
+                    raise ReaderError(
+                        f"{lex.filename}:{lex.line}:{lex.col}: expected '=' after %hook"
+                    )
+                lex.take()
+                lex.skip_ws_and_comments()
+                hook_name, _ = lex.take_ident()
+                hook = hook_name
+                continue
+            if kw == "ast":
+                # %ast=Name per-alternative directive. Name is an ordinary
+                # identifier (the AST kind) or the reserved spelling
+                # ``_unwrap``. Validation of the name happens in the AST
+                # plan compiler; the reader only enforces the syntax.
+                lex.skip_ws_and_comments()
+                if lex.peek() != "=":
+                    raise ReaderError(
+                        f"{lex.filename}:{lex.line}:{lex.col}: expected '=' after %ast"
+                    )
+                lex.take()
+                lex.skip_ws_and_comments()
+                ast_name, _ = lex.take_ident()
+                if ast_kind is not None:
+                    raise ReaderError(
+                        f"{lex.filename}:{keyword_pos.line}:{keyword_pos.column}: "
+                        f"duplicate %ast= on this alternative "
+                        f"(was {ast_kind!r}, now {ast_name!r})"
+                    )
+                ast_kind = ast_name
+                continue
+            raise ReaderError(
+                f"{lex.filename}:{keyword_pos.line}:{keyword_pos.column}: "
+                f"unknown rule directive %{kw}; expected %hook or %ast"
+            )
         if c == "{":
             action, _ = lex.take_balanced_braces()
             continue
         if c == "'":
             literal, lit_pos = lex.take_string()
-            rhs.append(Symbol(name=literal, kind="literal", position=lit_pos))
+            field_name = _maybe_take_field_suffix(lex)
+            rhs.append(
+                Symbol(name=literal, kind="literal", position=lit_pos, field_name=field_name)
+            )
             continue
         if c == "<":
             name, sym_pos = lex.take_nonterm()
-            rhs.append(Symbol(name=name, kind="nonterm", position=sym_pos))
+            field_name = _maybe_take_field_suffix(lex)
+            rhs.append(
+                Symbol(name=name, kind="nonterm", position=sym_pos, field_name=field_name)
+            )
             continue
         if c.isalpha() or c == "_":
             name, sym_pos = lex.take_ident()
-            rhs.append(Symbol(name=name, kind="term", position=sym_pos))
+            field_name = _maybe_take_field_suffix(lex)
+            rhs.append(
+                Symbol(name=name, kind="term", position=sym_pos, field_name=field_name)
+            )
             continue
         raise ReaderError(
             f"{lex.filename}:{lex.line}:{lex.col}: unexpected character {c!r} in production"
         )
-    return Production(rhs=rhs, action=action, hook=hook, position=prod_pos)
+    return Production(
+        rhs=rhs, action=action, hook=hook, ast_kind=ast_kind, position=prod_pos
+    )
+
+
+def _maybe_take_field_suffix(lex: _RulesLexer) -> str | None:
+    """If the next char is ``@``, consume it and the following identifier.
+
+    Returns the field name, or ``None`` when no ``@`` is present. The
+    ``@`` must abut the preceding symbol (no whitespace between symbol
+    and ``@``) so it's unambiguous which RHS position the field belongs
+    to. Spelled ``X@field`` or ``<x>@field`` or ``'+'@op``.
+    """
+    if lex.peek() != "@":
+        return None
+    at_pos = lex.position()
+    lex.take()
+    if not (lex.peek().isalpha() or lex.peek() == "_"):
+        raise ReaderError(
+            f"{lex.filename}:{at_pos.line}:{at_pos.column}: "
+            f"expected identifier after '@'"
+        )
+    name, _ = lex.take_ident()
+    return name

@@ -100,6 +100,184 @@ TAB = '\\t'
     assert ir.tokens[0].literal == "\t"
 
 
+# ---- v3 AST-annotation surface ----------------------------------------------
+
+
+_AST_SRC = """
+%grammar calc
+
+%tokens
+NUMBER = /[0-9]+/
+PLUS   = '+'
+MINUS  = '-'
+STAR   = '*'
+SLASH  = '/'
+LPAREN = '('
+RPAREN = ')'
+WS     = /[ \\t\\n]+/   %skip
+
+%ast_drop
+LPAREN RPAREN
+
+%rules
+<expr>?   : <expr>@lhs '+'@op <term>@rhs   %ast=BinOp
+          | <expr>@lhs '-'@op <term>@rhs   %ast=BinOp
+          | <term>
+          ;
+
+<term>?   : <term>@lhs '*'@op <factor>@rhs %ast=BinOp
+          | <factor>
+          ;
+
+<factor>? : NUMBER@value                   %ast=NumLit
+          | '(' <expr> ')'
+          ;
+"""
+
+
+def test_ast_drop_section():
+    ir = read_source(_AST_SRC, "calc.uplox")
+    assert ir.ast_drop_tokens == {"LPAREN", "RPAREN"}
+
+
+def test_ast_lift_marker_on_lhs():
+    ir = read_source(_AST_SRC, "calc.uplox")
+    by_name = {r.name: r for r in ir.rules}
+    assert by_name["expr"].ast_lift is True
+    assert by_name["term"].ast_lift is True
+    assert by_name["factor"].ast_lift is True
+
+
+def test_ast_kind_per_alternative():
+    ir = read_source(_AST_SRC, "calc.uplox")
+    by_name = {r.name: r for r in ir.rules}
+    expr = by_name["expr"]
+    assert [p.ast_kind for p in expr.productions] == ["BinOp", "BinOp", None]
+    factor = by_name["factor"]
+    assert [p.ast_kind for p in factor.productions] == ["NumLit", None]
+
+
+def test_field_suffix_on_rhs_symbols():
+    ir = read_source(_AST_SRC, "calc.uplox")
+    by_name = {r.name: r for r in ir.rules}
+    binop = by_name["expr"].productions[0]
+    assert [(s.name, s.kind, s.field_name) for s in binop.rhs] == [
+        ("expr", "nonterm", "lhs"),
+        ("+", "literal", "op"),
+        ("term", "nonterm", "rhs"),
+    ]
+    numlit = by_name["factor"].productions[0]
+    assert numlit.rhs[0].field_name == "value"
+    # Bare reference without @ has no field name.
+    plain = by_name["expr"].productions[2].rhs[0]
+    assert plain.field_name is None
+
+
+def test_list_rule_lhs_annotation():
+    src = """
+%grammar t
+%tokens
+IDENT = /[A-Za-z_][A-Za-z0-9_]*/
+COMMA = ','
+WS    = /[ \\t\\n]+/   %skip
+%rules
+<args> %ast=list element=<expr>
+       : <expr>
+       | <args> COMMA <expr>
+       ;
+<expr>?: IDENT@name   %ast=Ident ;
+"""
+    ir = read_source(src)
+    args = next(r for r in ir.rules if r.name == "args")
+    assert args.ast_list_element == "expr"
+    assert args.ast_lift is False
+
+
+def test_ast_unwrap_reserved_kind_parses():
+    """Reader accepts %ast=_unwrap; the semantic check that the production
+    has exactly one @field-annotated RHS is the AST plan compiler's job."""
+    src = """
+%grammar t
+%tokens
+IDENT = /[A-Za-z_][A-Za-z0-9_]*/
+COLON = ':'
+WS    = /[ \\t\\n]+/   %skip
+%rules
+<type_opt> : COLON IDENT@name   %ast=_unwrap
+           |
+           ;
+"""
+    ir = read_source(src)
+    p = ir.rules[0].productions[0]
+    assert p.ast_kind == "_unwrap"
+
+
+def test_duplicate_ast_on_alt_rejected():
+    src = """
+%grammar t
+%tokens
+IDENT = /[A-Za-z_][A-Za-z0-9_]*/
+WS    = /[ \\t\\n]+/   %skip
+%rules
+<r> : IDENT@name   %ast=A %ast=B ;
+"""
+    with pytest.raises(ReaderError, match="duplicate %ast"):
+        read_source(src)
+
+
+def test_at_without_identifier_rejected():
+    src = """
+%grammar t
+%tokens
+IDENT = /[A-Za-z_][A-Za-z0-9_]*/
+WS    = /[ \\t\\n]+/   %skip
+%rules
+<r> : IDENT@   %ast=R ;
+"""
+    with pytest.raises(ReaderError, match="expected identifier after '@'"):
+        read_source(src)
+
+
+def test_lhs_ast_rejects_non_list_kind():
+    src = """
+%grammar t
+%tokens
+IDENT = /[A-Za-z_][A-Za-z0-9_]*/
+WS    = /[ \\t\\n]+/   %skip
+%rules
+<r> %ast=Foo : IDENT@name %ast=Foo ;
+"""
+    with pytest.raises(ReaderError, match="only accepts %ast=list"):
+        read_source(src)
+
+
+def test_ast_drop_rejects_non_identifier():
+    src = """
+%grammar t
+%tokens
+WS = /[ \\t\\n]+/   %skip
+%ast_drop
++
+%rules
+<r> : WS ;
+"""
+    with pytest.raises(ReaderError, match="not a valid identifier"):
+        read_source(src)
+
+
+def test_grammar_without_ast_annotations_has_empty_ast_state():
+    """Pure back-compat — a grammar with no v3 surface gets defaults."""
+    ir = read_source(CALC_SRC, "calc.uplox")
+    assert ir.ast_drop_tokens == set()
+    for r in ir.rules:
+        assert r.ast_lift is False
+        assert r.ast_list_element is None
+        for p in r.productions:
+            assert p.ast_kind is None
+            for s in p.rhs:
+                assert s.field_name is None
+
+
 def test_lex_pipeline_from_ir():
     """Reader output feeds the lexer end-to-end."""
     from uplox.lex.build import lex_from_ir
