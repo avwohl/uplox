@@ -294,6 +294,40 @@ def test_ast_module_list_field_single_element(tmp_path):
     assert ast.args[0].name.text == "a"
 
 
+RIGHT_RECURSIVE_GRAMMAR = """
+%grammar t
+%options
+start = block
+%tokens
+IDENT  = /[A-Za-z_][A-Za-z0-9_]*/
+SEMI   = ';'
+WS     = /[ \\t\\n]+/   %skip
+
+%ast_drop SEMI
+
+%rules
+<block> : <stmts>@stmts   %ast=Block ;
+
+# Right-recursive list (element first, self second). Common for
+# statement sequences with a sentinel empty terminator.
+<stmts> %ast=list element=<stmt>
+        : <stmt> <stmts>
+        |
+        ;
+
+<stmt>? : IDENT@name SEMI   %ast=Stmt ;
+"""
+
+
+def test_ast_module_right_recursive_list_preserves_order(tmp_path):
+    """Right-recursive lists must prepend, not append — otherwise the AST
+    sees the statements in reverse order."""
+    mod = _import_emitted(tmp_path, RIGHT_RECURSIVE_GRAMMAR)
+    ast = mod.parse("a; b; c;")
+    assert isinstance(ast, mod.Block)
+    assert [s.name.text for s in ast.stmts] == ["a", "b", "c"]
+
+
 # ---- v3: _unwrap + auto-optional --------------------------------------------
 
 

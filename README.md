@@ -130,6 +130,11 @@ implements the full classical hack on top of these primitives.
   surface (`%ast=`, `?`, `@field`, `%ast_drop`). Emitted Python module
   produces typed `BinOp` / `NumLit` dataclasses instead of a generic
   parse tree. See [`docs/proposals/calc_annotated.md`](docs/proposals/calc_annotated.md).
+- `cowgol_ast` — full Cowgol grammar with v3 annotations. 78 tokens, 182
+  productions, 68 AST kinds. Validates the v3 surface at real-language
+  scale: 12-level expression ladder, 11 auto-optional clauses, 13
+  list-shaped rules, nested type expressions, statement sequences.
+  Walkthrough: [`docs/proposals/cowgol_annotated.md`](docs/proposals/cowgol_annotated.md).
 - `ambig_expr` — classically ambiguous, exercises GLR.
 - `scoped` — block-scoped IDs, exercises hooks.
 - `plm_subset` — the first real grammar (Phase 5). Calc-style PL/M with declarations, IF/THEN/ELSE, DO blocks.

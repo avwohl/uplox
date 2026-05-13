@@ -124,10 +124,13 @@ class ProductionAction:
     * ``"_lift"`` — pass ``rhs[source_index]`` through.
     * ``"_unwrap"`` — like ``_lift``; the spec-level distinction
       drives auto-optional inference, not runtime behaviour.
-    * ``"_list_init"`` — start a list with
-      ``rhs[element_index]`` as its first element.
-    * ``"_list_extend"`` — append ``rhs[element_index]`` to
-      ``rhs[accumulator_index]``.
+    * ``"_list_init"`` — start a list with the elements at the
+      RHS positions in ``element_indices`` (length 1 is the
+      common case; cowgol's ``<multi_target> : <expr> COMMA
+      <expr>`` is an example of length 2).
+    * ``"_list_extend"`` — append ``rhs[element_indices[0]]`` to
+      ``rhs[accumulator_index]``. element_indices is always length 1
+      for extend (a list extension consumes one new element).
     * ``"_list_empty"`` — yield an empty list.
     """
 
@@ -136,7 +139,7 @@ class ProductionAction:
     field_assignments: tuple[FieldAssignment, ...] = ()
     source_index: int = -1
     accumulator_index: int = -1
-    element_index: int = -1
+    element_indices: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -478,26 +481,30 @@ def _compile_list_production(
         else:
             other_count += 1
 
-    if len(self_indices) == 0 and len(elem_indices) == 1 and other_count == 0:
+    if len(self_indices) == 0 and len(elem_indices) >= 1 and other_count == 0:
+        # _list_init: take one or more elements as the initial list.
+        # The common case is a single element; cowgol's <multi_target>
+        # which mandates at-least-two elements is an example of >1.
         return ProductionAction(
             user_index=user_index,
             kind="_list_init",
-            element_index=elem_indices[0],
+            element_indices=tuple(elem_indices),
         )
     if len(self_indices) == 1 and len(elem_indices) == 1 and other_count == 0:
         return ProductionAction(
             user_index=user_index,
             kind="_list_extend",
             accumulator_index=self_indices[0],
-            element_index=elem_indices[0],
+            element_indices=(elem_indices[0],),
         )
 
     raise AstPlanError(
         f"production at {prod.position} of list-rule <{rule.name}> "
         f"%ast=list element=<{elem_kind}>: shape not recognised "
         f"(self_refs={len(self_indices)}, element_refs={len(elem_indices)}, "
-        f"non-drop other={other_count}). Allowed shapes are <{elem_kind}> "
-        f"alone, or <{rule.name}> … <{elem_kind}> with only drop tokens between."
+        f"non-drop other={other_count}). Allowed shapes are one or more "
+        f"<{elem_kind}>s with only drop tokens between, or "
+        f"<{rule.name}> … <{elem_kind}> with only drop tokens between."
     )
 
 
@@ -610,20 +617,60 @@ def _resolve_field(
 
 
 def _classify_field_source(
-    sym: Symbol, ctx: _Context
+    sym: Symbol, ctx: _Context, _seen: Optional[set[str]] = None
 ) -> tuple[str, Optional[str], bool]:
     """Return (type_kind, list_element_kind, optional) for this RHS source.
 
+    Resolution rules:
+
     * Terminal/literal (declared token) -> ``("token", None, False)``.
     * Non-terminal in a list rule -> ``("list", <element_lhs>, False)``.
+    * Non-terminal whose non-empty productions are all ``%ast=_unwrap``
+      -> recursively classify the unwrapped inner field; optional is
+      forced True if this rule has an empty alt.
     * Non-terminal with an empty alt -> ``("node", None, True)``.
     * Non-terminal without an empty alt -> ``("node", None, False)``.
     """
     if sym.kind != "nonterm":
         return ("token", None, False)
-    # Non-terminal reference.
+
+    # Recursion guard: shouldn't happen for well-formed grammars but
+    # protect against cycles like A -> _unwrap B; B -> _unwrap A.
+    seen = _seen or set()
+    if sym.name in seen:
+        return ("node", None, ctx.has_empty_alt.get(sym.name, False))
+    seen = seen | {sym.name}
+
     if sym.name in ctx.list_rules:
         return ("list", ctx.list_rules[sym.name], False)
+
+    # Look-through for _unwrap: if every non-empty alt of the rule is
+    # %ast=_unwrap, the field's effective type is the inner @-tagged
+    # child's type, not the wrapping non-terminal.
+    rule = ctx.rules_by_name.get(sym.name)
+    if rule is not None:
+        non_empty = [p for p in rule.productions if p.rhs]
+        if non_empty and all(p.ast_kind == "_unwrap" for p in non_empty):
+            inner_classifications: list[tuple[str, Optional[str], bool]] = []
+            for prod in non_empty:
+                inner_sym = next(
+                    (s for s in prod.rhs if s.field_name is not None), None
+                )
+                if inner_sym is None:
+                    continue
+                inner_classifications.append(
+                    _classify_field_source(inner_sym, ctx, seen)
+                )
+            if inner_classifications:
+                # All inner classifications must agree on type category;
+                # _validate_named_kind already checks per-production
+                # field consistency, so we just take the first.
+                kind, elem, inner_opt = inner_classifications[0]
+                # If the outer rule has an empty alt, the unwrap chain
+                # is optional even when the inner field isn't.
+                outer_opt = ctx.has_empty_alt.get(sym.name, False)
+                return (kind, elem, inner_opt or outer_opt)
+
     if ctx.has_empty_alt.get(sym.name, False):
         return ("node", None, True)
     return ("node", None, False)

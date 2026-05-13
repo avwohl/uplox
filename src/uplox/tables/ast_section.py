@@ -114,10 +114,10 @@ def _action_to_json(a: ProductionAction) -> dict[str, Any]:
             # value."
             out["source_index"] = a.source_index
         elif a.kind == "_list_init":
-            out["element_index"] = a.element_index
+            out["element_indices"] = list(a.element_indices)
         elif a.kind == "_list_extend":
             out["accumulator_index"] = a.accumulator_index
-            out["element_index"] = a.element_index
+            out["element_indices"] = list(a.element_indices)
         # _list_empty has no extra data.
     else:
         out["fields"] = [_assignment_to_json(fa) for fa in a.field_assignments]
@@ -178,14 +178,14 @@ def _action_from_json(d: dict[str, Any]) -> ProductionAction:
             return ProductionAction(
                 user_index=user_index,
                 kind=kind,
-                element_index=d.get("element_index", -1),
+                element_indices=tuple(d.get("element_indices", ())),
             )
         if kind == "_list_extend":
             return ProductionAction(
                 user_index=user_index,
                 kind=kind,
                 accumulator_index=d.get("accumulator_index", -1),
-                element_index=d.get("element_index", -1),
+                element_indices=tuple(d.get("element_indices", ())),
             )
         if kind == "_list_empty":
             return ProductionAction(user_index=user_index, kind=kind)

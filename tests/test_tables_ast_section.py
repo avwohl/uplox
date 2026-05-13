@@ -126,9 +126,9 @@ def test_list_action_round_trip():
     section = ast_to_json(plan)
     init = next(a for a in section["production_actions"] if a["kind"] == "_list_init")
     extend = next(a for a in section["production_actions"] if a["kind"] == "_list_extend")
-    assert init["element_index"] == 0
+    assert init["element_indices"] == [0]
     assert extend["accumulator_index"] == 0
-    assert extend["element_index"] == 2
+    assert extend["element_indices"] == [2]
     assert ast_from_json(section) == plan
 
 
@@ -181,10 +181,12 @@ WS    = /[ \\t\\n]+/   %skip
     section = ast_to_json(plan)
     unwrap = next(a for a in section["production_actions"] if a["kind"] == "_unwrap")
     assert unwrap["source_index"] == 1
-    # Decl.type field is auto-optional because <type_opt> has an empty alt.
+    # Decl.type field is auto-optional because <type_opt> has an empty
+    # alt. The type category is "token" because the _unwrap look-through
+    # resolves to the inner IDENT@n, which is a Token.
     decl = next(k for k in section["node_kinds"] if k["name"] == "Decl")
     type_field = next(f for f in decl["fields"] if f["name"] == "type")
-    assert type_field == {"name": "type", "type": "node", "optional": True}
+    assert type_field == {"name": "type", "type": "token", "optional": True}
 
 
 # ---- Optional flag is omitted when false (compact bundles) ------------------

@@ -362,11 +362,24 @@ def _action_body(action: ProductionAction) -> str:
         # is captured in the schema, not in the action body.
         return f"lambda ctx, rhs: rhs[{action.source_index}]"
     if kind == "_list_init":
-        return f"lambda ctx, rhs: [rhs[{action.element_index}]]"
+        # element_indices may have one entry (single-element init) or
+        # several (e.g. cowgol's <multi_target> requires at-least-two).
+        items = ", ".join(f"rhs[{i}]" for i in action.element_indices)
+        return f"lambda ctx, rhs: [{items}]"
     if kind == "_list_extend":
+        elem_idx = action.element_indices[0]
+        # Order matters: in a left-recursive list (<self> ... <element>)
+        # the accumulator comes first and we append; in a right-recursive
+        # list (<element> <self>) the element comes first and we prepend
+        # so the resulting list preserves source order.
+        if elem_idx < action.accumulator_index:
+            return (
+                f"lambda ctx, rhs: [rhs[{elem_idx}]] + "
+                f"rhs[{action.accumulator_index}]"
+            )
         return (
             f"lambda ctx, rhs: rhs[{action.accumulator_index}] + "
-            f"[rhs[{action.element_index}]]"
+            f"[rhs[{elem_idx}]]"
         )
     if kind == "_list_empty":
         return "lambda ctx, rhs: []"

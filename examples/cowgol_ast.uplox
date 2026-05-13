@@ -1,0 +1,547 @@
+# Cowgol grammar with v3 AST annotations.
+#
+# Same language as cowgol.uplox; the annotations make uplox emit
+# typed AST nodes directly, replacing the parse-tree-then-lower
+# pattern that ucow's src/parser.py + src/ast.py currently does by
+# hand (~1400 lines).
+#
+# Annotation strategy: see docs/proposals/cowgol_annotated.md for
+# the full walkthrough. In short:
+#
+#   * %ast_drop strips punctuation and structural keywords that
+#     carry no AST information (LPAREN, KW_if, etc).
+#   * Each rule with multiple alternatives uses `?` to lift the
+#     single-child dispatcher alts and %ast=Name on the structural
+#     alts that produce real nodes.
+#   * @field on RHS positions names the slot on the produced AST
+#     node. Operator tokens like '+' get @op so BinaryOp carries
+#     the operator as a Token field.
+#   * List-shaped rules are marked %ast=list element=<element>.
+#   * The <elseif_clause> non-terminal was added (vs cowgol.uplox)
+#     so the <elseif_parts> list has a real element non-terminal
+#     instead of an inline tuple.
+
+%grammar cowgol
+
+
+%define lr.type lalr
+%options
+start = program
+
+%keyword_prefix KW_
+%keywords
+and as break case const continue else elseif end if implements include
+interface is loop not or record return sub then typedef var when while nil
+int8 uint8 int16 uint16 int32 uint32 intptr
+
+%tokens
+WS         = /[ \t\r\n]+/                            %skip
+COMMENT    = /#[^\n]*/                               %skip
+
+AT_BYTESOF = '@bytesof'
+AT_INDEXOF = '@indexof'
+AT_EXTERN  = '@extern'
+AT_SIZEOF  = '@sizeof'
+AT_ALIAS   = '@alias'
+AT_DECL    = '@decl'
+AT_IMPL    = '@impl'
+AT_NEXT    = '@next'
+AT_PREV    = '@prev'
+AT_ASM     = '@asm'
+AT_AT      = '@at'
+
+NUMBER     = /0[xX][0-9A-Fa-f_]+|0[oO][0-7_]+|0[bB][01_]+|0[dD][0-9_]+|'(\\.|[^'\n])'|[0-9][0-9_]*/
+STRING     = /"(\\.|[^"\n])*"/
+IDENT      = /[A-Za-z_][A-Za-z0-9_]*/
+
+ASSIGN     = ':='
+EQ         = '=='
+NE         = '!='
+LE         = '<='
+GE         = '>='
+LSHIFT     = '<<'
+RSHIFT     = '>>'
+PLUS       = '+'
+MINUS      = '-'
+STAR       = '*'
+SLASH      = '/'
+PERCENT    = '%'
+AMP        = '&'
+PIPE       = '|'
+CARET      = '^'
+TILDE      = '~'
+LT         = '<'
+GT         = '>'
+LPAREN     = '('
+RPAREN     = ')'
+LBRACKET   = '['
+RBRACKET   = ']'
+LBRACE     = '{'
+RBRACE     = '}'
+COMMA      = ','
+COLON      = ':'
+SEMI       = ';'
+DOT        = '.'
+AT         = '@'
+
+# Punctuation and structural keywords drop from the AST. Keep
+# operator and type keywords (they carry semantic content as @op
+# or @kind fields).
+%ast_drop
+LPAREN RPAREN LBRACKET RBRACKET LBRACE RBRACE
+SEMI COMMA COLON DOT
+KW_if KW_then KW_else KW_elseif KW_end KW_loop
+KW_case KW_when KW_is KW_var KW_const KW_while
+KW_return KW_break KW_continue
+KW_sub KW_record KW_typedef KW_interface KW_include KW_implements
+KW_nil
+AT_DECL AT_IMPL AT_AT AT
+
+%rules
+
+# =========================================================================
+# Top level
+# =========================================================================
+
+<program>  : <top_items>@items   %ast=Program
+           |                     %ast=Program
+           ;
+
+<top_items> %ast=list element=<top_item>
+           : <top_item>
+           | <top_items> <top_item>
+           ;
+
+<top_item>?
+           : <include_decl>
+           | <record_decl>
+           | <typedef_decl>
+           | <interface_decl>
+           | <sub_form>
+           | <stmt>
+           ;
+
+<include_decl> : KW_include STRING@path SEMI   %ast=IncludeDecl ;
+
+# =========================================================================
+# Subroutines
+# =========================================================================
+#
+# Three shapes: full def, decl/extern (KW_sub IDENT ... SEMI), and the
+# @decl / @impl split. AT_DECL / AT_IMPL are dropped — the kind name
+# encodes "this is a forward decl / impl" without needing a marker token.
+
+<sub_form>?
+           : <sub_decl_or_def>
+           | AT_DECL <sub_decl_only>
+           | AT_IMPL <sub_impl>
+           ;
+
+<sub_decl_or_def>
+           : KW_sub IDENT@name <sub_signature>@sig <sub_attrs>@attrs
+             <implements_opt>@implements <sub_tail>@tail
+             %ast=SubDecl
+           ;
+
+<sub_decl_only>
+           : KW_sub IDENT@name <sub_signature>@sig <sub_attrs>@attrs
+             <implements_opt>@implements SEMI
+             %ast=SubForwardDecl
+           ;
+
+<sub_impl>
+           : KW_sub IDENT@name <sub_attrs>@attrs <implements_opt>@implements
+             KW_is <sub_body>@body KW_end KW_sub SEMI
+             %ast=SubImpl
+           ;
+
+# Optional ``(params) [: (returns)]`` after sub IDENT. Empty alt makes
+# the parent's @sig slot auto-optional.
+<sub_signature>
+           : LPAREN <param_list_opt>@params RPAREN <returns_opt>@returns
+             %ast=Signature
+           |
+           ;
+
+<param_list_opt>
+           : <param_list>@params   %ast=_unwrap
+           |
+           ;
+
+<param_list> %ast=list element=<param>
+           : <param>
+           | <param_list> COMMA <param>
+           ;
+
+<param>    : IDENT@name COLON <type>@type   %ast=Parameter ;
+
+<returns_opt>
+           : COLON LPAREN <param_list>@returns RPAREN   %ast=_unwrap
+           |
+           ;
+
+<sub_attrs> %ast=list element=<sub_attr>
+           : <sub_attrs> <sub_attr>
+           |
+           ;
+
+<sub_attr> : AT_EXTERN LPAREN STRING@name RPAREN   %ast=ExternAttr ;
+
+<implements_opt>
+           : KW_implements IDENT@name   %ast=_unwrap
+           |
+           ;
+
+<sub_tail>?
+           : KW_is <sub_body>@body KW_end KW_sub SEMI   %ast=SubBody
+           | SEMI                                       %ast=SubExternal
+           ;
+
+# Sub body: <sub_body_items> is the list; <sub_body> is the
+# auto-optional indirection (LALR-friendly split that the original
+# cowgol.uplox uses). The AST surface routes via _unwrap so the
+# inner list is what appears at the use site as a clean
+# list[sub_body_item] (defaulting to []).
+<sub_body>
+           : <sub_body_items>@items   %ast=_unwrap
+           |
+           ;
+
+<sub_body_items> %ast=list element=<sub_body_item>
+           : <sub_body_item>
+           | <sub_body_items> <sub_body_item>
+           ;
+
+<sub_body_item>?
+           : <record_decl>
+           | <typedef_decl>
+           | <interface_decl>
+           | <sub_form>
+           | <stmt>
+           ;
+
+# =========================================================================
+# Records
+# =========================================================================
+
+<record_decl>
+           : KW_record IDENT@name <record_base_opt>@base KW_is
+             <field_list>@fields KW_end KW_record SEMI
+             %ast=RecordDecl
+           ;
+
+<record_base_opt>
+           : COLON IDENT@name   %ast=_unwrap
+           |
+           ;
+
+<field_list> %ast=list element=<field_decl>
+           : <field_list> <field_decl>
+           |
+           ;
+
+<field_decl>
+           : IDENT@name <field_offset_opt>@offset COLON <type>@type SEMI
+             %ast=RecordField
+           ;
+
+<field_offset_opt>
+           : AT_AT LPAREN NUMBER@value RPAREN   %ast=_unwrap
+           | AT LPAREN NUMBER@value RPAREN      %ast=_unwrap
+           |
+           ;
+
+# =========================================================================
+# Typedefs and interfaces
+# =========================================================================
+
+<typedef_decl>
+           : KW_typedef IDENT@name KW_is <type>@type SEMI   %ast=TypedefDecl ;
+
+<interface_decl>
+           : KW_interface IDENT@name LPAREN <param_list_opt>@params RPAREN
+             <returns_opt>@returns SEMI
+             %ast=InterfaceDecl
+           ;
+
+# =========================================================================
+# Types
+# =========================================================================
+
+<type>     : <base_type>@base <array_suffixes>@suffixes   %ast=Type ;
+
+<base_type>?
+           : <scalar_kw>
+           | LBRACKET <type>@target RBRACKET                 %ast=PointerType
+           | AT_SIZEOF IDENT@target                          %ast=SizeOfType
+           | AT_INDEXOF IDENT@target                         %ast=IndexOfType
+           | IDENT@name                                      %ast=NamedType
+           | IDENT@name LPAREN <expr>@lo COMMA <expr>@hi RPAREN
+             %ast=RangedIntType
+           ;
+
+# Each scalar keyword token is the discriminator. We name the kind
+# explicitly per keyword so consumers can dispatch via `kind` without
+# inspecting a token's `.text`.
+<scalar_kw>?
+           : KW_int8     %ast=Int8Type
+           | KW_uint8    %ast=UInt8Type
+           | KW_int16    %ast=Int16Type
+           | KW_uint16   %ast=UInt16Type
+           | KW_int32    %ast=Int32Type
+           | KW_uint32   %ast=UInt32Type
+           | KW_intptr   %ast=IntPtrType
+           ;
+
+<array_suffixes> %ast=list element=<array_suffix>
+           : <array_suffixes> <array_suffix>
+           |
+           ;
+
+<array_suffix>?
+           : LBRACKET <expr>@size RBRACKET   %ast=ArraySized
+           | LBRACKET RBRACKET               %ast=ArrayInferred
+           ;
+
+# =========================================================================
+# Statements
+# =========================================================================
+
+<stmt>?
+           : <var_decl>
+           | <const_decl>
+           | <if_stmt>
+           | <while_stmt>
+           | <loop_stmt>
+           | <case_stmt>
+           | <return_stmt>
+           | <break_stmt>
+           | <continue_stmt>
+           | <asm_stmt>
+           | <assign_or_call_stmt>
+           ;
+
+<var_decl> : KW_var IDENT@name <var_type_opt>@type <var_init_opt>@init SEMI
+             %ast=VarDecl
+           ;
+
+<var_type_opt>
+           : COLON <type>@type   %ast=_unwrap
+           |
+           ;
+
+<var_init_opt>
+           : ASSIGN <expr>@value   %ast=_unwrap
+           |
+           ;
+
+<const_decl>
+           : KW_const IDENT@name ASSIGN <expr>@value SEMI   %ast=ConstDecl ;
+
+<return_stmt>   : KW_return SEMI               %ast=ReturnStmt ;
+<break_stmt>    : KW_break SEMI                %ast=BreakStmt ;
+<continue_stmt> : KW_continue SEMI             %ast=ContinueStmt ;
+
+<asm_stmt> : AT_ASM STRING@first <asm_more>@more SEMI   %ast=AsmStmt ;
+
+<asm_more> %ast=list element=<expr>
+           : <asm_more> COMMA <expr>
+           |
+           ;
+
+# --- assignment / call / multi-assign -----------------------------------
+
+<assign_or_call_stmt>?
+           : <expr>@expr SEMI                                          %ast=ExprStmt
+           | <expr>@target ASSIGN <expr>@value SEMI                    %ast=Assignment
+           | LPAREN <multi_target>@targets RPAREN ASSIGN <expr>@value SEMI
+             %ast=MultiAssignment
+           ;
+
+<multi_target> %ast=list element=<expr>
+           : <expr> COMMA <expr>
+           | <multi_target> COMMA <expr>
+           ;
+
+# --- control flow --------------------------------------------------------
+
+<if_stmt>  : KW_if <expr>@cond KW_then <stmt_seq>@then_body
+             <elseif_parts>@elseifs <else_part>@otherwise
+             KW_end KW_if SEMI
+             %ast=IfStmt
+           ;
+
+<elseif_parts> %ast=list element=<elseif_clause>
+           : <elseif_parts> <elseif_clause>
+           |
+           ;
+
+<elseif_clause>
+           : KW_elseif <expr>@cond KW_then <stmt_seq>@body   %ast=ElseIf
+           ;
+
+<else_part>
+           : KW_else <stmt_seq>@body   %ast=_unwrap
+           |
+           ;
+
+<while_stmt>
+           : KW_while <expr>@cond KW_loop <stmt_seq>@body
+             KW_end KW_loop SEMI
+             %ast=WhileStmt
+           ;
+
+<loop_stmt>
+           : KW_loop <stmt_seq>@body KW_end KW_loop SEMI   %ast=LoopStmt ;
+
+<case_stmt>
+           : KW_case <expr>@subject KW_is <case_arms>@arms
+             KW_end KW_case SEMI
+             %ast=CaseStmt
+           ;
+
+<case_arms> %ast=list element=<case_arm>
+           : <case_arm>
+           | <case_arms> <case_arm>
+           ;
+
+<case_arm>?
+           : KW_when <expr_list>@values COLON <stmt_seq>@body   %ast=CaseArm
+           | KW_when KW_else COLON <stmt_seq>@body              %ast=CaseElse
+           ;
+
+<expr_list> %ast=list element=<expr>
+           : <expr>
+           | <expr_list> COMMA <expr>
+           ;
+
+# stmt_seq is right-recursive (matches cowgol.uplox).
+<stmt_seq> %ast=list element=<stmt_seq_item>
+           : <stmt_seq_item> <stmt_seq>
+           |
+           ;
+
+<stmt_seq_item>?
+           : <stmt>
+           | <sub_form>
+           | <interface_decl>
+           ;
+
+# =========================================================================
+# Expressions
+# =========================================================================
+
+<expr>?    : <logical_or> ;
+
+<logical_or>?
+           : <logical_or>@lhs KW_or@op <logical_and>@rhs   %ast=LogicalOp
+           | <logical_and>
+           ;
+
+<logical_and>?
+           : <logical_and>@lhs KW_and@op <logical_not>@rhs   %ast=LogicalOp
+           | <logical_not>
+           ;
+
+<logical_not>?
+           : KW_not <logical_not>@operand   %ast=NotOp
+           | <comparison>
+           ;
+
+<comparison>?
+           : <bitwise_or>
+           | <bitwise_or>@lhs EQ@op <bitwise_or>@rhs   %ast=Comparison
+           | <bitwise_or>@lhs NE@op <bitwise_or>@rhs   %ast=Comparison
+           | <bitwise_or>@lhs LT@op <bitwise_or>@rhs   %ast=Comparison
+           | <bitwise_or>@lhs LE@op <bitwise_or>@rhs   %ast=Comparison
+           | <bitwise_or>@lhs GT@op <bitwise_or>@rhs   %ast=Comparison
+           | <bitwise_or>@lhs GE@op <bitwise_or>@rhs   %ast=Comparison
+           ;
+
+<bitwise_or>?
+           : <bitwise_or>@lhs PIPE@op <bitwise_xor>@rhs   %ast=BinaryOp
+           | <bitwise_xor>
+           ;
+
+<bitwise_xor>?
+           : <bitwise_xor>@lhs CARET@op <bitwise_and>@rhs   %ast=BinaryOp
+           | <bitwise_and>
+           ;
+
+<bitwise_and>?
+           : <bitwise_and>@lhs AMP@op <shift>@rhs   %ast=BinaryOp
+           | <shift>
+           ;
+
+<shift>?
+           : <shift>@lhs LSHIFT@op <additive>@rhs   %ast=BinaryOp
+           | <shift>@lhs RSHIFT@op <additive>@rhs   %ast=BinaryOp
+           | <additive>
+           ;
+
+<additive>?
+           : <additive>@lhs PLUS@op <multiplicative>@rhs   %ast=BinaryOp
+           | <additive>@lhs MINUS@op <multiplicative>@rhs   %ast=BinaryOp
+           | <multiplicative>
+           ;
+
+<multiplicative>?
+           : <multiplicative>@lhs STAR@op <cast>@rhs    %ast=BinaryOp
+           | <multiplicative>@lhs SLASH@op <cast>@rhs   %ast=BinaryOp
+           | <multiplicative>@lhs PERCENT@op <cast>@rhs %ast=BinaryOp
+           | <cast>
+           ;
+
+<cast>?    : <cast>@target KW_as <type>@type   %ast=Cast
+           | <unary>
+           ;
+
+<unary>?   : MINUS <unary>@operand                  %ast=Negate
+           | TILDE <unary>@operand                  %ast=BitNot
+           | AMP <unary>@operand                    %ast=AddressOf
+           | AT_SIZEOF <unary>@operand              %ast=SizeOf
+           | AT_BYTESOF <unary>@operand             %ast=BytesOf
+           | AT_BYTESOF <scalar_kw>@scalar          %ast=BytesOfType
+           | AT_INDEXOF <unary>@operand             %ast=IndexOf
+           | AT_NEXT <unary>@operand                %ast=Next
+           | AT_PREV <unary>@operand                %ast=Prev
+           | <postfix>
+           ;
+
+<postfix>?
+           : <primary>
+           | <postfix>@callee LPAREN <arg_list_opt>@args RPAREN   %ast=Call
+           | <postfix>@array LBRACKET <expr>@index RBRACKET       %ast=ArrayAccess
+           | <postfix>@record DOT IDENT@field                     %ast=FieldAccess
+           ;
+
+<arg_list_opt>
+           : <arg_list>@args   %ast=_unwrap
+           |
+           ;
+
+<arg_list> %ast=list element=<expr>
+           : <expr>
+           | <arg_list> COMMA <expr>
+           ;
+
+<primary>?
+           : NUMBER@value                                %ast=NumberLiteral
+           | STRING@value                                %ast=StringLiteral
+           | KW_nil                                      %ast=NilLiteral
+           | IDENT@name                                  %ast=Identifier
+           | LPAREN <expr> RPAREN
+           | LBRACE <init_list_opt>@items RBRACE         %ast=ArrayInitializer
+           | LBRACKET <expr>@operand RBRACKET            %ast=Dereference
+           ;
+
+<init_list_opt>
+           : <init_list>@items          %ast=_unwrap
+           | <init_list>@items COMMA    %ast=_unwrap
+           |
+           ;
+
+<init_list> %ast=list element=<expr>
+           : <expr>
+           | <init_list> COMMA <expr>
+           ;

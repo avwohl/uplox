@@ -143,10 +143,10 @@ def test_list_rule_init_and_extend():
     actions = plan.production_actions
     assert actions[0].kind == "Call"
     assert actions[1].kind == "_list_init"
-    assert actions[1].element_index == 0
+    assert actions[1].element_indices == (0,)
     assert actions[2].kind == "_list_extend"
     assert actions[2].accumulator_index == 0
-    assert actions[2].element_index == 2  # <args> COMMA <expr> -> COMMA dropped, but raw index 2
+    assert actions[2].element_indices == (2,)  # <args> COMMA <expr> -> COMMA dropped, but raw index 2
 
 
 def test_list_field_typed_as_list():
@@ -197,19 +197,50 @@ WS    = /[ \\t\\n]+/   %skip
 
 
 def test_list_shape_with_extra_non_drop_rejected():
+    """Extra non-drop non-element non-self tokens are rejected — the
+    list's element role is unambiguous, but stray tokens leave the
+    grammar's intent unclear (separator? attribute? wrap?)."""
     src = """
 %grammar t
 %tokens
 IDENT = /[A-Za-z_][A-Za-z0-9_]*/
+EXTRA = 'extra'
 WS    = /[ \\t\\n]+/   %skip
 %rules
 <things> %ast=list element=<thing>
-        : <thing> <thing>
+        : <thing> EXTRA
         ;
 <thing>?: IDENT@n   %ast=T ;
 """
     with pytest.raises(AstPlanError, match="shape not recognised"):
         compile_ast_plan(read_source(src))
+
+
+def test_list_init_accepts_multi_element_shape():
+    """``<multi_target> : <expr> COMMA <expr>`` in cowgol — the init
+    alternative consumes two elements as the seed list."""
+    src = """
+%grammar t
+%tokens
+IDENT = /[A-Za-z_][A-Za-z0-9_]*/
+COMMA = ','
+WS    = /[ \\t\\n]+/   %skip
+%ast_drop COMMA
+%rules
+<pair> %ast=list element=<atom>
+       : <atom> COMMA <atom>
+       | <pair> COMMA <atom>
+       ;
+<atom>?: IDENT@n   %ast=Atom ;
+"""
+    plan = compile_ast_plan(read_source(src))
+    init = plan.production_actions[0]
+    assert init.kind == "_list_init"
+    assert init.element_indices == (0, 2)
+    extend = plan.production_actions[1]
+    assert extend.kind == "_list_extend"
+    assert extend.accumulator_index == 0
+    assert extend.element_indices == (2,)
 
 
 # ---- _unwrap ----------------------------------------------------------------
