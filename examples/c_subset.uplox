@@ -63,6 +63,10 @@ KW_RESTRICT = 'restrict'
 KW_SIZEOF        = 'sizeof'
 KW_ALIGNOF       = 'alignof'
 KW_STATIC_ASSERT = 'static_assert'
+KW_GENERIC       = '_Generic'
+KW_VA_ARG        = 'va_arg'
+KW_OFFSETOF      = 'offsetof'
+KW_TYPEDEF       = 'typedef'
 
 # Control flow.
 KW_IF      = 'if'
@@ -90,6 +94,14 @@ KW_TRUE    = 'true'
 KW_FALSE   = 'false'
 
 IDENT      = /[A-Za-z_][A-Za-z0-9_]*/
+
+# TYPEDEF_NAME is a synthetic terminal — never emitted by the lexer
+# directly. A token filter (uplox.hooks.TypedefTracker or equivalent)
+# rewrites IDENT to TYPEDEF_NAME when the parser has previously
+# recorded the identifier as a typedef name. Declared after IDENT so
+# IDENT wins all longest-match ties; the regex here exists only so
+# uplox accepts the name as a declared terminal.
+TYPEDEF_NAME = /[A-Za-z_][A-Za-z0-9_]*/
 
 # Multi-char operators first.
 LSHIFT_EQ  = '<<='
@@ -143,6 +155,13 @@ GT         = '>'
 # Punctuation has no AST significance. Structural keywords too — the
 # kind name encodes "this is an if / while / return" so the keyword
 # token itself carries no field-level information.
+# Hooks: the parser fires record_typedef on post_reduce of every
+# typedef declaration so the host's typedef-name tracker (e.g.
+# uplox.hooks.TypedefTracker) can update its name set and the token
+# filter rewrites subsequent IDENT->TYPEDEF_NAME.
+%hooks
+record_typedef post_reduce
+
 %ast_drop
 LPAREN RPAREN LBRACKET RBRACKET LBRACE RBRACE
 SEMI COMMA COLON DOT QUESTION
@@ -150,6 +169,7 @@ KW_IF KW_ELSE KW_WHILE KW_DO KW_FOR
 KW_SWITCH KW_CASE KW_DEFAULT KW_GOTO
 KW_RETURN KW_BREAK KW_CONTINUE
 KW_STRUCT KW_UNION KW_ENUM KW_ASM
+KW_TYPEDEF
 
 %rules
 
@@ -181,6 +201,8 @@ KW_STRUCT KW_UNION KW_ENUM KW_ASM
       %ast=Declaration
     | <type>@type_spec SEMI
       %ast=TypeDeclaration
+    | KW_TYPEDEF <type>@type_spec <init_declarators>@declarators SEMI
+      %ast=TypedefDecl %hook=record_typedef
     | KW_STATIC_ASSERT LPAREN <conditional_expr>@condition RPAREN SEMI
       %ast=StaticAssert
     | KW_STATIC_ASSERT LPAREN <conditional_expr>@condition COMMA STRING_LIT@message RPAREN SEMI
@@ -263,6 +285,8 @@ KW_STRUCT KW_UNION KW_ENUM KW_ASM
 <designator>?
     : DOT IDENT@field                            %ast=FieldDesignator
     | LBRACKET <conditional_expr>@index RBRACKET %ast=IndexDesignator
+    | LBRACKET <conditional_expr>@start ELLIPSIS <conditional_expr>@end RBRACKET
+      %ast=RangeDesignator
     ;
 
 # Parameter list. ``()`` is no params; ``(void)`` parses as a single
@@ -334,6 +358,7 @@ KW_STRUCT KW_UNION KW_ENUM KW_ASM
     | KW_BOOL                       %ast=BoolType
     | KW_UNSIGNED                   %ast=UnsignedIntType   # bare ``unsigned`` = unsigned int
     | KW_SIGNED                     %ast=IntType           # bare ``signed`` = int
+    | TYPEDEF_NAME@name             %ast=NamedType         # via the typedef-name lex hook
     | <struct_or_union_spec>
     | <enum_spec>
     ;
@@ -809,6 +834,34 @@ KW_STRUCT KW_UNION KW_ENUM KW_ASM
     | KW_TRUE@value          %ast=BoolLiteral
     | KW_FALSE@value         %ast=BoolLiteral
     | LPAREN <expr> RPAREN
+    | LPAREN <compound_stmt>@stmt RPAREN
+      %ast=StmtExpr
+    | KW_GENERIC LPAREN <assignment_expr>@controlling_expr COMMA <generic_assoc_list>@assocs RPAREN
+      %ast=GenericSelection
+    | KW_VA_ARG LPAREN <assignment_expr>@va_list_expr COMMA <type_name>@type RPAREN
+      %ast=VaArgExpr
+    | KW_OFFSETOF LPAREN <type_name>@type COMMA <offsetof_designator>@designator RPAREN
+      %ast=OffsetofExpr
+    ;
+
+# Generic selection: each association is `<type_name> : expr` or
+# `default : expr`. Split present/default into distinct kinds.
+<generic_assoc_list> %ast=list element=<generic_association>
+    : <generic_association>
+    | <generic_assoc_list> COMMA <generic_association>
+    ;
+
+<generic_association>?
+    : <type_name>@type COLON <assignment_expr>@expr   %ast=GenericAssoc
+    | KW_DEFAULT COLON <assignment_expr>@expr         %ast=GenericDefault
+    ;
+
+# offsetof's second argument is a member designator chain: an IDENT
+# optionally followed by .field and [expr] accesses.
+<offsetof_designator>?
+    : IDENT@name                                                       %ast=OffsetofMember
+    | <offsetof_designator>@base DOT IDENT@field                       %ast=OffsetofField
+    | <offsetof_designator>@base LBRACKET <expr>@index RBRACKET        %ast=OffsetofIndex
     ;
 
 <string_literal> %ast=list element=<string_piece>
