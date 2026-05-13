@@ -1,7 +1,10 @@
 # Proposal: declarative AST generation from `.uplox` grammars
 
-**Status:** draft, May 2026 — design decisions locked (see "Open
-questions" below); implementation not started.
+**Status:** draft, May 2026 — design decisions locked, validated
+against worked prototypes for calc
+([`calc_annotated.md`](calc_annotated.md)) and cowgol
+([`cowgol_annotated.md`](cowgol_annotated.md)); implementation not
+started.
 
 **Summary.** Add three grammar-source annotations (`%ast_drop`,
 `?` on LHS, `%ast=` per alternative, `@field` per RHS position)
@@ -221,9 +224,17 @@ opt-in; grammars without them behave exactly as today.
 
 ### 1. `?` on a non-terminal's LHS — single-child lift
 
-If a production of `<rule>?` has exactly one RHS symbol, the AST
-builder returns that child directly without wrapping. The
-precedence-ladder canonical case:
+If a production of `<rule>?` has exactly one RHS symbol (after
+`%ast_drop` filtering) **and carries no `%ast=` annotation of
+its own**, the AST builder returns that child directly without
+wrapping. Productions with an explicit `%ast=Name` win: the
+named node is produced regardless of child count, and the `?`
+on the LHS is silently no-op for those alternatives. This
+matters for dispatcher rules like `<primary>?` whose every
+alternative has its own `%ast=` — the `?` is harmless but does
+nothing.
+
+The precedence-ladder canonical case:
 
     <expr>?   : <expr> '+' <term>    %ast=Add
               | <expr> '-' <term>    %ast=Sub
@@ -271,6 +282,31 @@ produce the same kind of node:
 
 The operator distinguishes them at the AST level. See "Open
 question 3" below for how the operator becomes a field.
+
+**Reserved kind `%ast=_unwrap`.** Common pattern: an optional
+clause exists for grammar-shape reasons (matched/unmatched
+split, empty-alt for optionality) and has exactly one
+meaningful child you want to name on the parent. Wrapping in a
+one-field node forces the consumer to always unwrap; using `?`
+on the LHS loses the field name on the parent slot. `_unwrap`
+threads the named child through:
+
+    <var_decl> : KW_var IDENT@name <var_type_opt>@type
+                 <var_init_opt>@init SEMI            %ast=VarDecl
+               ;
+
+    <var_type_opt>
+              : COLON <type>@type   %ast=_unwrap     # contributes <type> as VarDecl.type
+              |                                      # empty alt -> VarDecl.type is None
+              ;
+
+The empty alternative still triggers auto-optional on the
+parent's slot (see OQ1) — so `VarDecl.type` is
+`Optional[Type]`. The non-empty alternative supplies the inner
+`<type>` directly; no `VarType` wrapper exists in the AST.
+
+`_unwrap` rules must have exactly one `@field`-annotated RHS
+position in the non-empty alternative. Codegen errors otherwise.
 
 ### 3. `@field` per RHS position — field naming
 
@@ -437,11 +473,18 @@ A new top-level `ast` section in the JSON bundle:
     listed fields from the RHS positions.
   * `kind: _lift` — pass through `rhs[<i>]` unchanged (the `?`
     behavior).
+  * `kind: _unwrap` — like `_lift`, but the producing rule had
+    exactly one `@field`-annotated RHS position. The runtime
+    contributes that child to the parent's named slot rather
+    than producing a node.
   * `kind: _list_extend` — append `rhs[<i>]` onto an
     accumulator (list-shaped rules; generated automatically
     from the rule structure).
   * `kind: _list_init` — start a new accumulator (the base
     case of a list rule).
+  * `kind: _list_empty` — yield an empty accumulator (the
+    empty alternative of a list-shaped rule with an empty
+    alt; see OQ1 on list defaults).
   * Grammars without annotations serialize without an `ast`
     section at all.
 
@@ -675,16 +718,36 @@ included; consumers parse from `.text` when they want a typed
 value.
 
 * `list` — for list-shaped rules like
-  `<args> : <args> ',' <expr> | <expr>`. The generator detects
-  the list shape from the rule structure (left- or
-  right-recursive with a leaf alternative) and treats a `@field`
-  reference to that non-terminal as a list field. Exact grammar
-  surface for marking the list-shaped rule itself is TBD during
-  implementation; the schema-level commitment is firm.
+  `<args> : <args> ',' <expr> | <expr>`. The grammar marks the
+  list-shaped rule itself with `%ast=list element=<inner>`; a
+  `@field` reference to that non-terminal from any parent rule
+  produces a `list` field whose element type matches.
+* `list` defaults to **empty list, not `Optional[list]`.** A
+  list-shaped rule with an empty alternative produces `[]` when
+  the alt fires. Consumers iterate without None-checking.
+  (`Optional[list]` was the natural inference from auto-optional,
+  but `[]` is the universally correct semantic and removes
+  ceremony from every list consumer. The cowgol prototype
+  surfaced 11+ list slots where this matters.)
 * `optional` — auto-derived: any `@field` whose referenced
   non-terminal has an empty alternative is `optional: true` in
-  the schema. No new grammar marker needed; the empty alt is
-  the signal.
+  the schema, *unless* the field is `list`-typed (per above).
+  No new grammar marker needed; the empty alt is the signal.
+* **Synthesised list elements rejected.** A list whose element
+  is a tuple (e.g. cowgol's `<elseif_parts>` where each iteration
+  produces `KW_elseif <expr> KW_then <stmt_seq>`) requires a
+  real intermediate non-terminal — `<elseif_clause>` carrying
+  `@cond` and `@then_body` — listed as the `element=` target.
+  This costs one extra production per such list; it avoids
+  embedding a per-element annotation sub-language. The cowgol
+  walkthrough flags `<elseif_parts>` as the canonical case.
+* **String-constant attributes deferred to v3.1.** A node kind
+  carrying a static string (e.g. `ScalarType(kind="int8")` with
+  no Token wrapper) is convenient but not load-bearing in v3.0
+  — consumers use a `Token` field and read `.text`. If
+  experience after the ucow migration shows consumers always
+  doing the `.text` indirection on these fields, v3.1 adds an
+  explicit `@field=value` literal-constant syntax.
 * No eager value parsing. `NUMBER@value` exposes the `Token`;
   consumers do `int(value.text)` themselves. Adding integer /
   float / unescaped-string conversion would be a v3.1
