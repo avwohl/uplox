@@ -12,8 +12,9 @@ from uplox.gen.lua import emit_lua
 from uplox.lex.build import lex_from_ir
 from uplox.parse.grammar import compile_grammar
 from uplox.parse.lr1 import build_lr1
+from uplox.spec.ast_plan import compile_ast_plan
 from uplox.spec.reader import read_source
-from uplox.tables import dfa_to_json, empty_bundle, table_to_json
+from uplox.tables import ast_to_json, dfa_to_json, empty_bundle, table_to_json
 
 
 # Lua may live in unusual paths; widen the search a bit.
@@ -430,3 +431,232 @@ os.exit(ok and 0 or 1)
     r = subprocess.run([LUA, str(driver)], capture_output=True, text=True, timeout=10)
     assert r.returncode != 0
     assert "unterminated" in r.stderr.lower()
+
+
+# ============================================================================
+# v3 auto-AST in Lua
+# ============================================================================
+
+
+CALC_ANNOTATED = """
+%grammar calc
+%define lr.type lalr
+%options
+start = expr
+%tokens
+NUMBER = /[0-9]+/
+PLUS   = '+'
+MINUS  = '-'
+STAR   = '*'
+SLASH  = '/'
+LPAREN = '('
+RPAREN = ')'
+WS     = /[ \\t\\n]+/   %skip
+%ast_drop
+LPAREN RPAREN
+%rules
+<expr>?   : <expr>@lhs '+'@op <term>@rhs   %ast=BinOp
+          | <expr>@lhs '-'@op <term>@rhs   %ast=BinOp
+          | <term>
+          ;
+<term>?   : <term>@lhs '*'@op <factor>@rhs %ast=BinOp
+          | <term>@lhs '/'@op <factor>@rhs %ast=BinOp
+          | <factor>
+          ;
+<factor>? : NUMBER@value                   %ast=NumLit
+          | '(' <expr> ')'
+          ;
+"""
+
+
+def build_calc_ast_bundle() -> dict:
+    ir = read_source(CALC_ANNOTATED)
+    dfa, tokens, skip = lex_from_ir(ir)
+    table = build_lr1(compile_grammar(ir))
+    bundle = empty_bundle(ir.name)
+    bundle["lex"] = dfa_to_json(dfa, tokens=tokens, skip=skip)
+    bundle["parse"] = table_to_json(table)
+    bundle["ast"] = ast_to_json(compile_ast_plan(ir))
+    return bundle
+
+
+def _emit_lua_module(tmp_path: Path, bundle: dict) -> Path:
+    module = tmp_path / f"uplox_{bundle['meta']['grammar']}.lua"
+    module.write_text(emit_lua(bundle))
+    return module
+
+
+def test_lua_ast_module_exposes_kinds(tmp_path):
+    bundle = build_calc_ast_bundle()
+    _emit_lua_module(tmp_path, bundle)
+    driver = tmp_path / "d.lua"
+    driver.write_text(f"""
+package.path = '{tmp_path}/?.lua;' .. package.path
+local M = require('uplox_calc')
+print(M.AST_KINDS.BinOp)
+print(M.AST_KINDS.NumLit)
+""")
+    r = subprocess.run([LUA, str(driver)], capture_output=True, text=True, timeout=10)
+    assert r.returncode == 0, r.stderr
+    lines = r.stdout.strip().split("\n")
+    # Both kinds should be present and distinct integer ordinals.
+    assert lines[0].isdigit() and lines[1].isdigit()
+    assert lines[0] != lines[1]
+
+
+def test_lua_ast_calc_end_to_end(tmp_path):
+    bundle = build_calc_ast_bundle()
+    _emit_lua_module(tmp_path, bundle)
+    driver = tmp_path / "d.lua"
+    driver.write_text(f"""
+package.path = '{tmp_path}/?.lua;' .. package.path
+local M = require('uplox_calc')
+local p = M.new('(1 + 2) * 3')
+local ast = p:parse_ast()
+assert(ast, 'parse_ast returned nil: ' .. tostring(p.error))
+assert(ast.kind == 'BinOp', 'outer kind: ' .. ast.kind)
+assert(ast.op.text == '*', 'outer op: ' .. ast.op.text)
+assert(ast.lhs.kind == 'BinOp', 'lhs kind: ' .. ast.lhs.kind)
+assert(ast.lhs.op.text == '+', 'lhs op: ' .. ast.lhs.op.text)
+assert(ast.rhs.kind == 'NumLit', 'rhs kind: ' .. ast.rhs.kind)
+assert(ast.rhs.value.text == '3', 'rhs value: ' .. ast.rhs.value.text)
+print('ok')
+""")
+    r = subprocess.run([LUA, str(driver)], capture_output=True, text=True, timeout=10)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() == "ok"
+
+
+COWGOL_MINI_LUA = """
+%grammar mini
+%options
+start = program
+%keyword_prefix KW_
+%keywords
+sub is end var return
+
+%tokens
+WS     = /[ \\t\\n]+/   %skip
+NUMBER = /[0-9]+/
+IDENT  = /[A-Za-z_][A-Za-z0-9_]*/
+COLON  = ':'
+COMMA  = ','
+SEMI   = ';'
+ASSIGN = ':='
+LPAREN = '('
+RPAREN = ')'
+
+%ast_drop
+LPAREN RPAREN COLON SEMI COMMA
+KW_sub KW_is KW_end KW_var KW_return
+
+%rules
+<program> : <items>@items   %ast=Program
+          |                  %ast=Program
+          ;
+
+<items> %ast=list element=<item>
+        : <item>
+        | <items> <item>
+        ;
+
+<item>? : <sub_decl>
+        | <stmt>
+        ;
+
+<sub_decl> : KW_sub IDENT@name LPAREN <param_list_opt>@params RPAREN
+             KW_is <body>@body KW_end KW_sub SEMI
+             %ast=SubDecl
+           ;
+
+<param_list_opt> : <params>@params   %ast=_unwrap
+                 |
+                 ;
+
+<params> %ast=list element=<param>
+         : <param>
+         | <params> COMMA <param>
+         ;
+
+<param> : IDENT@name COLON IDENT@type   %ast=Param ;
+
+<body> : <body_stmts>@stmts   %ast=_unwrap
+       |
+       ;
+
+<body_stmts> %ast=list element=<stmt>
+       : <stmt>
+       | <body_stmts> <stmt>
+       ;
+
+<stmt>? : <var_decl>
+        | <return_stmt>
+        ;
+
+<var_decl> : KW_var IDENT@name <var_init_opt>@init SEMI   %ast=VarDecl ;
+
+<var_init_opt> : ASSIGN NUMBER@value   %ast=_unwrap
+               |
+               ;
+
+<return_stmt> : KW_return SEMI   %ast=ReturnStmt ;
+"""
+
+
+def build_mini_ast_bundle() -> dict:
+    ir = read_source(COWGOL_MINI_LUA)
+    dfa, tokens, skip = lex_from_ir(ir)
+    table = build_lr1(compile_grammar(ir))
+    bundle = empty_bundle(ir.name)
+    bundle["lex"] = dfa_to_json(dfa, tokens=tokens, skip=skip)
+    bundle["parse"] = table_to_json(table)
+    bundle["ast"] = ast_to_json(compile_ast_plan(ir))
+    return bundle
+
+
+def test_lua_ast_lists_optionals_unwrap(tmp_path):
+    bundle = build_mini_ast_bundle()
+    _emit_lua_module(tmp_path, bundle)
+    driver = tmp_path / "d.lua"
+    driver.write_text(f"""
+package.path = '{tmp_path}/?.lua;' .. package.path
+local M = require('uplox_mini')
+local p = M.new([[
+sub f(x: int8, y: int8) is
+    var a := 1;
+    var b;
+    return;
+end sub;
+]])
+local ast = p:parse_ast()
+assert(ast, 'parse_ast returned nil: ' .. tostring(p.error))
+assert(ast.kind == 'Program', ast.kind)
+assert(#ast.items == 1, '#items = ' .. #ast.items)
+local sub = ast.items[1]
+assert(sub.kind == 'SubDecl', sub.kind)
+assert(sub.name.text == 'f', sub.name.text)
+assert(#sub.params == 2, '#params = ' .. #sub.params)
+assert(sub.params[1].name.text == 'x', sub.params[1].name.text)
+assert(sub.params[1].type.text == 'int8', sub.params[1].type.text)
+assert(#sub.body == 3, '#body = ' .. #sub.body)
+local v1 = sub.body[1]
+assert(v1.kind == 'VarDecl' and v1.name.text == 'a', 'v1: ' .. v1.kind)
+assert(v1.init ~= nil and v1.init.text == '1', 'v1.init')
+local v2 = sub.body[2]
+assert(v2.kind == 'VarDecl' and v2.name.text == 'b', 'v2: ' .. v2.kind)
+assert(v2.init == nil, 'v2.init should be nil')
+assert(sub.body[3].kind == 'ReturnStmt', sub.body[3].kind)
+print('ok')
+""")
+    r = subprocess.run([LUA, str(driver)], capture_output=True, text=True, timeout=10)
+    assert r.returncode == 0, (
+        f"exit={r.returncode}, stdout={r.stdout!r}, stderr={r.stderr!r}"
+    )
+    assert r.stdout.strip() == "ok"
+
+
+def test_lua_unannotated_emits_no_ast(tmp_path):
+    bundle = build_bundle()
+    module_text = emit_lua(bundle)
+    assert "parse_ast" not in module_text
+    assert "AST_KINDS" not in module_text

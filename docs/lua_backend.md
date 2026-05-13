@@ -81,7 +81,33 @@ typedef table. Use it as the template for any feedback-style grammar.
 state mutated during parsing. Two grammars produce two distinct modules
 under different `require` paths.
 
+## v3 auto-AST emission
+
+When the grammar carries v3 AST annotations, the Lua module
+exposes a typed AST API:
+
+* `M.AST_KINDS` — table mapping kind name -> integer ordinal.
+* `Parser:parse_ast()` — calls `parse()` then builds and stores
+  the AST root. Returns the root table on success, `nil` on
+  failure (inspect `parser.error`).
+
+Each AST node is a Lua table with `kind = "KindName"`, `pos =
+{ start_line, start_column, end_line, end_column }`, and one
+entry per declared field. List fields are Lua arrays; token
+fields are references to the parse-tree leaf tables (which
+carry `.text`, `.line`, `.column`, `.kind`).
+
+```lua
+local M = require('uplox_calc')
+local ast = M.new('(1 + 2) * 3'):parse_ast()
+-- ast.kind == 'BinOp', ast.op.text == '*', ast.lhs.kind == 'BinOp'
+```
+
+Grammars without v3 annotations emit byte-identical Lua to
+before — the surface is purely additive.
+
 ## Status of out-of-scope items
 
-Same as C / C++: no semantic-action injection beyond the post-reduce
-hook, no error recovery. Walk the parse tree.
+Same as C / C++: no semantic-action injection beyond the
+post-reduce hook (or the v3 auto-AST surface when annotations
+are present), no error recovery. Walk the parse tree.

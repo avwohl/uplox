@@ -174,6 +174,32 @@ before erroring. This is what makes the typedef-name hack work in
 canonical LR(1) — without default reductions, the parser errors before
 the post-reduce hook can update the host's typedef set.
 
+## v3 auto-AST emission
+
+When the grammar carries v3 AST annotations (see
+`docs/proposals/auto_ast.md`), the C backend appends a typed AST
+surface alongside the parse-tree API:
+
+* `enum uplox_<g>_ast_kind` — one entry per declared `%ast=Name`.
+* `struct uplox_<g>_ast_pos` — start/end source spans.
+* `struct uplox_<g>_ast_<KindName>` — one per kind, with named
+  fields (token fields as `uplox_<g>_node *` parse-tree leaves,
+  list fields as `T ** + int _count` pairs, node fields as
+  `uplox_<g>_ast *`).
+* `struct uplox_<g>_ast` — tagged union: `kind`, `pos`, and a
+  union of all per-kind structs.
+* `uplox_<g>_parse_ast(ctx, &out)` — parses, then walks the
+  parse tree to build the AST. Returns 0 on success.
+* `uplox_<g>_ast_kind_name(int kind)` — human-readable kind name
+  for debugging.
+
+Memory: AST nodes and list buffers are tracked on the ctx and
+freed by `uplox_<g>_destroy()`. Token fields share storage with
+the parse-tree leaves (no copy).
+
+Grammars without v3 annotations emit byte-identical C to before
+— the surface is purely additive.
+
 ## What's still out of scope
 
 * Custom semantic actions. The grammar's `{ ... }` action text is copied
@@ -181,7 +207,8 @@ the post-reduce hook can update the host's typedef set.
   per-production semantic actions either walk the parse tree post-parse
   or use the post-reduce hook described above (which carries the
   production index and the just-built node — most "semantic action" use
-  cases reduce to that).
+  cases reduce to that). The v3 auto-AST surface (above) is the
+  preferred path for "decide what each rule produces."
 * Error recovery. The driver stops at the first error.
 
 These restrictions match what the uc* front-ends actually need from a

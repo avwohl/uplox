@@ -86,8 +86,32 @@ implements the full typedef-name hack with `std::function` closures
 capturing a shared typedef set. It's the closest analogue to the C
 worked example.
 
+## v3 auto-AST emission
+
+When the grammar carries v3 AST annotations, the C++ backend emits
+a class hierarchy alongside the parse-tree API:
+
+* `enum class uplox::<g>::AstKind` — one entry per declared kind.
+* `struct uplox::<g>::AstPos` — start/end source spans.
+* `struct uplox::<g>::AstNode` — base class with `kind`, `pos`,
+  and a virtual destructor.
+* `struct uplox::<g>::<KindName> : AstNode` — one per `%ast=Name`,
+  with named fields (token fields as `const Node*`, list fields
+  as `std::vector<AstNode*>`, node fields as `AstNode*`).
+* `Parser::parse_ast()` and `Parser::ast_root()` — typed entry
+  alongside `parse()` / `root()`. Ownership stays with the
+  Parser; nodes are valid for its lifetime.
+
+See `docs/proposals/auto_ast.md` for the design and
+`docs/proposals/calc_annotated.md` /
+`docs/proposals/cowgol_annotated.md` for worked examples.
+
+Grammars without v3 annotations emit byte-identical C++ to before
+— the surface is purely additive.
+
 ## Status of out-of-scope items
 
 Same as the C backend: no semantic-action injection beyond the
-post-reduce hook, no error recovery in the driver itself. Use the
-parse tree.
+post-reduce hook (or, when v3 annotations are present, the
+typed AST surface), no error recovery in the driver itself.
+Use the parse tree.
