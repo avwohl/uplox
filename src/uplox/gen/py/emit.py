@@ -335,6 +335,15 @@ def _emit_action_table(plan: AstPlan) -> list[str]:
     Each entry is a lambda computing the new stack value from
     ``(ctx, rhs)``. The runtime calls it during reduction.
     """
+    # Field-type lookup: (kind_name, field_name) -> NodeField.type_kind.
+    # Used by _action_body to wrap list-field assignments with `or []`,
+    # so an absent _unwrap wrapper (empty alt) yields the schema's
+    # default empty list instead of None on the parent.
+    field_types: dict[tuple[str, str], str] = {}
+    for kind in plan.node_kinds:
+        for f in kind.fields:
+            field_types[(kind.name, f.name)] = f.type_kind
+
     out = ["_AST_ACTIONS: dict[int, Callable[[ParseContext, list], Any]] = {"]
     # The augmented-start production (grammar index 0) lifts rhs[0] —
     # that's the user's start non-terminal's value, which by the time
@@ -342,14 +351,28 @@ def _emit_action_table(plan: AstPlan) -> list[str]:
     out.append("    0: lambda ctx, rhs: rhs[0],")
     for action in plan.production_actions:
         grammar_idx = action.user_index + 1
-        body = _action_body(action)
+        body = _action_body(action, field_types)
         out.append(f"    {grammar_idx}: {body},")
     out.append("}")
     return out
 
 
-def _action_body(action: ProductionAction) -> str:
-    """Build the lambda body for one ProductionAction."""
+def _action_body(
+    action: ProductionAction,
+    field_types: dict[tuple[str, str], str] | None = None,
+) -> str:
+    """Build the lambda body for one ProductionAction.
+
+    ``field_types`` maps ``(kind_name, field_name)`` to the field's
+    ``type_kind`` (one of ``"node"`` / ``"token"`` / ``"list"``). When
+    a named-kind action assigns a list field from an RHS position, the
+    rhs slot may carry ``None`` because the source non-terminal's
+    empty alt fired (via ``_unwrap`` look-through). Coalesce to ``[]``
+    per the OQ1 resolution: list fields default to empty list, never
+    None.
+    """
+    if field_types is None:
+        field_types = {}
     kind = action.kind
     if kind == "_lift":
         if action.source_index < 0:
@@ -383,10 +406,16 @@ def _action_body(action: ProductionAction) -> str:
         )
     if kind == "_list_empty":
         return "lambda ctx, rhs: []"
-    # Named kind construction.
-    field_args = ", ".join(
-        f"{fa.field_name}=rhs[{fa.rhs_index}]" for fa in action.field_assignments
-    )
+    # Named kind construction. List fields wrap with `or []` so an
+    # empty-alt wrapper (None value) becomes the empty list default.
+    parts: list[str] = []
+    for fa in action.field_assignments:
+        ft = field_types.get((kind, fa.field_name))
+        if ft == "list":
+            parts.append(f"{fa.field_name}=(rhs[{fa.rhs_index}] or [])")
+        else:
+            parts.append(f"{fa.field_name}=rhs[{fa.rhs_index}]")
+    field_args = ", ".join(parts)
     if field_args:
         return f"lambda ctx, rhs: {kind}({field_args}, pos=_pos_from_rhs(rhs))"
     return f"lambda ctx, rhs: {kind}(pos=_pos_from_rhs(rhs))"
