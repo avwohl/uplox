@@ -764,3 +764,92 @@ def test_cpp_unannotated_grammar_emits_no_ast(tmp_path):
     assert "AstKind" not in header
     assert "parse_ast" not in header
     assert "parse_ast" not in impl
+
+
+# ---- file_id / FileTable ----------------------------------------------------
+
+
+def test_cpp_header_declares_filetable(tmp_path):
+    bundle = build_bundle(CALC)
+    h, _c = emit_to_cpp(tmp_path, bundle)
+    text = h.read_text()
+    assert "class FileTable" in text
+    assert "intern_filename" in text
+    assert "set_file_id" in text
+    assert "int  file_id = 0;" in text
+
+
+def test_cpp_stamps_file_id_on_terminals(tmp_path):
+    """Intern a filename, set it, parse, walk the tree and verify every
+    terminal leaf carries the matching file_id."""
+    bundle = build_bundle(CALC)
+    _h, c = emit_to_cpp(tmp_path, bundle)
+    driver = tmp_path / "main.cpp"
+    driver.write_text(r"""
+#include "uplox_calc.hpp"
+#include <cstdio>
+using namespace uplox::calc;
+
+static int check(const Node* n, int expect_id) {
+    if (n->is_terminal) return n->file_id == expect_id ? 0 : 1;
+    for (auto* c : n->children) {
+        int rc = check(c, expect_id);
+        if (rc) return rc;
+    }
+    return 0;
+}
+
+int main() {
+    Parser p("1 + 2 * 3");
+    int fid = p.intern_filename("src/expr.calc");
+    if (fid <= 0) { fprintf(stderr, "intern failed\n"); return 1; }
+    if (p.file_table().name(fid) != "src/expr.calc") {
+        fprintf(stderr, "filename mismatch\n"); return 1;
+    }
+    p.set_file_id(fid);
+    if (p.file_id() != fid) { fprintf(stderr, "get mismatch\n"); return 1; }
+    if (!p.parse()) { fprintf(stderr, "parse: %s\n", p.error().c_str()); return 1; }
+    if (check(p.root(), fid)) { fprintf(stderr, "leaf id mismatch\n"); return 1; }
+    if (p.intern_filename("src/expr.calc") != fid) {
+        fprintf(stderr, "intern not idempotent\n"); return 1;
+    }
+    if (p.file_table().name(0) != "") { fprintf(stderr, "id0 not ''\n"); return 1; }
+    std::printf("ok\n");
+    return 0;
+}
+""")
+    binary = tmp_path / "fid_cpp"
+    cxx_compile(c, driver, out=binary, include=tmp_path)
+    r = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() == "ok"
+
+
+def test_cpp_default_file_id_is_zero(tmp_path):
+    bundle = build_bundle(CALC)
+    _h, c = emit_to_cpp(tmp_path, bundle)
+    driver = tmp_path / "main.cpp"
+    driver.write_text(r"""
+#include "uplox_calc.hpp"
+#include <cstdio>
+using namespace uplox::calc;
+
+static int any_nonzero(const Node* n) {
+    if (n->is_terminal) return n->file_id != 0;
+    for (auto* c : n->children) if (any_nonzero(c)) return 1;
+    return 0;
+}
+
+int main() {
+    Parser p("1 + 2");
+    if (!p.parse()) return 1;
+    if (any_nonzero(p.root())) { fprintf(stderr, "expected file_id==0\n"); return 1; }
+    std::printf("ok\n");
+    return 0;
+}
+""")
+    binary = tmp_path / "fid_zero_cpp"
+    cxx_compile(c, driver, out=binary, include=tmp_path)
+    r = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() == "ok"

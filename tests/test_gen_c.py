@@ -1021,3 +1021,111 @@ def test_unannotated_grammar_emits_no_ast_section(tmp_path):
     assert "parse_ast" not in header
     assert "ast_kind" not in header
     assert "parse_ast" not in impl
+
+
+# ---- file_id / FileTable ----------------------------------------------------
+
+
+def test_emitted_c_header_declares_filetable_api(tmp_path):
+    bundle = build_calc_bundle()
+    h, _c = emit_to(tmp_path, bundle)
+    text = h.read_text()
+    assert "uplox_calc_intern_filename" in text
+    assert "uplox_calc_filename" in text
+    assert "uplox_calc_set_file_id" in text
+    assert "uplox_calc_get_file_id" in text
+    # Node struct gains a file_id field.
+    assert "int   file_id;" in text
+
+
+def test_emitted_c_stamps_file_id_on_terminals(tmp_path):
+    """End-to-end: intern a filename, set it, parse, verify every terminal
+    leaf carries the matching file_id; non-terminals stay at 0."""
+    bundle = build_calc_bundle()
+    _h, c = emit_to(tmp_path, bundle)
+    driver = tmp_path / "driver.c"
+    driver.write_text(r"""
+#include "uplox_calc.h"
+#include <stdio.h>
+#include <string.h>
+
+static int check_leaves(uplox_calc_node *n, int expect_id) {
+    if (n->is_terminal) {
+        if (n->file_id != expect_id) return 1;
+        return 0;
+    }
+    for (int i = 0; i < n->num_children; ++i) {
+        int rc = check_leaves(n->children[i], expect_id);
+        if (rc) return rc;
+    }
+    return 0;
+}
+
+int main(void) {
+    const char *src = "1 + 2 * 3";
+    uplox_calc_ctx *ctx = uplox_calc_create(src, (int)strlen(src));
+    int fid = uplox_calc_intern_filename(ctx, "src/expr.calc");
+    if (fid <= 0) { fprintf(stderr, "intern failed\n"); return 1; }
+    if (strcmp(uplox_calc_filename(ctx, fid), "src/expr.calc") != 0) {
+        fprintf(stderr, "filename mismatch\n"); return 1;
+    }
+    uplox_calc_set_file_id(ctx, fid);
+    if (uplox_calc_get_file_id(ctx) != fid) {
+        fprintf(stderr, "get_file_id mismatch\n"); return 1;
+    }
+    uplox_calc_node *root;
+    if (uplox_calc_parse(ctx, &root) != 0) { fprintf(stderr, "%s\n", uplox_calc_error(ctx)); return 1; }
+    if (check_leaves(root, fid) != 0) {
+        fprintf(stderr, "leaf file_id mismatch\n"); return 1;
+    }
+    /* Re-intern the same name -> same id. */
+    if (uplox_calc_intern_filename(ctx, "src/expr.calc") != fid) {
+        fprintf(stderr, "intern not idempotent\n"); return 1;
+    }
+    /* file_id 0 maps to '' */
+    if (strcmp(uplox_calc_filename(ctx, 0), "") != 0) { fprintf(stderr, "id0 not ''\n"); return 1; }
+    printf("ok\n");
+    uplox_calc_destroy(ctx);
+    return 0;
+}
+""")
+    binary = tmp_path / "fid_calc"
+    cc_compile(c, driver, out=binary, include=tmp_path)
+    result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "ok"
+
+
+def test_emitted_c_default_file_id_is_zero(tmp_path):
+    """Without intern/set, every terminal leaf carries file_id == 0."""
+    bundle = build_calc_bundle()
+    _h, c = emit_to(tmp_path, bundle)
+    driver = tmp_path / "driver.c"
+    driver.write_text(r"""
+#include "uplox_calc.h"
+#include <stdio.h>
+#include <string.h>
+
+static int any_nonzero(uplox_calc_node *n) {
+    if (n->is_terminal) return n->file_id != 0;
+    for (int i = 0; i < n->num_children; ++i)
+        if (any_nonzero(n->children[i])) return 1;
+    return 0;
+}
+
+int main(void) {
+    const char *src = "1 + 2";
+    uplox_calc_ctx *ctx = uplox_calc_create(src, (int)strlen(src));
+    uplox_calc_node *root;
+    if (uplox_calc_parse(ctx, &root) != 0) { fprintf(stderr, "%s\n", uplox_calc_error(ctx)); return 1; }
+    if (any_nonzero(root)) { fprintf(stderr, "expected all leaves file_id==0\n"); return 1; }
+    printf("ok\n");
+    uplox_calc_destroy(ctx);
+    return 0;
+}
+""")
+    binary = tmp_path / "fid_zero"
+    cc_compile(c, driver, out=binary, include=tmp_path)
+    result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "ok"

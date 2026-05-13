@@ -148,6 +148,7 @@ def _emit_header(ctx: _EmitContext) -> str:
     out.append("    int   production;    /* -1 for terminals; production index otherwise */")
     out.append("    int   line;")
     out.append("    int   column;")
+    out.append("    int   file_id;       /* index into the ctx's filetable; 0 = '' */")
     out.append("    const char *text;    /* into the input buffer; not NUL-terminated */")
     out.append("    int   text_len;")
     out.append(f"    uplox_{g}_node **children;")
@@ -167,6 +168,20 @@ def _emit_header(ctx: _EmitContext) -> str:
     out.append(f"const char    *uplox_{g}_error(const uplox_{g}_ctx *ctx);")
     out.append(f"const char    *uplox_{g}_token_name(int token_kind);")
     out.append(f"const char    *uplox_{g}_nt_name(int nt_kind);")
+    out.append("")
+    out.append("/* --- filetable: maps file_id <-> filename --- */")
+    out.append("/*")
+    out.append(" * Each ctx owns a small string table that maps file_id integers to")
+    out.append(" * filename strings. file_id == 0 is the reserved '' slot, seeded at")
+    out.append(" * ctx creation. Hosts that need source-tracking across #include or")
+    out.append(" * multi-file translation can call uplox_<g>_intern_filename to add")
+    out.append(" * names and uplox_<g>_set_file_id to choose which id is stamped on")
+    out.append(" * subsequently-scanned tokens. uplox_<g>_filename decodes back.")
+    out.append(" */")
+    out.append(f"int         uplox_{g}_intern_filename(uplox_{g}_ctx *ctx, const char *filename);")
+    out.append(f"const char *uplox_{g}_filename(const uplox_{g}_ctx *ctx, int file_id);")
+    out.append(f"void        uplox_{g}_set_file_id(uplox_{g}_ctx *ctx, int file_id);")
+    out.append(f"int         uplox_{g}_get_file_id(const uplox_{g}_ctx *ctx);")
     out.append("")
     out.append("/* --- token-filter (lexer feedback) --- */")
     out.append("/*")
@@ -464,6 +479,12 @@ def _emit_ctx_struct(ctx: _EmitContext) -> list[str]:
         "    /* Optional post-reduce callback (set via uplox_<g>_set_post_reduce). */",
         f"    void (*post_reduce)(uplox_{g}_ctx *ctx, int prod_index, uplox_{g}_node *node, void *user_data);",
         "    void  *post_reduce_data;",
+        "",
+        "    /* Filetable: file_id -> filename. Index 0 is reserved for ''. */",
+        "    char **filetable_names;",
+        "    int    filetable_count;",
+        "    int    filetable_cap;",
+        "    int    current_file_id;",
     ]
     plan = ast_emit.plan_from_bundle(ctx.bundle)
     if plan is not None:
@@ -528,6 +549,15 @@ def _emit_lifecycle(ctx: _EmitContext) -> list[str]:
         "    c->lex_pos = 0;",
         "    c->lex_line = 1;",
         "    c->lex_column = 1;",
+        "    /* Seed the filetable: index 0 is '' (unknown file). */",
+        "    c->filetable_cap = 4;",
+        "    c->filetable_names = (char **)calloc((size_t)c->filetable_cap, sizeof(char *));",
+        "    if (!c->filetable_names) { free(c); return NULL; }",
+        "    c->filetable_names[0] = (char *)malloc(1);",
+        "    if (!c->filetable_names[0]) { free(c->filetable_names); free(c); return NULL; }",
+        "    c->filetable_names[0][0] = '\\0';",
+        "    c->filetable_count = 1;",
+        "    c->current_file_id = 0;",
         "    return c;",
         "}",
         "",
@@ -540,6 +570,8 @@ def _emit_lifecycle(ctx: _EmitContext) -> list[str]:
         "    free(c->all_nodes);",
         # AST cleanup (no-op when bundle has no ast section).
         *_ast_destroy_lines(ctx),
+        "    for (int i = 0; i < c->filetable_count; ++i) free(c->filetable_names[i]);",
+        "    free(c->filetable_names);",
         "    free(c->state_stack);",
         "    free(c->value_stack);",
         "    free(c);",
@@ -565,6 +597,45 @@ def _emit_lifecycle(ctx: _EmitContext) -> list[str]:
         "    if (!c) return;",
         "    c->post_reduce = fn;",
         "    c->post_reduce_data = user_data;",
+        "}",
+        "",
+        f"int uplox_{g}_intern_filename(uplox_{g}_ctx *c, const char *filename) {{",
+        "    if (!c) return -1;",
+        "    if (!filename) filename = \"\";",
+        "    /* Linear scan: filetables are small (one entry per source file).",
+        "       A host with thousands of files can wrap this with their own",
+        "       hashmap; uplox keeps the structure compact. */",
+        "    for (int i = 0; i < c->filetable_count; ++i) {",
+        "        if (strcmp(c->filetable_names[i], filename) == 0) return i;",
+        "    }",
+        "    if (c->filetable_count >= c->filetable_cap) {",
+        "        int new_cap = c->filetable_cap * 2;",
+        "        char **na = (char **)realloc(c->filetable_names, sizeof(char *) * (size_t)new_cap);",
+        "        if (!na) return -1;",
+        "        c->filetable_names = na;",
+        "        c->filetable_cap = new_cap;",
+        "    }",
+        "    size_t n = strlen(filename);",
+        "    char *copy = (char *)malloc(n + 1);",
+        "    if (!copy) return -1;",
+        "    memcpy(copy, filename, n + 1);",
+        "    c->filetable_names[c->filetable_count] = copy;",
+        "    return c->filetable_count++;",
+        "}",
+        "",
+        f"const char *uplox_{g}_filename(const uplox_{g}_ctx *c, int file_id) {{",
+        "    if (!c || file_id < 0 || file_id >= c->filetable_count) return \"\";",
+        "    return c->filetable_names[file_id];",
+        "}",
+        "",
+        f"void uplox_{g}_set_file_id(uplox_{g}_ctx *c, int file_id) {{",
+        "    if (!c) return;",
+        "    if (file_id < 0 || file_id >= c->filetable_count) file_id = 0;",
+        "    c->current_file_id = file_id;",
+        "}",
+        "",
+        f"int uplox_{g}_get_file_id(const uplox_{g}_ctx *c) {{",
+        "    return c ? c->current_file_id : 0;",
         "}",
     ]
 
@@ -713,6 +784,7 @@ def _emit_parser(ctx: _EmitContext) -> list[str]:
         "            leaf->kind = la_kind;",
         "            leaf->line = la_line;",
         "            leaf->column = la_col;",
+        "            leaf->file_id = c->current_file_id;",
         "            leaf->text = c->input + la_pos;",
         "            leaf->text_len = la_len;",
         "            c->state_stack[c->stack_top] = act - 1;",

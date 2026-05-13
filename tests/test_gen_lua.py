@@ -660,3 +660,77 @@ def test_lua_unannotated_emits_no_ast(tmp_path):
     module_text = emit_lua(bundle)
     assert "parse_ast" not in module_text
     assert "AST_KINDS" not in module_text
+
+
+# ---- file_id / FileTable ----------------------------------------------------
+
+
+def test_lua_module_exposes_filetable_api(tmp_path):
+    bundle = build_bundle()
+    text = emit_lua(bundle)
+    assert "intern_filename" in text
+    assert "set_file_id" in text
+    assert "file_names" in text
+
+
+def test_lua_stamps_file_id_on_terminals(tmp_path):
+    """End-to-end Lua: intern a filename, set the file_id, parse, verify
+    every terminal leaf carries the matching id, and that file_id 0 maps
+    back to ''."""
+    write_calc_module(tmp_path)
+    driver = tmp_path / "driver.lua"
+    driver.write_text(rf"""
+package.path = '{tmp_path}/?.lua;' .. package.path
+local M = require('uplox_calc')
+
+local p = M.new("1 + 2 * 3")
+local fid = p:intern_filename("src/expr.calc")
+assert(fid > 0, "expected positive file_id, got " .. tostring(fid))
+assert(p:filename(fid) == "src/expr.calc", "filename mismatch")
+p:set_file_id(fid)
+assert(p:get_file_id() == fid, "get_file_id mismatch")
+assert(p:parse(), "parse failed: " .. tostring(p.error))
+
+local function check(n)
+    if n.is_terminal then
+        assert(n.file_id == fid, "leaf id mismatch: " .. tostring(n.file_id))
+        return
+    end
+    for _, c in ipairs(n.children) do check(c) end
+end
+check(p.root)
+-- Idempotent intern.
+assert(p:intern_filename("src/expr.calc") == fid, "intern not idempotent")
+-- id 0 -> ''
+assert(p:filename(0) == "", "id0 not ''")
+print("ok")
+""")
+    r = subprocess.run([LUA, str(driver)], capture_output=True, text=True, timeout=10)
+    assert r.returncode == 0, r.stderr
+    assert "ok" in r.stdout
+
+
+def test_lua_default_file_id_is_zero(tmp_path):
+    """Without intern/set, every terminal leaf carries file_id == 0."""
+    write_calc_module(tmp_path)
+    driver = tmp_path / "driver.lua"
+    driver.write_text(rf"""
+package.path = '{tmp_path}/?.lua;' .. package.path
+local M = require('uplox_calc')
+
+local p = M.new("1 + 2")
+assert(p:parse())
+
+local function any_nonzero(n)
+    if n.is_terminal then return n.file_id ~= 0 end
+    for _, c in ipairs(n.children) do
+        if any_nonzero(c) then return true end
+    end
+    return false
+end
+assert(not any_nonzero(p.root), "expected file_id==0 on every leaf")
+print("ok")
+""")
+    r = subprocess.run([LUA, str(driver)], capture_output=True, text=True, timeout=10)
+    assert r.returncode == 0, r.stderr
+    assert "ok" in r.stdout

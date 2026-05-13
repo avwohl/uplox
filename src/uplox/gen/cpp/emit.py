@@ -108,8 +108,34 @@ def _emit_header(ctx: _CppCtx) -> str:
     out.append("    int  production = -1;     // -1 for terminals")
     out.append("    int  line = 0;")
     out.append("    int  column = 0;")
+    out.append("    int  file_id = 0;         // index into the Parser's FileTable; 0 = ''")
     out.append("    std::string_view text;    // valid for terminals; into the input buffer")
     out.append("    std::vector<Node*> children;  // observer ptrs; non-owning")
+    out.append("};")
+    out.append("")
+    out.append("/* Maps a small integer file_id to a filename string. Index 0 is")
+    out.append(" * reserved for the empty/unknown filename and is seeded on construction.")
+    out.append(" * Hosts driving multi-file source (e.g. C #include preprocessing) use")
+    out.append(" * intern() to add filenames and set_file_id() on the Parser to choose")
+    out.append(" * which id is stamped on subsequently-scanned tokens. */")
+    out.append("class FileTable {")
+    out.append("public:")
+    out.append("    FileTable() : names_{{\"\"}} {}")
+    out.append("    int intern(std::string_view filename) {")
+    out.append("        std::string s(filename);")
+    out.append("        for (size_t i = 0; i < names_.size(); ++i)")
+    out.append("            if (names_[i] == s) return static_cast<int>(i);")
+    out.append("        names_.push_back(std::move(s));")
+    out.append("        return static_cast<int>(names_.size()) - 1;")
+    out.append("    }")
+    out.append("    const std::string& name(int file_id) const {")
+    out.append("        static const std::string empty;")
+    out.append("        if (file_id < 0 || file_id >= static_cast<int>(names_.size())) return empty;")
+    out.append("        return names_[file_id];")
+    out.append("    }")
+    out.append("    int size() const { return static_cast<int>(names_.size()); }")
+    out.append("private:")
+    out.append("    std::vector<std::string> names_;")
     out.append("};")
     out.append("")
 
@@ -151,6 +177,14 @@ def _emit_header(ctx: _CppCtx) -> str:
     out.append("       host state across the parse. */")
     out.append("    using PostReduce = std::function<void(Parser& parser, int prod_index, Node* node)>;")
     out.append("    void set_post_reduce(PostReduce f) { post_reduce_ = std::move(f); }")
+    out.append("")
+    out.append("    /* Filetable accessors. Tokens stamp the current file_id on each")
+    out.append("       leaf; decode back to a filename with file_table().name(...). */")
+    out.append("    FileTable& file_table() { return file_table_; }")
+    out.append("    const FileTable& file_table() const { return file_table_; }")
+    out.append("    int  intern_filename(std::string_view filename) { return file_table_.intern(filename); }")
+    out.append("    int  file_id() const { return current_file_id_; }")
+    out.append("    void set_file_id(int file_id) { current_file_id_ = file_id; }")
     if plan is not None:
         out.extend(ast_emit.emit_parser_ast_methods())
     out.append("")
@@ -165,6 +199,8 @@ def _emit_header(ctx: _CppCtx) -> str:
     out.append("    std::string error_;")
     out.append("    TokenFilter token_filter_;")
     out.append("    PostReduce  post_reduce_;")
+    out.append("    FileTable   file_table_;")
+    out.append("    int         current_file_id_ = 0;")
     if plan is not None:
         out.extend(ast_emit.emit_parser_ast_fields())
     out.append("};")
@@ -496,6 +532,7 @@ def _emit_parser(ctx: _CppCtx) -> list[str]:
         "            leaf->kind = la_kind;",
         "            leaf->line = la_line;",
         "            leaf->column = la_col;",
+        "            leaf->file_id = current_file_id_;",
         "            leaf->text = im.input.substr(la_pos, la_len);",
         "            Node* raw = im.track(std::move(leaf));",
         "            im.state_stack.push_back(act - 1);",

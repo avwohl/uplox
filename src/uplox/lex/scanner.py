@@ -32,14 +32,71 @@ from .dfa import DEAD, DFA
 
 @dataclass(frozen=True)
 class Token:
+    """A lexical token.
+
+    ``file_id`` is an integer into a :class:`FileTable` that maps it
+    back to a filename string. Tokens stay compact (an int per token
+    instead of a string reference) and filenames de-dupe automatically
+    across the source set. ``file_id == 0`` is the reserved "unknown
+    file" slot; the FileTable always initialises with ``""`` at index
+    0 so a Token constructed without a file_id still decodes to an
+    empty filename via the table.
+    """
+
     name: str
     text: str
     line: int
     column: int
     offset: int  # byte offset into the input
+    file_id: int = 0
 
     def __repr__(self) -> str:  # pragma: no cover - cosmetic
         return f"Token({self.name!r}, {self.text!r}, line={self.line}, col={self.column})"
+
+
+class FileTable:
+    """Map between filename strings and small integer ``file_id``s.
+
+    The table de-dupes filenames so each unique source file occupies
+    one slot regardless of how many tokens reference it. ``file_id``
+    0 is reserved for the empty/unknown filename and the table is
+    seeded with that entry on construction; subsequent
+    :meth:`intern` calls return monotonically-assigned ids.
+
+    A FileTable is mutable (filenames may be added over the life of
+    a parse), but is otherwise straightforward — no locking, no
+    thread-safety guarantees. Consumers that want shared tables
+    across threads should synchronise externally.
+    """
+
+    __slots__ = ("_files", "_index")
+
+    def __init__(self) -> None:
+        self._files: list[str] = [""]
+        self._index: dict[str, int] = {"": 0}
+
+    def intern(self, filename: str) -> int:
+        """Return the ``file_id`` for ``filename``; assign one if new."""
+        idx = self._index.get(filename)
+        if idx is not None:
+            return idx
+        idx = len(self._files)
+        self._files.append(filename)
+        self._index[filename] = idx
+        return idx
+
+    def name(self, file_id: int) -> str:
+        """Return the filename for ``file_id``, or ``""`` if out of range."""
+        if 0 <= file_id < len(self._files):
+            return self._files[file_id]
+        return ""
+
+    def __len__(self) -> int:
+        return len(self._files)
+
+    def filenames(self) -> list[str]:
+        """Snapshot of the filename table (read-only copy)."""
+        return list(self._files)
 
 
 class ScanError(Exception):
@@ -70,15 +127,21 @@ class Scanner:
     filename: str = "<input>"
     balanced: dict[str, str] = field(default_factory=dict)
 
-    def scan(self, source: str | bytes) -> Iterator[Token]:
-        """Yield tokens for ``source``. ``source`` may be ``str`` (treated as UTF-8) or bytes."""
+    def scan(self, source: str | bytes, *, file_id: int = 0) -> Iterator[Token]:
+        """Yield tokens for ``source``. ``source`` may be ``str`` (UTF-8) or bytes.
+
+        ``file_id`` stamps every emitted token. The caller is responsible
+        for managing a :class:`FileTable` that maps the id back to a
+        filename string when needed; the scanner itself only carries the
+        integer.
+        """
         data = source.encode("utf-8") if isinstance(source, str) else bytes(source)
-        return self._scan_bytes(data)
+        return self._scan_bytes(data, file_id)
 
-    def scan_all(self, source: str | bytes) -> list[Token]:
-        return list(self.scan(source))
+    def scan_all(self, source: str | bytes, *, file_id: int = 0) -> list[Token]:
+        return list(self.scan(source, file_id=file_id))
 
-    def _scan_bytes(self, data: bytes) -> Iterator[Token]:
+    def _scan_bytes(self, data: bytes, file_id: int = 0) -> Iterator[Token]:
         n = len(data)
         pos = 0
         line = 1
@@ -149,6 +212,7 @@ class Scanner:
                     line=line,
                     column=col,
                     offset=pos,
+                    file_id=file_id,
                 )
             # Advance position and update line/column.
             for b in text_bytes:

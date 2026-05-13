@@ -395,3 +395,71 @@ def test_unannotated_grammar_emits_legacy_module(tmp_path):
     # parse() still works and still returns a ParseNode.
     result = mod.parse("1 + 2")
     assert isinstance(result, mod.ParseNode)
+
+
+# ---- file_id / FileTable ----------------------------------------------------
+
+
+def test_legacy_module_exposes_file_table(tmp_path):
+    mod = _import_emitted(tmp_path, CALC)
+    assert hasattr(mod, "FILE_TABLE")
+    assert hasattr(mod, "FileTable")
+    assert mod.FILE_TABLE.name(0) == ""
+    # An explicit filename intern returns a positive id.
+    fid = mod.FILE_TABLE.intern("foo.calc")
+    assert fid >= 1
+    assert mod.FILE_TABLE.name(fid) == "foo.calc"
+
+
+def test_legacy_module_scan_stamps_file_id(tmp_path):
+    mod = _import_emitted(tmp_path, CALC)
+    tokens = list(mod.scan("1 + 2", filename="src/expr.calc"))
+    fid = mod.FILE_TABLE.intern("src/expr.calc")
+    assert all(t.file_id == fid for t in tokens)
+    # Default filename leaves the file_id == 0.
+    tokens2 = list(mod.scan("3 - 4"))
+    assert all(t.file_id == 0 for t in tokens2)
+
+
+def test_legacy_module_parse_threads_filename(tmp_path):
+    mod = _import_emitted(tmp_path, CALC)
+    mod.parse("1 + 2", filename="thread.calc")
+    # The filename was interned, so it now decodes back.
+    fid = mod.FILE_TABLE.intern("thread.calc")
+    assert mod.FILE_TABLE.name(fid) == "thread.calc"
+
+
+def test_ast_module_exposes_file_table(tmp_path):
+    mod = _import_emitted(tmp_path, CALC_ANNOTATED)
+    assert hasattr(mod, "FILE_TABLE")
+    assert hasattr(mod, "FileTable")
+    assert mod.FILE_TABLE.name(0) == ""
+
+
+def test_ast_module_parse_threads_filename(tmp_path):
+    mod = _import_emitted(tmp_path, CALC_ANNOTATED)
+    ast = mod.parse("1 + 2", filename="ast.calc")
+    # The AST tokens carry the interned file_id; decode via FILE_TABLE.
+    expected = mod.FILE_TABLE.intern("ast.calc")
+    assert ast.lhs.value.file_id == expected
+    assert mod.FILE_TABLE.name(expected) == "ast.calc"
+
+
+def test_ast_module_scan_stamps_file_id(tmp_path):
+    mod = _import_emitted(tmp_path, CALC_ANNOTATED)
+    tokens = list(mod.scan("1 + 2", filename="scan.calc"))
+    fid = mod.FILE_TABLE.intern("scan.calc")
+    assert all(t.file_id == fid for t in tokens)
+
+
+def test_ast_module_parse_cst_threads_filename(tmp_path):
+    mod = _import_emitted(tmp_path, CALC_ANNOTATED)
+    cst = mod.parse_cst("1 + 2", filename="cst.calc")
+    fid = mod.FILE_TABLE.intern("cst.calc")
+    # Walk to a leaf and verify the file_id is stamped.
+    def first_leaf(node):
+        while not isinstance(node, mod.Token):
+            node = node.children[0]
+        return node
+    leaf = first_leaf(cst)
+    assert leaf.file_id == fid

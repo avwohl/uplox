@@ -125,3 +125,61 @@ def test_utf8_input_passes_through_byte_classes():
     toks = sc.scan_all("caf\xc3\xa9")
     assert [t.name for t in toks] == ["LATIN", "OTHER"]
     assert toks[0].text == "caf"
+
+
+# ---- FileTable + file_id --------------------------------------------------
+
+
+def test_filetable_intern_returns_same_id():
+    from uplox.lex.scanner import FileTable
+    ft = FileTable()
+    a = ft.intern("a.c")
+    b = ft.intern("b.c")
+    assert ft.intern("a.c") == a
+    assert b != a
+
+
+def test_filetable_zero_is_empty_string():
+    from uplox.lex.scanner import FileTable
+    ft = FileTable()
+    assert ft.name(0) == ""
+    # An intern of "" also returns 0 (no new slot).
+    assert ft.intern("") == 0
+
+
+def test_filetable_name_for_unknown_id():
+    from uplox.lex.scanner import FileTable
+    ft = FileTable()
+    assert ft.name(999) == ""
+    assert ft.name(-1) == ""
+
+
+def test_scan_stamps_file_id_on_tokens():
+    sc = make_scanner([("WORD", "[a-z]+"), ("WS", " ")], skip={"WS"})
+    toks = sc.scan_all("hello world", file_id=42)
+    assert all(t.file_id == 42 for t in toks)
+
+
+def test_scan_default_file_id_is_zero():
+    sc = make_scanner([("WORD", "[a-z]+"), ("WS", " ")], skip={"WS"})
+    toks = sc.scan_all("hello")
+    assert toks[0].file_id == 0
+
+
+def test_token_default_file_id_is_zero():
+    """Constructing Token without file_id keeps back-compat."""
+    from uplox.lex.scanner import Token
+    t = Token(name="X", text="x", line=1, column=1, offset=0)
+    assert t.file_id == 0
+
+
+def test_filetable_filenames_snapshot():
+    from uplox.lex.scanner import FileTable
+    ft = FileTable()
+    ft.intern("a.c")
+    ft.intern("b.c")
+    snap = ft.filenames()
+    assert snap == ["", "a.c", "b.c"]
+    # Snapshot is a copy — mutating it doesn't affect the table.
+    snap.append("c.c")
+    assert len(ft) == 3
