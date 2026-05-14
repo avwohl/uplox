@@ -163,12 +163,12 @@ IDENT      = /[A-Za-z_][A-Za-z0-9_]*/
 # that rewrites IDENT to TYPEDEF_NAME for identifiers that have been typedef'd.
 TYPEDEF_NAME = /[A-Za-z_][A-Za-z0-9_]*/
 
-# C23 attribute delimiters ``[[`` / ``]]``. Must precede the single
-# bracket tokens so the DFA picks the doubled form when present —
-# attributes appear in declarators / type-specs and the ambiguous
-# context is small enough that no alternative parse uses ``[[``.
-DOUBLE_LBRACKET = '[['
-DOUBLE_RBRACKET = ']]'
+# NOTE: C23 attribute delimiters ``[[`` / ``]]`` are NOT tokenized.
+# Attributes are stripped at the source level by uc_core.frontend's
+# _strip_attributes before the parser runs, so we never need to lex
+# them. A separate DOUBLE_RBRACKET token would collide with nested
+# array subscripts (``arr[i[0]];`` has ``]]`` that must lex as two
+# RBRACKETs, not one attribute closer).
 
 # Multi-char operators (each must precede its prefix).
 ARROW      = '->'
@@ -234,7 +234,6 @@ record_typedef post_reduce
 %ast_drop
 LPAREN RPAREN LBRACE RBRACE LBRACKET RBRACKET
 SEMI COMMA COLON QUESTION DOT
-DOUBLE_LBRACKET DOUBLE_RBRACKET
 ELLIPSIS
 KW_IF KW_ELSE KW_WHILE KW_DO KW_FOR
 KW_SWITCH KW_CASE KW_DEFAULT KW_GOTO
