@@ -81,12 +81,22 @@ class LayoutFilter:
         with no synthetic indentation markers yet. The output stream has
         INDENT / DEDENT / NEWLINE inserted at line boundaries.
         """
+        # The flow_open / flow_close lists may carry either token
+        # names (`LPAREN`) or literal text (`'('`). We match against
+        # both `tok.name` and `tok.text` so either spelling works in
+        # the directive.
         flow_open = set(self.config.flow_open)
         flow_close = set(self.config.flow_close)
         indent_token = self.config.indent_token
         dedent_token = self.config.dedent_token
         newline_token = self.config.newline_token
         is_comment = self.is_comment or (lambda _t: False)
+
+        def is_flow_open(tok: Token) -> bool:
+            return tok.name in flow_open or tok.text in flow_open
+
+        def is_flow_close(tok: Token) -> bool:
+            return tok.name in flow_close or tok.text in flow_close
 
         # Buffer one line's tokens at a time so we can decide whether the
         # line is blank / comment-only / content-bearing before emitting
@@ -140,14 +150,17 @@ class LayoutFilter:
             else:
                 top = stack[-1]
                 if col > top:
+                    # NEWLINE before INDENT — matches CPython's tokenizer:
+                    # `if x: NEWLINE INDENT body DEDENT`.
+                    if had_content:
+                        yield _make_token(newline_token, first.line, col, file_id)
                     stack.append(col)
                     yield _make_token(indent_token, first.line, col, file_id)
                 elif col < top:
-                    yield from emit_dedent_to(col, first.line, col, file_id)
-                    # After popping, emit NEWLINE between the previous content
-                    # line and this one (sibling at the dedented level).
+                    # NEWLINE before DEDENT — matches CPython.
                     if had_content:
                         yield _make_token(newline_token, first.line, col, file_id)
+                    yield from emit_dedent_to(col, first.line, col, file_id)
                 else:
                     if had_content:
                         yield _make_token(newline_token, first.line, col, file_id)
@@ -169,20 +182,23 @@ class LayoutFilter:
                 last_line = tok.line
                 flow_depth_at_line_start = flow_depth
             # Apply ``tok``'s effect on flow depth for subsequent tokens.
-            if tok.name in flow_open:
+            if is_flow_open(tok):
                 flow_depth += 1
-            elif tok.name in flow_close and flow_depth > 0:
+            elif is_flow_close(tok) and flow_depth > 0:
                 flow_depth -= 1
             current_line.append(tok)
 
-        # End-of-input: flush remaining line and close all indent levels.
-        # We DON'T emit a trailing NEWLINE — the parser's start production
-        # treats the block as ``stmt (NEWLINE stmt)*`` with no trailing
-        # separator. DEDENTs close any nested levels still on the stack.
+        # End-of-input: flush remaining line, emit a trailing NEWLINE
+        # so the parser sees `stmt NEWLINE stmt NEWLINE` even at EOF
+        # (matches CPython's tokenizer behaviour — every Python
+        # statement is terminated by NEWLINE, including the last one).
+        # Then close any nested indent levels with DEDENTs.
         if current_line:
             yield from process_line()
         last_file_id = current_line[0].file_id if current_line else 0
         end_line = (last_line or 0) + 1
+        if had_content:
+            yield _make_token(newline_token, end_line, 1, last_file_id)
         # Close every nested level — pop down to (but not including) the
         # base level established by the first content line.
         while len(stack) > 1:
@@ -244,6 +260,14 @@ class ContinuationFilter:
         # Token-marker form is always-suppress; char-marker form is
         # prospective (look-ahead one line).
         always_suppress = marker_token is not None
+        # `join_target`: the logical line the continuation chain
+        # collapses onto. `last_marker_physical`: the physical line
+        # of the most recent suppressed marker — tokens on physical
+        # line `last_marker_physical + 1` get rebased to join_target.
+        # If a token appears past that line without an intervening
+        # marker, the chain has ended.
+        join_target: Optional[int] = None
+        last_marker_physical: Optional[int] = None
 
         def is_marker(tok: Token) -> bool:
             if marker_token is not None and tok.name == marker_token:
@@ -256,18 +280,53 @@ class ContinuationFilter:
                 return True
             return False
 
+        def rebase(tok: Token) -> Token:
+            return Token(
+                name=tok.name,
+                text=tok.text,
+                line=join_target,  # type: ignore[arg-type]
+                column=tok.column,
+                offset=tok.offset,
+                file_id=tok.file_id,
+            )
+
         for tok in tokens:
-            if tok.name in self.flow_open:
+            if tok.name in self.flow_open or tok.text in self.flow_open:
                 flow_depth += 1
-            elif tok.name in self.flow_close and flow_depth > 0:
+            elif (tok.name in self.flow_close or tok.text in self.flow_close) and flow_depth > 0:
                 flow_depth -= 1
             in_flow = flow_depth > 0 and not applies_in_brackets
+            # If we're past the continuation chain (a token on a
+            # physical line beyond the last marker's physical+1),
+            # clear the join.
+            if (
+                join_target is not None
+                and last_marker_physical is not None
+                and tok.line > last_marker_physical + 1
+            ):
+                join_target = None
+                last_marker_physical = None
             if pending_marker is not None:
                 # Char-marker form: suppress iff next token is on a
                 # later line. Token-marker form: always suppressed
-                # (we never get here for it; see `continue` below).
+                # (handled below via the `continue` branch).
                 if tok.line > pending_marker.line:
-                    pass  # suppressed
+                    # Establish or extend the join chain. The chain's
+                    # target line stays the FIRST marker's
+                    # (rebased) line; subsequent markers within the
+                    # chain push the physical-line boundary forward.
+                    if join_target is None:
+                        # The marker token itself was on physical
+                        # line pending_marker.line. If a previous
+                        # rebase had already moved it, use that
+                        # rebased line; otherwise the marker's own
+                        # line.
+                        join_target = pending_marker.line
+                    last_marker_physical = (
+                        pending_marker.line
+                        if last_marker_physical is None
+                        else max(last_marker_physical, pending_marker.line)
+                    )
                 else:
                     yield pending_marker
                 pending_marker = None
@@ -275,11 +334,22 @@ class ContinuationFilter:
                 if always_suppress:
                     # Synthetic dispatcher-emitted token; drop it.
                     continue
+                # For char-marker form, the marker may sit on a
+                # rebased line — its `line` for chain-purpose is
+                # the join_target. Capture its physical line in
+                # last_marker_physical when the chain actually
+                # extends (above).
                 pending_marker = tok
                 continue
-            yield tok
+            if join_target is not None:
+                yield rebase(tok)
+            else:
+                yield tok
         if pending_marker is not None:
-            yield pending_marker
+            if join_target is not None:
+                yield rebase(pending_marker)
+            else:
+                yield pending_marker
 
 
 @dataclass

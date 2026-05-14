@@ -1,0 +1,958 @@
+# Python 3 grammar — uplox cut targeting Python 3.10+.
+#
+# Python is indentation-sensitive. We use the `%layout` directive
+# to emit synthetic INDENT / DEDENT / NEWLINE terminals (the same
+# mechanism CPython's tokenizer uses) and the `%continuation`
+# directive to handle backslash-at-end-of-line. Flow brackets
+# (`(`, `[`, `{`) suspend indentation tracking so multi-line
+# expressions inside parens / brackets / braces parse without
+# tripping over their visual indentation.
+#
+# Covered (Python 3.10+ core):
+#
+#   * Module structure: import / from-import (with relative and
+#     star forms), function and class definitions (with
+#     decorators), top-level statements.
+#   * Statements: simple (expression, assignment with multiple
+#     targets, augmented assignment, annotated assignment, walrus,
+#     del, pass, break, continue, return, raise, global,
+#     nonlocal, assert, yield, type-alias) and compound (if /
+#     elif / else, while / for with else clauses, try / except /
+#     finally / else, with / async with, def / async def,
+#     class, async for, match-case).
+#   * Function / class headers: positional / keyword / `/` and
+#     `*` separators, default values, `*args` / `**kwargs`,
+#     return-type annotations, decorators, generic type params
+#     (`def foo[T](x: T) -> T`), inheritance lists with keyword
+#     args (metaclass=, etc.).
+#   * Expressions: the full Python precedence ladder — walrus,
+#     ternary, lambda, logical or / and / not, comparison chain
+#     (`a < b < c`), `in` / `not in` / `is` / `is not`, bitwise,
+#     shift, additive, multiplicative (including `@` for matmul),
+#     unary, power, await, primary (atom + trailers).
+#   * Atoms: identifiers, numeric literals (int / float / complex
+#     with all bases and underscores), string literals (regular /
+#     byte / raw / f-string treated as single tokens),
+#     `True` / `False` / `None`, ellipsis (`...`), parens / list
+#     / dict / set / generator forms (each with comprehension
+#     variants), starred-and-double-starred expressions.
+#   * Trailers: attribute access (`.name`), subscript with full
+#     slicing (`a[i]`, `a[i:j:k]`, `a[i, j]`), call (with
+#     positional / keyword / `*` / `**` arguments).
+#   * Match statement: literal, capture, wildcard, value,
+#     sequence (`[a, b, *rest]`), mapping (`{k: v, **rest}`),
+#     class (`Point(x=0, y=0)`), or-pattern (`A | B`), as-pattern
+#     (`pat as name`), guard clause (`if expr`).
+#   * Type annotations: PEP 484 / 526 / 604 forms — `var: T`,
+#     `def f(x: T) -> U`, `T | U` unions, `T[X, Y]` parameterised,
+#     `class Foo[T, U]` generic class.
+#
+# Out of scope (rare or LR-hostile):
+#
+#   * Soft keywords beyond `match` / `case` / `type` (Python's
+#     parser uses the PEG-era context check; we accept them as
+#     reserved here).
+#   * f-string interpolation parsing — f-strings are lexed as a
+#     single STRING_LIT token; the host re-parses the brace
+#     expressions if needed.
+#   * `\` continuation inside string literals (the lexer's
+#     STRING_LIT regex handles the standard escape language).
+#   * PEP 657 / PEP 695 forward references inside type
+#     parameters.
+#
+# Source is whitespace-sensitive but otherwise text-based —
+# no preprocessing (encoding-cookie comment line, BOM, etc.) is
+# handled here; hosts should drop those before passing to the
+# scanner.
+
+%grammar python
+
+
+%define lr.type lalr
+%options
+start = file_input
+
+%reduce
+# `in` is the loop binder in `for x in items:` AND the membership
+# operator in `x in items`. At the LR(1) point where both
+# interpretations are possible (after the for-target's expression),
+# reduce closes the target so the `in` lands on the for-statement,
+# not on the target expression's comparison chain. Comparison-form
+# `x in y` outside for-loops still parses because the
+# enclosing context doesn't reach the conflict state.
+KW_IN
+
+%shift
+KW_ELSE
+# Precedence-ladder operators. Each shift extends the current
+# expression rung; reducing would prematurely close the
+# expression and leave the operator dangling. Statement-keyword
+# operators (`in`, `is`, `not`, `for`, `if`) are NOT included
+# here — those appear in for-loop binders, comprehension
+# clauses, and ternary scrutinees where premature shift would
+# capture the wrong token.
+EQEQ NEQ LT GT LE GE
+PIPE CARET AMP
+LSHIFT RSHIFT
+PLUS MINUS
+STAR SLASH FLOORDIV PERCENT AT
+POW
+DOT LBRACK LPAREN
+COMMA
+# `:` after a parameter name extends with the type annotation
+# rather than ending the param early.
+COLON
+# `:=` walrus binds tightly to the right.
+WALRUS
+
+%layout
+indent_token  = INDENT
+dedent_token  = DEDENT
+newline_token = NEWLINE
+flow_open     = '(' '[' '{'
+flow_close    = ')' ']' '}'
+tab_width     = 8
+
+%continuation
+marker = '\\'
+
+%tokens
+
+# Inline whitespace inside a logical line is skipped by the raw
+# lexer; the layout filter tracks leading-line whitespace
+# separately for indentation.
+WS         = /[ \t]+/                                       %skip
+RAW_NL     = /\r?\n/                                        %skip
+COMMENT    = /#[^\n]*/                                      %skip
+
+# Numeric literals. Underscores allowed as separators per PEP
+# 515. Float / complex literals require either a decimal point,
+# an exponent, or a `j` suffix to distinguish from integers.
+INT_LIT    = /0[bB][01_]+|0[oO][0-7_]+|0[xX][0-9A-Fa-f_]+|[0-9][0-9_]*/
+FLOAT_LIT  = /[0-9][0-9_]*\.[0-9_]*([eE][+-]?[0-9_]+)?|\.[0-9][0-9_]*([eE][+-]?[0-9_]+)?|[0-9][0-9_]*[eE][+-]?[0-9_]+/
+COMPLEX_LIT = /([0-9][0-9_]*\.[0-9_]*([eE][+-]?[0-9_]+)?|\.[0-9][0-9_]*([eE][+-]?[0-9_]+)?|[0-9][0-9_]*[eE][+-]?[0-9_]+|[0-9][0-9_]*)[jJ]/
+
+# String literals. Optional prefix `r` / `R` / `b` / `B` / `u` /
+# `U` / `f` / `F` and pair combinations (rb / br / fr / rf …)
+# precede the quote. Both single- and double-quoted single-line
+# forms; triple-quoted multi-line forms.
+STRING_LIT = /([rRbBuUfF]?[rRbBuUfF]?)?("""([^"\\]|\\.|"[^"]|""[^"])*"""|'''([^'\\]|\\.|'[^']|''[^'])*'''|"([^"\\\n]|\\.)*"|'([^'\\\n]|\\.)*')/
+
+# --- keywords ------------------------------------------------------------
+#
+# Hard keywords as of Python 3.10. Soft keywords (`match`, `case`,
+# `type`) are also reserved here for grammar simplicity — Python's
+# PEG parser treats them context-sensitively, but the LR grammar
+# accepts the simpler tradeoff of reservation. Code that uses
+# these as identifiers will need renaming.
+
+KW_FALSE    = 'False'
+KW_NONE     = 'None'
+KW_TRUE     = 'True'
+KW_AND      = 'and'
+KW_AS       = 'as'
+KW_ASSERT   = 'assert'
+KW_ASYNC    = 'async'
+KW_AWAIT    = 'await'
+KW_BREAK    = 'break'
+KW_CLASS    = 'class'
+KW_CONTINUE = 'continue'
+KW_DEF      = 'def'
+KW_DEL      = 'del'
+KW_ELIF     = 'elif'
+KW_ELSE     = 'else'
+KW_EXCEPT   = 'except'
+KW_FINALLY  = 'finally'
+KW_FOR      = 'for'
+KW_FROM     = 'from'
+KW_GLOBAL   = 'global'
+KW_IF       = 'if'
+KW_IMPORT   = 'import'
+KW_IN       = 'in'
+KW_IS       = 'is'
+KW_LAMBDA   = 'lambda'
+KW_NONLOCAL = 'nonlocal'
+KW_NOT      = 'not'
+KW_OR       = 'or'
+KW_PASS     = 'pass'
+KW_RAISE    = 'raise'
+KW_RETURN   = 'return'
+KW_TRY      = 'try'
+KW_WHILE    = 'while'
+KW_WITH     = 'with'
+KW_YIELD    = 'yield'
+
+# Soft keywords (3.10+ match-case, 3.12+ type alias).
+KW_MATCH    = 'match'
+KW_CASE     = 'case'
+KW_TYPE     = 'type'
+KW_UNDERSCORE = '_'
+
+IDENT = /[A-Za-z_][A-Za-z0-9_]*/
+
+# --- operators / punctuation ---------------------------------------------
+
+# Multi-character operators declared before their single-char
+# prefixes so longest-match picks the multi-char form.
+ELLIPSIS    = '...'
+ARROW       = '->'
+POW_ASSIGN  = '**='
+FLOORDIV_ASSIGN = '//='
+LSHIFT_ASSIGN = '<<='
+RSHIFT_ASSIGN = '>>='
+WALRUS      = ':='
+EQEQ        = '=='
+NEQ         = '!='
+LE          = '<='
+GE          = '>='
+LSHIFT      = '<<'
+RSHIFT      = '>>'
+POW         = '**'
+FLOORDIV    = '//'
+PLUS_ASSIGN = '+='
+MINUS_ASSIGN = '-='
+STAR_ASSIGN = '*='
+SLASH_ASSIGN = '/='
+PERCENT_ASSIGN = '%='
+AMP_ASSIGN  = '&='
+PIPE_ASSIGN = '|='
+CARET_ASSIGN = '^='
+AT_ASSIGN   = '@='
+
+EQ          = '='
+LT          = '<'
+GT          = '>'
+PLUS        = '+'
+MINUS       = '-'
+STAR        = '*'
+SLASH       = '/'
+PERCENT     = '%'
+AT          = '@'
+AMP         = '&'
+PIPE        = '|'
+CARET       = '^'
+TILDE       = '~'
+LPAREN      = '('
+RPAREN      = ')'
+LBRACE      = '{'
+RBRACE      = '}'
+LBRACK      = '['
+RBRACK      = ']'
+COMMA       = ','
+SEMI        = ';'
+COLON       = ':'
+DOT         = '.'
+
+# Backslash — consumed by the continuation filter at end of line.
+BACKSLASH   = '\\'
+
+# --- synthetic terminals (filter-produced) -------------------------------
+INDENT  = /\x01/
+DEDENT  = /\x02/
+NEWLINE = /\x03/
+
+%rules
+
+# --- top level -----------------------------------------------------------
+
+<file_input> : <statements>
+             |
+             ;
+
+<statements> : <statement>
+             | <statements> <statement>
+             ;
+
+<statement> : <simple_stmts>
+            | <compound_stmt>
+            ;
+
+# A simple-statement line: one or more simple_stmts separated by
+# `;`, optionally with a trailing `;`, terminated by NEWLINE.
+<simple_stmts> : <simple_stmt> NEWLINE
+               | <simple_stmt> ';' NEWLINE
+               | <simple_stmt> ';' <simple_stmts>
+               ;
+
+<simple_stmt> : <assignment_stmt>
+              | <expression_stmt>
+              | <del_stmt>
+              | <pass_stmt>
+              | <break_stmt>
+              | <continue_stmt>
+              | <return_stmt>
+              | <raise_stmt>
+              | <import_stmt>
+              | <from_import_stmt>
+              | <global_stmt>
+              | <nonlocal_stmt>
+              | <assert_stmt>
+              | <yield_stmt>
+              | <type_alias_stmt>
+              ;
+
+# --- simple statements ---------------------------------------------------
+
+<pass_stmt>     : KW_PASS ;
+<break_stmt>    : KW_BREAK ;
+<continue_stmt> : KW_CONTINUE ;
+
+<return_stmt> : KW_RETURN
+              | KW_RETURN <expression_list>
+              ;
+
+<raise_stmt> : KW_RAISE
+             | KW_RAISE <expression>
+             | KW_RAISE <expression> KW_FROM <expression>
+             ;
+
+<global_stmt>   : KW_GLOBAL <ident_list> ;
+<nonlocal_stmt> : KW_NONLOCAL <ident_list> ;
+
+<ident_list> : IDENT
+             | <ident_list> ',' IDENT
+             ;
+
+<assert_stmt> : KW_ASSERT <expression>
+              | KW_ASSERT <expression> ',' <expression>
+              ;
+
+<del_stmt> : KW_DEL <expression_list> ;
+
+<yield_stmt> : <yield_expression> ;
+
+# Yield expression — used as a statement and as a primary.
+<yield_expression> : KW_YIELD
+                   | KW_YIELD <expression_list>
+                   | KW_YIELD KW_FROM <expression>
+                   ;
+
+# import a.b.c, x as y, ...
+<import_stmt> : KW_IMPORT <import_path_list>
+              ;
+
+<import_path_list> : <import_path>
+                   | <import_path_list> ',' <import_path>
+                   ;
+
+<import_path> : <dotted_name>
+              | <dotted_name> KW_AS IDENT
+              ;
+
+<dotted_name> : IDENT
+              | <dotted_name> '.' IDENT
+              ;
+
+# from . module import X, Y as Z, *
+<from_import_stmt> : KW_FROM <import_source> KW_IMPORT <import_target>
+                   ;
+
+<import_source> : <dotted_name>
+                | <relative_dots>
+                | <relative_dots> <dotted_name>
+                ;
+
+<relative_dots> : '.'
+                | <relative_dots> '.'
+                | '...'
+                | '...' <relative_dots>
+                ;
+
+<import_target> : '*'
+                | <import_name_list>
+                | '(' <import_name_list> ')'
+                | '(' <import_name_list> ',' ')'
+                ;
+
+<import_name_list> : <import_name>
+                   | <import_name_list> ',' <import_name>
+                   ;
+
+<import_name> : IDENT
+              | IDENT KW_AS IDENT
+              ;
+
+# type X = …, type X[T] = …  (Python 3.12+ soft keyword).
+<type_alias_stmt> : KW_TYPE IDENT '=' <expression>
+                  | KW_TYPE IDENT <type_params> '=' <expression>
+                  ;
+
+# --- assignments ---------------------------------------------------------
+#
+# Python's assignment family has several shapes:
+#   * Plain:        target = value
+#   * Chained:      a = b = c = value
+#   * Augmented:    target += value, etc.
+#   * Annotated:    target: type = value  (PEP 526)
+#   * Annotation only: target: type
+# All `target` lvalues are evaluated as expressions; the host's
+# semantic phase enforces the lvalue restriction.
+
+# Plain assignment: `a = value`. Chained: `a = b = c = value`.
+# Tuple unpacking: `x, y = tup`. Augmented: `a += value`.
+# Annotated: handled by <annotation_assign>. A target is an
+# `<expression_list>` so tuple unpacking works; the host's
+# semantic phase rejects non-lvalue expressions.
+<assignment_stmt> : <target_chain> '=' <assignment_rhs>
+                  | <assignment_target> <augmented_op> <expression>
+                  | <annotation_assign>
+                  ;
+
+<target_chain> : <target>
+               | <target_chain> '=' <target>
+               ;
+
+<target> : <expression_list>
+         ;
+
+<assignment_target> : <expression>
+                    ;
+
+<assignment_rhs> : <expression_list>
+                 | <yield_expression>
+                 ;
+
+<augmented_op> : '+='  | '-='  | '*='  | '/='  | '//='
+               | '%='  | '@='  | '&='  | '|='  | '^='
+               | '<<=' | '>>=' | '**='
+               ;
+
+<annotation_assign> : <annotation_target> ':' <expression>
+                    | <annotation_target> ':' <expression> '=' <assignment_rhs>
+                    ;
+
+<annotation_target> : IDENT
+                    | <primary> '.' IDENT
+                    | <primary> '[' <subscript_list> ']'
+                    ;
+
+# --- expression statement ------------------------------------------------
+
+<expression_stmt> : <expression_list>
+                  ;
+
+<expression_list> : <expression>
+                  | <expression_list> ',' <expression>
+                  | <expression_list> ','
+                  ;
+
+# --- compound statements -------------------------------------------------
+
+<compound_stmt> : <if_stmt>
+                | <while_stmt>
+                | <for_stmt>
+                | <try_stmt>
+                | <with_stmt>
+                | <function_def>
+                | <class_def>
+                | <async_stmt>
+                | <match_stmt>
+                | <decorated>
+                ;
+
+<if_stmt> : KW_IF <expression> ':' <block> <elif_clauses_opt> <else_clause_opt>
+          ;
+
+<elif_clauses_opt> : <elif_clauses>
+                   |
+                   ;
+
+<elif_clauses> : <elif_clause>
+               | <elif_clauses> <elif_clause>
+               ;
+
+<elif_clause> : KW_ELIF <expression> ':' <block> ;
+
+<else_clause_opt> : KW_ELSE ':' <block>
+                  |
+                  ;
+
+<while_stmt> : KW_WHILE <expression> ':' <block> <else_clause_opt>
+             ;
+
+<for_stmt> : KW_FOR <target_list_loop> KW_IN <expression_list> ':' <block> <else_clause_opt>
+           ;
+
+# A for-loop binder accepts a single name, a tuple
+# (`for x, y in pairs`), or any tuple-of-names destructuring.
+<target_list_loop> : <expression_list>
+                   ;
+
+<try_stmt> : KW_TRY ':' <block> <try_tail>
+           ;
+
+<try_tail> : <except_clauses> <else_clause_opt> <finally_clause_opt>
+           | <finally_clause>
+           ;
+
+<except_clauses> : <except_clause>
+                 | <except_clauses> <except_clause>
+                 ;
+
+# except [<expr> [as IDENT]] :
+<except_clause> : KW_EXCEPT ':' <block>
+                | KW_EXCEPT <expression> ':' <block>
+                | KW_EXCEPT <expression> KW_AS IDENT ':' <block>
+                | KW_EXCEPT '*' <expression> ':' <block>
+                | KW_EXCEPT '*' <expression> KW_AS IDENT ':' <block>
+                ;
+
+<finally_clause_opt> : <finally_clause>
+                     |
+                     ;
+
+<finally_clause> : KW_FINALLY ':' <block> ;
+
+# `with` accepts a comma-separated item list. The Python 3.10+
+# parenthesised form (`with (a, b): …`) collides with a
+# parenthesised tuple expression at LR(1) — both shapes have an
+# `<expression>` reduction available on `,` and `)` lookahead.
+# The pre-3.10 unparenthesised form covers the common case;
+# parenthesised forms can use the line-continuation backslash
+# instead (`with a, \\\n     b: …`).
+<with_stmt> : KW_WITH <with_item_list> ':' <block>
+            ;
+
+<with_item_list> : <with_item>
+                 | <with_item_list> ',' <with_item>
+                 ;
+
+<with_item> : <expression>
+            | <expression> KW_AS <target>
+            ;
+
+# --- decorators, function and class definitions --------------------------
+
+<decorated> : <decorators> <decorated_target>
+            ;
+
+<decorators> : <decorator>
+             | <decorators> <decorator>
+             ;
+
+<decorator> : '@' <expression> NEWLINE
+            ;
+
+<decorated_target> : <function_def>
+                   | <class_def>
+                   | <async_stmt>
+                   ;
+
+<function_def> : KW_DEF IDENT <type_params_opt> '(' <param_list_opt> ')' <return_annotation_opt> ':' <block>
+               ;
+
+<type_params_opt> : <type_params>
+                  |
+                  ;
+
+# Generic type parameters: `def foo[T, U: Bound](x: T) -> U`.
+<type_params> : '[' <type_param_list> ']'
+              ;
+
+<type_param_list> : <type_param>
+                  | <type_param_list> ',' <type_param>
+                  ;
+
+<type_param> : IDENT
+             | IDENT ':' <expression>
+             | IDENT '=' <expression>
+             | '*' IDENT
+             | '**' IDENT
+             ;
+
+<return_annotation_opt> : '->' <expression>
+                        |
+                        ;
+
+<param_list_opt> : <param_list>
+                 | <param_list> ','
+                 |
+                 ;
+
+<param_list> : <param>
+             | <param_list> ',' <param>
+             ;
+
+<param> : IDENT
+        | IDENT ':' <expression>
+        | IDENT '=' <expression>
+        | IDENT ':' <expression> '=' <expression>
+        | '*'
+        | '*' IDENT
+        | '*' IDENT ':' <expression>
+        | '**' IDENT
+        | '**' IDENT ':' <expression>
+        | '/'
+        ;
+
+<class_def> : KW_CLASS IDENT <type_params_opt> ':' <block>
+            | KW_CLASS IDENT <type_params_opt> '(' ')' ':' <block>
+            | KW_CLASS IDENT <type_params_opt> '(' <argument_list> ')' ':' <block>
+            ;
+
+# --- async forms ---------------------------------------------------------
+
+<async_stmt> : KW_ASYNC <function_def>
+             | KW_ASYNC <for_stmt>
+             | KW_ASYNC <with_stmt>
+             ;
+
+# --- match statement -----------------------------------------------------
+
+<match_stmt> : KW_MATCH <expression> ':' NEWLINE INDENT <case_list> DEDENT
+             ;
+
+<case_list> : <case_block>
+            | <case_list> <case_block>
+            ;
+
+<case_block> : KW_CASE <pattern> ':' <block>
+             | KW_CASE <pattern> KW_IF <expression> ':' <block>
+             ;
+
+# Patterns. Subset of PEP 634 — literal, capture, wildcard, value,
+# group, sequence, mapping, class, or-pattern, as-pattern.
+<pattern> : <pattern_alt>
+          | <pattern> KW_AS IDENT
+          ;
+
+<pattern_alt> : <pattern_atom>
+              | <pattern_alt> '|' <pattern_atom>
+              ;
+
+<pattern_atom> : <literal_pattern>
+               | <capture_or_wildcard_pattern>
+               | <value_pattern>
+               | <group_pattern>
+               | <sequence_pattern>
+               | <mapping_pattern>
+               | <class_pattern>
+               ;
+
+<literal_pattern> : INT_LIT
+                  | FLOAT_LIT
+                  | COMPLEX_LIT
+                  | STRING_LIT
+                  | KW_TRUE
+                  | KW_FALSE
+                  | KW_NONE
+                  | '-' INT_LIT
+                  | '-' FLOAT_LIT
+                  | '-' COMPLEX_LIT
+                  ;
+
+<capture_or_wildcard_pattern> : IDENT
+                              | KW_UNDERSCORE
+                              ;
+
+<value_pattern> : <dotted_name> '.' IDENT
+                ;
+
+<group_pattern> : '(' <pattern> ')' ;
+
+<sequence_pattern> : '[' ']'
+                   | '[' <pattern_list> ']'
+                   | '[' <pattern_list> ',' ']'
+                   ;
+
+<pattern_list> : <pattern_or_star>
+               | <pattern_list> ',' <pattern_or_star>
+               ;
+
+<pattern_or_star> : <pattern>
+                  | '*' IDENT
+                  | '*' KW_UNDERSCORE
+                  ;
+
+<mapping_pattern> : '{' '}'
+                  | '{' <mapping_pattern_items> '}'
+                  | '{' <mapping_pattern_items> ',' '}'
+                  ;
+
+<mapping_pattern_items> : <mapping_pattern_item>
+                        | <mapping_pattern_items> ',' <mapping_pattern_item>
+                        ;
+
+<mapping_pattern_item> : <literal_pattern> ':' <pattern>
+                       | <value_pattern> ':' <pattern>
+                       | '**' IDENT
+                       ;
+
+<class_pattern> : <dotted_name> '(' ')'
+                | <dotted_name> '(' <class_pattern_args> ')'
+                | <dotted_name> '(' <class_pattern_args> ',' ')'
+                ;
+
+<class_pattern_args> : <class_pattern_arg>
+                     | <class_pattern_args> ',' <class_pattern_arg>
+                     ;
+
+<class_pattern_arg> : <pattern>
+                    | IDENT '=' <pattern>
+                    ;
+
+# --- block ---------------------------------------------------------------
+
+# A block is either a `NEWLINE INDENT statements DEDENT` (the
+# nested, indented form) or a `simple_stmts` directly after the
+# `:` on the same line.
+<block> : NEWLINE INDENT <statements> DEDENT
+        | <simple_stmts>
+        ;
+
+# --- expressions ---------------------------------------------------------
+#
+# Python precedence ladder (lowest to highest):
+#   1. lambda
+#   2. ternary (`x if cond else y`)
+#   3. or
+#   4. and
+#   5. not
+#   6. comparison (chainable: `a < b < c`), `in`, `not in`, `is`,
+#      `is not`
+#   7. bitwise or `|`
+#   8. bitwise xor `^`
+#   9. bitwise and `&`
+#  10. shift `<< >>`
+#  11. additive `+ -`
+#  12. multiplicative `* / // % @`
+#  13. unary `+x -x ~x`
+#  14. power `**` (right-associative)
+#  15. await
+#  16. primary (atom + trailers)
+#  17. walrus `:=` (assignment expression — special-cased)
+
+<expression> : <ternary_or_lambda>
+             | IDENT ':=' <ternary_or_lambda>
+             ;
+
+<ternary_or_lambda> : <conditional_expr>
+                    | <lambda_expr>
+                    ;
+
+<conditional_expr> : <or_expr>
+                   | <or_expr> KW_IF <or_expr> KW_ELSE <expression>
+                   ;
+
+# Lambda's param list disallows annotations (the `:` after a
+# lambda param name is the body separator, not an annotation
+# colon). We reuse the regular <param> elements that don't carry
+# `:` annotations — IDENT, IDENT '=' default, `*` / `*args` /
+# `**kwargs` — via a dedicated <lambda_param_list> non-terminal.
+<lambda_expr> : KW_LAMBDA ':' <expression>
+              | KW_LAMBDA <lambda_param_list> ':' <expression>
+              ;
+
+<lambda_param_list> : <lambda_param>
+                    | <lambda_param_list> ',' <lambda_param>
+                    ;
+
+<lambda_param> : IDENT
+               | IDENT '=' <expression>
+               | '*'
+               | '*' IDENT
+               | '**' IDENT
+               | '/'
+               ;
+
+<or_expr> : <and_expr>
+          | <or_expr> KW_OR <and_expr>
+          ;
+
+<and_expr> : <not_expr>
+           | <and_expr> KW_AND <not_expr>
+           ;
+
+<not_expr> : <comparison>
+           | KW_NOT <not_expr>
+           ;
+
+# Comparison chain: `a < b < c <= d`. Encoded as a left-recursive
+# rule so the parse tree records each comparison; the host
+# rebuilds the conjunction during AST construction per CPython
+# semantics.
+<comparison> : <bitor_expr>
+             | <comparison> <comparison_op> <bitor_expr>
+             ;
+
+<comparison_op> : '=='
+                | '!='
+                | '<'
+                | '>'
+                | '<='
+                | '>='
+                | KW_IN
+                | KW_NOT KW_IN
+                | KW_IS
+                | KW_IS KW_NOT
+                ;
+
+<bitor_expr> : <bitxor_expr>
+             | <bitor_expr> '|' <bitxor_expr>
+             ;
+
+<bitxor_expr> : <bitand_expr>
+              | <bitxor_expr> '^' <bitand_expr>
+              ;
+
+<bitand_expr> : <shift_expr>
+              | <bitand_expr> '&' <shift_expr>
+              ;
+
+<shift_expr> : <additive_expr>
+             | <shift_expr> '<<' <additive_expr>
+             | <shift_expr> '>>' <additive_expr>
+             ;
+
+<additive_expr> : <multiplicative_expr>
+                | <additive_expr> '+' <multiplicative_expr>
+                | <additive_expr> '-' <multiplicative_expr>
+                ;
+
+<multiplicative_expr> : <unary_expr>
+                      | <multiplicative_expr> '*'  <unary_expr>
+                      | <multiplicative_expr> '/'  <unary_expr>
+                      | <multiplicative_expr> '//' <unary_expr>
+                      | <multiplicative_expr> '%'  <unary_expr>
+                      | <multiplicative_expr> '@'  <unary_expr>
+                      ;
+
+<unary_expr> : <power_expr>
+             | '+' <unary_expr>
+             | '-' <unary_expr>
+             | '~' <unary_expr>
+             ;
+
+# Power is right-associative: `a ** b ** c` = `a ** (b ** c)`.
+<power_expr> : <await_expr>
+             | <await_expr> '**' <unary_expr>
+             ;
+
+<await_expr> : <primary>
+             | KW_AWAIT <primary>
+             ;
+
+# Primary: an atom optionally followed by a chain of trailers.
+<primary> : <atom>
+          | <primary> '.' IDENT
+          | <primary> '[' <subscript_list> ']'
+          | <primary> '(' <argument_list_opt> ')'
+          ;
+
+<subscript_list> : <subscript>
+                 | <subscript_list> ',' <subscript>
+                 ;
+
+<subscript> : <expression>
+            | <slice>
+            ;
+
+<slice> : ':'
+        | <expression> ':'
+        | ':' <expression>
+        | <expression> ':' <expression>
+        | ':' ':' <expression>
+        | <expression> ':' ':' <expression>
+        | <expression> ':' <expression> ':' <expression>
+        | ':' ':'
+        ;
+
+<argument_list_opt> : <argument_list>
+                    | <argument_list> ','
+                    |
+                    ;
+
+<argument_list> : <argument>
+                | <argument_list> ',' <argument>
+                ;
+
+<argument> : <expression>
+           | IDENT '=' <expression>
+           | '*' <expression>
+           | '**' <expression>
+           | <comprehension_for_chain>
+           ;
+
+# Generator-expression argument: `sum(x for x in xs)`.
+<comprehension_for_chain> : <expression> <comp_for_list>
+                          ;
+
+<comp_for_list> : <comp_for>
+                | <comp_for_list> <comp_for>
+                ;
+
+<comp_for> : KW_FOR <target_list_loop> KW_IN <or_expr>
+           | KW_FOR <target_list_loop> KW_IN <or_expr> KW_IF <or_expr>
+           | KW_ASYNC KW_FOR <target_list_loop> KW_IN <or_expr>
+           ;
+
+# --- atoms ---------------------------------------------------------------
+
+# Starred expressions (`*x`) appear in tuple-unpacking, function
+# call arguments, and collection literals — but NOT as
+# stand-alone atoms in arithmetic expressions. The `'*'<or_expr>`
+# forms live on `<expr_or_starred>` / `<argument>` /
+# `<set_or_dict_item>` directly, not on `<atom>`.
+<atom> : IDENT
+       | <literal>
+       | KW_TRUE
+       | KW_FALSE
+       | KW_NONE
+       | '...'
+       | '(' ')'
+       | '(' <yield_expression> ')'
+       | '(' <expression_or_starred_list> ')'
+       | '(' <generator_expr> ')'
+       | '[' ']'
+       | '[' <expression_or_starred_list> ']'
+       | '[' <list_comprehension> ']'
+       | '{' '}'
+       | '{' <set_or_dict_items> '}'
+       | '{' <set_comprehension> '}'
+       | '{' <dict_comprehension> '}'
+       ;
+
+<literal> : INT_LIT
+          | FLOAT_LIT
+          | COMPLEX_LIT
+          | <string_seq>
+          ;
+
+# Implicit string concatenation: `"abc" "def"` joins at lex / parse
+# time. Each string-literal token is the lexeme; the grammar
+# accepts a run of them.
+<string_seq> : STRING_LIT
+             | <string_seq> STRING_LIT
+             ;
+
+<expression_or_starred_list> : <expr_or_starred>
+                             | <expression_or_starred_list> ',' <expr_or_starred>
+                             | <expression_or_starred_list> ','
+                             ;
+
+<expr_or_starred> : <expression>
+                  | '*' <or_expr>
+                  ;
+
+<generator_expr> : <expression> <comp_for_list>
+                 ;
+
+<list_comprehension> : <expression> <comp_for_list>
+                     ;
+
+<set_or_dict_items> : <set_or_dict_item>
+                    | <set_or_dict_items> ',' <set_or_dict_item>
+                    | <set_or_dict_items> ','
+                    ;
+
+<set_or_dict_item> : <expression>
+                   | <expression> ':' <expression>
+                   | '*' <or_expr>
+                   | '**' <or_expr>
+                   ;
+
+<set_comprehension> : <expression> <comp_for_list>
+                    ;
+
+<dict_comprehension> : <expression> ':' <expression> <comp_for_list>
+                     ;
