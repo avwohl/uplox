@@ -1,0 +1,1108 @@
+# Delphi / Object Pascal grammar — uplox first cut.
+#
+# Targets the language as implemented by Turbo Pascal / Borland Pascal /
+# Delphi 1-7 and the Free Pascal `objfpc` / `delphi` modes. Sized to
+# match real-world Object Pascal as written before the modern features
+# (generics, anonymous methods, attributes, class helpers) added
+# disambiguation cost.
+#
+# Built on top of the standard-Pascal core in `pascal.uplox`; adds the
+# Object Pascal layer:
+#
+#   * Compilation units: `program` / `unit` / `library`, with `uses`
+#     clauses in both interface and implementation sections, the
+#     `in 'path'` form for in-tree includes, and the unit's
+#     `initialization` / `finalization` sections.
+#   * Classes: single inheritance, multiple implemented interfaces,
+#     the four canonical visibility sections (`private`, `protected`,
+#     `public`, `published`) plus `strict private` / `strict
+#     protected`, instance and class fields, instance and class
+#     methods, constructors and destructors, class-level constants
+#     and types, property declarations with the full specifier set
+#     (`read` / `write` / `stored` / `default` / `nodefault` /
+#     `index` / `implements`), and indexed / default array properties.
+#   * Interfaces: optional parent, optional `[GUID]` literal, method
+#     headings (no bodies), property headings (no bodies).
+#   * Exception handling: `try ... except`, `try ... finally`, the
+#     `on [E:] T do` handler form with an optional `else` arm, and
+#     the `raise [expr] [at <addr>]` statement.
+#   * Strings: the `string` type (with optional bounded length).
+#     Wide / Ansi / Unicode variants are plain type identifiers.
+#   * Dynamic arrays: `array of T` (and the variant-typed
+#     `array of const`) in both type-denoter and parameter positions.
+#   * Procedural types: `procedure(...)` / `function(...): T`,
+#     optionally followed by `of object` for method pointers.
+#   * The `out` parameter modifier in addition to value / `var` /
+#     `const`. Default parameter values (`x: integer = 5`).
+#   * Method directives: `virtual`, `override`, `dynamic`, `abstract`,
+#     `reintroduce`, `overload`, `inline`, `message <expr>`, `static`,
+#     and the calling-convention set (`cdecl`, `stdcall`, `pascal`,
+#     `register`, `safecall`, `fastcall`, `varargs`).
+#   * Hint directives: `deprecated [<msg>]`, `platform`, `library`,
+#     `experimental`.
+#   * `resourcestring`, `threadvar`, and `exports` declarations.
+#   * The `inherited` call form (bare, named-method, with-args),
+#     the `is` type-test operator, and the `as` typed-cast operator.
+#   * Bitwise shifts (`shl`, `shr`).
+#
+# Out of scope (the first cut keeps the grammar tractable):
+#
+#   * Generics: `TList<T>`, generic methods. The `<` versus
+#     less-than overload is hard to resolve without a lexer hack.
+#   * Anonymous methods: `procedure begin ... end` expressions.
+#   * Class / record / type helpers.
+#   * Attribute syntax: `[MyAttribute(...)]` before declarations.
+#   * Inline assembler blocks (`asm ... end`).
+#   * Operator overloading on records / classes.
+#   * Compiler directives (`{$IFDEF ...}` etc.) are skipped as plain
+#     brace-comments; hosts that want to evaluate them should
+#     pre-process the source before the lexer sees it.
+#
+# Source is conventionally case-insensitive; this grammar accepts the
+# lowercase keyword spelling only. Hosts that need case-insensitivity
+# should downcase identifiers before the lexer sees them.
+#
+# Conflict-resolution decisions:
+#
+#   * Dangling `else` resolves greedily (`%shift KW_ELSE`), matching
+#     every Pascal-family compiler.
+#   * A class type's forward form (`class;`) versus its body form
+#     (`class ... end`) disambiguates at LR(1) lookahead — `;` after
+#     the optional ancestor list reduces to the forward shape; any
+#     member-introducing token (visibility keyword, method keyword,
+#     field IDENT, etc.) starts the body.
+#   * Method directives are reserved keywords. Real Delphi treats
+#     them as context-sensitive identifiers (you can name a local
+#     variable `virtual`); the cost of doing that in an LR grammar
+#     is large and the benefit small, so we make them reserved.
+#     Sources that hit a name collision can rename.
+#   * `default` doubles as a property specifier (with or without an
+#     expression — `default 0` sets the published default value;
+#     bare `default` marks an indexed property as the class's
+#     default). LR(1) lookahead distinguishes: anything that starts
+#     an expression after `default` takes the value form; `;` reduces
+#     the bare form.
+#   * The `(IDENT)` enum-type vs parenthesised-expression ambiguity
+#     and the `(IDENT)` typed-const-aggregate ambiguity are both
+#     resolved the same way as in `pascal.uplox`: constant-factor
+#     subrange bounds don't accept parens, and positional typed-const
+#     aggregates require at least one comma.
+#   * Class-body `const` / `type` / `class var` sections have no
+#     terminating sentinel — IDENT after a const item is ambiguous
+#     between "another const item" and "this section ended, IDENT
+#     is a field of the next member". We resolve in favour of
+#     extending the section (%shift IDENT), which matches real
+#     Delphi convention: a new field section is introduced with an
+#     explicit `var` / visibility-keyword marker, not by relying on
+#     bare-IDENT to close the surrounding section.
+#   * `of object` follows the proc/func type-denoter optionally; the
+#     KW_OF lookahead is benign (`%shift KW_OF`) — there's no other
+#     production that would want to reduce on KW_OF in this
+#     position, and the LALR merge needed the hint.
+
+%grammar delphi
+
+
+%define lr.type lalr
+%options
+start = compilation_unit
+
+%shift
+KW_ELSE
+KW_OF
+IDENT
+
+%tokens
+WS            = /[ \t\r\n]+/                                  %skip
+# Block comments: `{ ... }` and `(* ... *)`. Compiler directives
+# (`{$IFDEF ...}`) are syntactically just brace comments and skipped.
+BRACE_COMMENT = /\{[^}]*\}/                                   %skip
+PAREN_COMMENT = /\(\*([^*]|\*+[^*\)])*\*+\)/                  %skip
+LINE_COMMENT  = /\/\/[^\n]*/                                  %skip
+
+# Numeric literals. Integer literals accept decimal and `$hex`;
+# reals require a fractional part or an exponent so `1` lexes as
+# INT_LIT and `1.0` / `1e2` lex as REAL_LIT.
+INT_LIT       = /([0-9]+|\$[0-9A-Fa-f]+)/
+REAL_LIT      = /[0-9]+(\.[0-9]+([eE][+-]?[0-9]+)?|[eE][+-]?[0-9]+)/
+
+# Strings are single-quoted with doubled-quote escapes. Newlines
+# inside a single literal are not allowed — long strings are
+# spelled as adjacent literals (`'a' 'b'`) and the host glues them
+# during semantic analysis.
+STRING_LIT    = /'([^'\n]|'')*'/
+
+# --- compilation-unit keywords -------------------------------------------
+KW_PROGRAM    = 'program'
+KW_UNIT       = 'unit'
+KW_LIBRARY    = 'library'
+KW_USES       = 'uses'
+KW_INTERFACE  = 'interface'
+KW_IMPLEMENTATION = 'implementation'
+KW_INITIALIZATION = 'initialization'
+KW_FINALIZATION   = 'finalization'
+
+# --- declaration keywords ------------------------------------------------
+KW_LABEL      = 'label'
+KW_CONST      = 'const'
+KW_TYPE       = 'type'
+KW_VAR        = 'var'
+KW_THREADVAR  = 'threadvar'
+KW_RESOURCESTRING = 'resourcestring'
+KW_EXPORTS    = 'exports'
+KW_PROCEDURE  = 'procedure'
+KW_FUNCTION   = 'function'
+KW_CONSTRUCTOR = 'constructor'
+KW_DESTRUCTOR = 'destructor'
+KW_PROPERTY   = 'property'
+
+# --- block keywords ------------------------------------------------------
+KW_BEGIN      = 'begin'
+KW_END        = 'end'
+
+# --- control-flow keywords -----------------------------------------------
+KW_IF         = 'if'
+KW_THEN       = 'then'
+KW_ELSE       = 'else'
+KW_WHILE      = 'while'
+KW_DO         = 'do'
+KW_REPEAT     = 'repeat'
+KW_UNTIL      = 'until'
+KW_FOR        = 'for'
+KW_TO         = 'to'
+KW_DOWNTO     = 'downto'
+KW_CASE       = 'case'
+KW_OF         = 'of'
+KW_WITH       = 'with'
+KW_GOTO       = 'goto'
+KW_TRY        = 'try'
+KW_EXCEPT     = 'except'
+KW_FINALLY    = 'finally'
+KW_RAISE      = 'raise'
+KW_ON         = 'on'
+KW_AT         = 'at'
+
+# --- type-shape keywords -------------------------------------------------
+KW_ARRAY      = 'array'
+KW_RECORD     = 'record'
+KW_SET        = 'set'
+KW_FILE       = 'file'
+KW_PACKED     = 'packed'
+KW_STRING     = 'string'
+KW_CLASS      = 'class'
+KW_OBJECT     = 'object'
+
+# --- visibility / strict modifiers ---------------------------------------
+KW_PRIVATE    = 'private'
+KW_PROTECTED  = 'protected'
+KW_PUBLIC     = 'public'
+KW_PUBLISHED  = 'published'
+KW_STRICT     = 'strict'
+
+# --- operator words ------------------------------------------------------
+KW_DIV        = 'div'
+KW_MOD        = 'mod'
+KW_AND        = 'and'
+KW_OR         = 'or'
+KW_XOR        = 'xor'
+KW_NOT        = 'not'
+KW_SHL        = 'shl'
+KW_SHR        = 'shr'
+KW_IN         = 'in'
+KW_IS         = 'is'
+KW_AS         = 'as'
+
+# --- literal-like keywords -----------------------------------------------
+KW_NIL        = 'nil'
+KW_SELF       = 'self'
+KW_INHERITED  = 'inherited'
+
+# --- property specifiers -------------------------------------------------
+KW_READ       = 'read'
+KW_WRITE      = 'write'
+KW_STORED     = 'stored'
+KW_DEFAULT    = 'default'
+KW_NODEFAULT  = 'nodefault'
+KW_INDEX      = 'index'
+KW_IMPLEMENTS = 'implements'
+
+# --- method directives ---------------------------------------------------
+KW_VIRTUAL     = 'virtual'
+KW_OVERRIDE    = 'override'
+KW_DYNAMIC     = 'dynamic'
+KW_ABSTRACT    = 'abstract'
+KW_REINTRODUCE = 'reintroduce'
+KW_OVERLOAD    = 'overload'
+KW_INLINE      = 'inline'
+KW_MESSAGE     = 'message'
+KW_STATIC      = 'static'
+KW_FORWARD     = 'forward'
+KW_EXTERNAL    = 'external'
+
+# Note: `name` is NOT reserved. It functions as a contextual
+# keyword inside the `external` directive and inside `exports`
+# clauses, but real Delphi sources routinely use it as a field /
+# variable / property identifier (`obj.Name`, `var Name: string`).
+# We model the name-clause as a plain IDENT slot and let the host
+# enforce the literal-`name` spelling at semantic-analysis time.
+
+# --- calling-convention directives ---------------------------------------
+KW_CDECL      = 'cdecl'
+KW_STDCALL    = 'stdcall'
+KW_PASCAL     = 'pascal'
+KW_REGISTER   = 'register'
+KW_SAFECALL   = 'safecall'
+KW_FASTCALL   = 'fastcall'
+KW_VARARGS    = 'varargs'
+
+# --- hint directives -----------------------------------------------------
+KW_DEPRECATED   = 'deprecated'
+KW_PLATFORM     = 'platform'
+KW_EXPERIMENTAL = 'experimental'
+
+# --- parameter modifiers -------------------------------------------------
+KW_OUT        = 'out'
+
+# --- misc ---------------------------------------------------------------
+KW_ABSOLUTE   = 'absolute'
+
+# Identifiers come last so longest-match ties favour the keyword.
+IDENT         = /[A-Za-z_][A-Za-z0-9_]*/
+
+# Multi-char operators before single-char so longest-match wins.
+ASSIGN        = ':='
+LE            = '<='
+GE            = '>='
+NE            = '<>'
+DOTDOT        = '..'
+
+EQ            = '='
+LT            = '<'
+GT            = '>'
+PLUS          = '+'
+MINUS         = '-'
+STAR          = '*'
+SLASH         = '/'
+CARET         = '^'
+AT            = '@'
+LPAREN        = '('
+RPAREN        = ')'
+LBRACK        = '['
+RBRACK        = ']'
+COMMA         = ','
+SEMI          = ';'
+COLON         = ':'
+DOT           = '.'
+
+%rules
+
+# --- compilation units ---------------------------------------------------
+
+<compilation_unit> : <program>
+                   | <unit>
+                   | <library>
+                   ;
+
+<program> : KW_PROGRAM IDENT <program_params_opt> ';' <uses_opt> <block> '.'
+          ;
+
+<library> : KW_LIBRARY IDENT ';' <uses_opt> <block> '.'
+          ;
+
+<program_params_opt> : '(' <ident_list> ')'
+                     |
+                     ;
+
+# Units split into an interface section (declarations only — no
+# routine bodies), an implementation section (declarations with
+# bodies), and optional initialization / finalization parts.
+<unit> : KW_UNIT IDENT <hint_directives_opt> ';'
+         KW_INTERFACE <uses_opt> <interface_decls>
+         KW_IMPLEMENTATION <uses_opt> <decl_parts>
+         <unit_tail>
+       ;
+
+<unit_tail> : KW_END '.'
+            | KW_INITIALIZATION <stmt_list> KW_END '.'
+            | KW_INITIALIZATION <stmt_list> KW_FINALIZATION <stmt_list> KW_END '.'
+            ;
+
+<uses_opt> : KW_USES <unit_ref_list> ';'
+           |
+           ;
+
+<unit_ref_list> : <unit_ref>
+                | <unit_ref_list> ',' <unit_ref>
+                ;
+
+# Unit names are dotted in modern Delphi (`System.SysUtils`); the
+# `in 'path'` suffix is how Delphi projects pin a unit to a
+# specific source file rather than letting the search path resolve
+# it.
+<unit_ref> : <qualified_ident>
+           | <qualified_ident> KW_IN STRING_LIT
+           ;
+
+# --- interface section ---------------------------------------------------
+
+<interface_decls> : <interface_decls> <interface_decl>
+                  |
+                  ;
+
+<interface_decl> : <const_decl_part>
+                 | <type_decl_part>
+                 | <var_decl_part>
+                 | <threadvar_decl_part>
+                 | <resourcestring_decl_part>
+                 | <exports_decl_part>
+                 | <iface_routine_decl>
+                 ;
+
+# Interface-section routine declarations are heading + optional
+# directives only — no body.
+<iface_routine_decl> : <proc_heading> ';' <iface_directives_opt>
+                     | <func_heading> ';' <iface_directives_opt>
+                     ;
+
+<iface_directives_opt> : <iface_directives_opt> <iface_directive> ';'
+                       |
+                       ;
+
+# Interface-section directives accept both kinds — a forward
+# heading can be terminator-only (`forward` is rare here but
+# legal in the right context) or modifier-decorated.
+<iface_directive> : <modifier_directive>
+                  | <terminator_directive>
+                  ;
+
+# --- block (program / library / nested routine bodies) ------------------
+
+<block>        : <decl_parts> <compound_stmt>
+               ;
+
+<decl_parts>   : <decl_parts> <decl_part>
+               |
+               ;
+
+<decl_part>    : <label_decl_part>
+               | <const_decl_part>
+               | <type_decl_part>
+               | <var_decl_part>
+               | <threadvar_decl_part>
+               | <resourcestring_decl_part>
+               | <exports_decl_part>
+               | <impl_routine_decl>
+               ;
+
+<label_decl_part> : KW_LABEL <label_list> ';' ;
+<label_list>      : INT_LIT
+                  | <label_list> ',' INT_LIT
+                  ;
+
+<const_decl_part> : KW_CONST <const_decl_seq> ;
+<const_decl_seq>  : <const_decl>
+                  | <const_decl_seq> <const_decl>
+                  ;
+<const_decl>      : IDENT '=' <expr> <hint_directives_opt> ';'
+                  | IDENT ':' <type_denoter> '=' <typed_const> <hint_directives_opt> ';'
+                  ;
+
+<type_decl_part>  : KW_TYPE <type_decl_seq> ;
+<type_decl_seq>   : <type_decl>
+                  | <type_decl_seq> <type_decl>
+                  ;
+# Forward declarations for class / interface types live at the
+# type_decl level, not inside the type_denoter — pushing them
+# down would create a reduce/reduce conflict between the
+# bare-keyword form and the empty-heritage prefix of a full
+# declaration.
+<type_decl>       : IDENT '=' <type_denoter> <hint_directives_opt> ';'
+                  | IDENT '=' KW_CLASS ';'
+                  | IDENT '=' KW_INTERFACE ';'
+                  ;
+
+<var_decl_part>   : KW_VAR <var_decl_seq> ;
+<var_decl_seq>    : <var_decl>
+                  | <var_decl_seq> <var_decl>
+                  ;
+<var_decl>        : <ident_list> ':' <type_denoter> <hint_directives_opt> ';'
+                  | <ident_list> ':' <type_denoter> '=' <typed_const> <hint_directives_opt> ';'
+                  | <ident_list> ':' <type_denoter> KW_ABSOLUTE <abs_target> ';'
+                  ;
+
+# `var X: T absolute Y;` overlays X on Y's memory; the target is an
+# identifier or an integer address. We list ABSOLUTE here because
+# Delphi sources use it in low-level RTL code. KW_ABSOLUTE is
+# borrowed from the regular IDENT space — see the lexer note below.
+
+<threadvar_decl_part>     : KW_THREADVAR <var_decl_seq> ;
+<resourcestring_decl_part> : KW_RESOURCESTRING <const_decl_seq> ;
+<exports_decl_part>       : KW_EXPORTS <exports_list> ';' ;
+
+<exports_list> : <export_item>
+               | <exports_list> ',' <export_item>
+               ;
+
+<export_item> : <designator>
+              | <designator> IDENT <expr>
+              | <designator> KW_INDEX <expr>
+              | <designator> KW_INDEX <expr> IDENT <expr>
+              ;
+
+# --- routine declarations (implementation side) --------------------------
+
+<impl_routine_decl> : <proc_heading> ';' <impl_routine_tail>
+                    | <func_heading> ';' <impl_routine_tail>
+                    | <ctor_heading> ';' <impl_routine_tail>
+                    | <dtor_heading> ';' <impl_routine_tail>
+                    | <class_proc_heading> ';' <impl_routine_tail>
+                    | <class_func_heading> ';' <impl_routine_tail>
+                    ;
+
+# Implementation-side routine tails come in two shapes:
+#
+#   * Bodyless: optional modifier directives, then a terminator
+#     directive (`forward`, `external`, `external <lib>`), then
+#     optionally more modifiers. Used for forward references,
+#     imported externals, and the like.
+#   * With body: optional modifier directives, then the local
+#     declarations and compound statement of the body, ended by `;`.
+#
+# Splitting modifier from terminator directives is what lets the
+# LR(1) parser disambiguate the `<modifier_dirs_opt> .` state: the
+# lookahead tells us terminator-path (KW_FORWARD / KW_EXTERNAL)
+# versus body-path (KW_BEGIN / KW_VAR / etc.). The original
+# undifferentiated `<directive_seq>` form had a reduce/reduce
+# conflict on every body-starter token because the parser couldn't
+# tell whether the next decl_part token belonged to this routine's
+# body or a sibling decl_part in the outer scope.
+
+<impl_routine_tail> : <modifier_dirs_opt> <terminator_directive> ';' <modifier_dirs_opt>
+                    | <modifier_dirs_opt> <local_decls> <compound_stmt> ';'
+                    ;
+
+<modifier_dirs_opt> : <modifier_dirs_opt> <modifier_directive> ';'
+                    |
+                    ;
+
+<modifier_directive> : KW_VIRTUAL
+                     | KW_OVERRIDE
+                     | KW_DYNAMIC
+                     | KW_ABSTRACT
+                     | KW_REINTRODUCE
+                     | KW_OVERLOAD
+                     | KW_INLINE
+                     | KW_STATIC
+                     | KW_MESSAGE <expr>
+                     | KW_CDECL
+                     | KW_STDCALL
+                     | KW_PASCAL
+                     | KW_REGISTER
+                     | KW_SAFECALL
+                     | KW_FASTCALL
+                     | KW_VARARGS
+                     | <hint_directive>
+                     ;
+
+<terminator_directive> : KW_FORWARD
+                       | KW_EXTERNAL
+                       | KW_EXTERNAL <expr> <ext_name_opt>
+                       ;
+
+<local_decls> : <decl_parts> ;
+
+# Routine headings. Names are qualified identifiers so
+# `procedure TFoo.DoStuff` parses at top level — the dotted form is
+# how Delphi sources name a class method's out-of-line body.
+<proc_heading> : KW_PROCEDURE <qualified_ident> <formal_params_opt>
+               ;
+<func_heading> : KW_FUNCTION <qualified_ident> <formal_params_opt> ':' <type_denoter>
+               ;
+<ctor_heading> : KW_CONSTRUCTOR <qualified_ident> <formal_params_opt>
+               ;
+<dtor_heading> : KW_DESTRUCTOR <qualified_ident> <formal_params_opt>
+               ;
+<class_proc_heading> : KW_CLASS KW_PROCEDURE <qualified_ident> <formal_params_opt>
+                     ;
+<class_func_heading> : KW_CLASS KW_FUNCTION <qualified_ident> <formal_params_opt> ':' <type_denoter>
+                     ;
+
+<qualified_ident> : IDENT
+                  | <qualified_ident> '.' IDENT
+                  ;
+
+<formal_params_opt> : '(' <formal_param_list> ')'
+                    | '(' ')'
+                    |
+                    ;
+
+<formal_param_list> : <formal_param>
+                    | <formal_param_list> ';' <formal_param>
+                    ;
+
+# Pascal's value / var / const / out modifier set plus optional
+# default-value initialisers.
+<formal_param> : <param_modifier_opt> <ident_list> ':' <param_type>
+               | <param_modifier_opt> <ident_list> ':' <param_type> '=' <expr>
+               | <param_modifier_opt> <ident_list>
+               ;
+
+<param_modifier_opt> : KW_VAR
+                     | KW_CONST
+                     | KW_OUT
+                     |
+                     ;
+
+# Parameter types accept the full type_denoter plus the
+# open-variant-array form (`array of const`) that only appears in
+# parameter position. The plain `array of T` open-array form is
+# handled via <type_denoter> → <array_type>.
+<param_type> : <type_denoter>
+             | KW_ARRAY KW_OF KW_CONST
+             ;
+
+# --- directives ----------------------------------------------------------
+
+<ext_name_opt> : IDENT <expr>
+               |
+               ;
+
+<hint_directive> : KW_DEPRECATED
+                 | KW_DEPRECATED <expr>
+                 | KW_PLATFORM
+                 | KW_LIBRARY
+                 | KW_EXPERIMENTAL
+                 ;
+
+<hint_directives_opt> : <hint_directives_opt> <hint_directive>
+                      |
+                      ;
+
+# --- type denoters -------------------------------------------------------
+
+<type_denoter> : <simple_type>
+               | <structured_type>
+               | <pointer_type>
+               | <string_type>
+               | <class_type>
+               | <interface_type>
+               | <proc_type_denoter>
+               ;
+
+<simple_type>  : <subrange_type>
+               | <enum_type>
+               | <type_ident>
+               ;
+
+# Constant-factor subrange bounds (no parens — see header note).
+<subrange_type> : <const_factor> '..' <const_factor>
+                ;
+
+<const_factor>  : INT_LIT
+                | REAL_LIT
+                | STRING_LIT
+                | KW_NIL
+                | '+' <const_factor>
+                | '-' <const_factor>
+                | <type_ident>
+                ;
+
+<enum_type>     : '(' <ident_list> ')' ;
+
+# Qualified type names so `TFoo.TInner` works for nested types.
+<type_ident>    : IDENT
+                | <type_ident> '.' IDENT
+                ;
+
+<string_type>   : KW_STRING
+                | KW_STRING '[' <expr> ']'
+                ;
+
+# --- structured types ----------------------------------------------------
+
+<structured_type> : <unpacked_structured>
+                  | KW_PACKED <unpacked_structured>
+                  ;
+
+<unpacked_structured> : <array_type>
+                      | <record_type>
+                      | <set_type>
+                      | <file_type>
+                      ;
+
+# `array of const` is parameter-only (the open-variant-array form);
+# it lives on <param_type>, not here.
+<array_type>   : KW_ARRAY '[' <index_type_list> ']' KW_OF <type_denoter>
+               | KW_ARRAY KW_OF <type_denoter>
+               ;
+
+<index_type_list> : <simple_type>
+                  | <index_type_list> ',' <simple_type>
+                  ;
+
+<record_type>  : KW_RECORD <field_list> KW_END
+               ;
+
+<field_list>   : <fixed_part>
+               | <fixed_part> ';' <variant_part>
+               | <variant_part>
+               |
+               ;
+
+<fixed_part>   : <field_decl>
+               | <fixed_part> ';' <field_decl>
+               ;
+
+<field_decl>   : <ident_list> ':' <type_denoter>
+               ;
+
+<variant_part> : KW_CASE <variant_selector> KW_OF <variant_list>
+               ;
+
+<variant_selector> : IDENT ':' <type_ident>
+                   | <type_ident>
+                   ;
+
+<variant_list> : <variant>
+               | <variant_list> ';' <variant>
+               ;
+
+<variant>      : <const_list> ':' '(' <field_list> ')'
+               ;
+
+<const_list>   : <expr>
+               | <const_list> ',' <expr>
+               ;
+
+<set_type>     : KW_SET KW_OF <simple_type> ;
+
+<file_type>    : KW_FILE KW_OF <type_denoter>
+               | KW_FILE
+               ;
+
+<pointer_type> : '^' <type_ident> ;
+
+# --- class types ---------------------------------------------------------
+
+# Full class declarations carry an optional ancestor list and a
+# body; both the heritage and the body may be empty (an empty class
+# is `class end`). True forward declarations (`T = class;`) live at
+# the type_decl level above.
+<class_type> : KW_CLASS <class_heritage_opt> <class_body_opt> KW_END
+             ;
+
+<class_heritage_opt> : <class_heritage>
+                     |
+                     ;
+
+<class_body_opt> : <class_body>
+                 |
+                 ;
+
+<class_heritage> : '(' <type_ident_list> ')' ;
+
+<type_ident_list> : <type_ident>
+                  | <type_ident_list> ',' <type_ident>
+                  ;
+
+# Class bodies are sequences of visibility sections. The leading
+# section is implicit-`published` (Delphi convention) and may
+# contain members before any explicit visibility keyword.
+<class_body> : <member_list>
+             | <member_list> <visibility_sections>
+             | <visibility_sections>
+             ;
+
+<visibility_sections> : <visibility_section>
+                      | <visibility_sections> <visibility_section>
+                      ;
+
+<visibility_section> : <visibility_marker> <member_list>
+                     ;
+
+<visibility_marker> : KW_PRIVATE
+                    | KW_PROTECTED
+                    | KW_PUBLIC
+                    | KW_PUBLISHED
+                    | KW_STRICT KW_PRIVATE
+                    | KW_STRICT KW_PROTECTED
+                    ;
+
+<member_list> : <member_list> <member>
+              | <member>
+              ;
+
+<member> : <field_member>
+         | <method_member>
+         | <property_member>
+         | <class_const_member>
+         | <class_type_member>
+         | <class_var_member>
+         ;
+
+<field_member> : <ident_list> ':' <type_denoter> <hint_directives_opt> ';'
+               ;
+
+# Class-level const / type / var sections inside a class body.
+<class_const_member> : KW_CONST <class_const_seq> ;
+<class_const_seq>    : <class_const_item>
+                     | <class_const_seq> <class_const_item>
+                     ;
+<class_const_item>   : IDENT '=' <expr> ';'
+                     | IDENT ':' <type_denoter> '=' <typed_const> ';'
+                     ;
+
+<class_type_member> : KW_TYPE <class_type_seq> ;
+<class_type_seq>    : <class_type_item>
+                    | <class_type_seq> <class_type_item>
+                    ;
+<class_type_item>   : IDENT '=' <type_denoter> ';' ;
+
+# Two forms: `var` introduces an instance-fields section
+# (modern Delphi); `class var` introduces a class-level fields
+# section. Both share the same item shape.
+<class_var_member>  : KW_VAR <class_var_seq>
+                    | KW_CLASS KW_VAR <class_var_seq>
+                    ;
+<class_var_seq>     : <class_var_item>
+                    | <class_var_seq> <class_var_item>
+                    ;
+<class_var_item>    : <ident_list> ':' <type_denoter> ';'
+                    ;
+
+# Method members inside a class body: heading + directives, no body.
+<method_member> : <class_proc_member_head> ';' <iface_directives_opt>
+                | <class_func_member_head> ';' <iface_directives_opt>
+                | <ctor_member_head> ';' <iface_directives_opt>
+                | <dtor_member_head> ';' <iface_directives_opt>
+                | <class_method_member_head> ';' <iface_directives_opt>
+                ;
+
+<class_proc_member_head> : KW_PROCEDURE IDENT <formal_params_opt>
+                         ;
+<class_func_member_head> : KW_FUNCTION IDENT <formal_params_opt> ':' <type_denoter>
+                         ;
+<ctor_member_head>       : KW_CONSTRUCTOR IDENT <formal_params_opt>
+                         ;
+<dtor_member_head>       : KW_DESTRUCTOR IDENT <formal_params_opt>
+                         ;
+
+# `class procedure` / `class function` / `class constructor` / `class
+# destructor` — the four class-bound forms inside a class body.
+<class_method_member_head> : KW_CLASS KW_PROCEDURE IDENT <formal_params_opt>
+                           | KW_CLASS KW_FUNCTION IDENT <formal_params_opt> ':' <type_denoter>
+                           | KW_CLASS KW_CONSTRUCTOR IDENT <formal_params_opt>
+                           | KW_CLASS KW_DESTRUCTOR IDENT <formal_params_opt>
+                           ;
+
+# --- properties ----------------------------------------------------------
+
+<property_member> : KW_PROPERTY IDENT <prop_params_opt> <prop_type_opt> <prop_specifiers> ';' <default_marker_opt>
+                  ;
+
+<prop_params_opt> : '[' <prop_param_list> ']'
+                  |
+                  ;
+
+<prop_param_list> : <prop_param>
+                  | <prop_param_list> ';' <prop_param>
+                  ;
+
+<prop_param> : <param_modifier_opt> <ident_list> ':' <type_denoter>
+             ;
+
+<prop_type_opt> : ':' <type_denoter>
+                |
+                ;
+
+<prop_specifiers> : <prop_specifiers> <prop_specifier>
+                  |
+                  ;
+
+<prop_specifier> : KW_READ <designator>
+                 | KW_WRITE <designator>
+                 | KW_STORED <expr>
+                 | KW_DEFAULT <expr>
+                 | KW_NODEFAULT
+                 | KW_INDEX <expr>
+                 | KW_IMPLEMENTS <type_ident_list>
+                 ;
+
+# Bare `default;` after the property's `;` marks the property as
+# the class's default indexed property (the one reachable via
+# `obj[i]`). It's distinct from the `default <expr>` specifier
+# above, which sets a published default value.
+<default_marker_opt> : KW_DEFAULT ';'
+                     |
+                     ;
+
+# --- interface types -----------------------------------------------------
+
+# True forward interface declarations (`IFoo = interface;`) live at
+# the type_decl level. Here we model the full form only; an empty
+# `interface end` covers the "declared but no members yet" case.
+<interface_type> : KW_INTERFACE <interface_heritage_opt> <interface_guid_opt> <interface_body> KW_END
+                 ;
+
+<interface_heritage_opt> : '(' <type_ident> ')'
+                         |
+                         ;
+
+<interface_guid_opt> : '[' STRING_LIT ']'
+                     |
+                     ;
+
+# Interface bodies hold method and property headings only — no
+# fields, no visibility sections, no bodies.
+<interface_body> : <interface_body> <interface_member>
+                 |
+                 ;
+
+<interface_member> : <class_proc_member_head> ';' <iface_directives_opt>
+                   | <class_func_member_head> ';' <iface_directives_opt>
+                   | <property_member>
+                   ;
+
+# --- procedural types ----------------------------------------------------
+
+<proc_type_denoter> : KW_PROCEDURE <formal_params_opt> <of_object_opt>
+                    | KW_FUNCTION <formal_params_opt> ':' <type_denoter> <of_object_opt>
+                    ;
+
+<of_object_opt> : KW_OF KW_OBJECT
+                |
+                ;
+
+# --- typed constants -----------------------------------------------------
+
+<typed_const>  : <expr>
+               | '(' <typed_const> ',' <typed_const_list_tail> ')'
+               | '(' <field_init_list> ')'
+               | '(' ')'
+               ;
+
+<typed_const_list_tail> : <typed_const>
+                        | <typed_const_list_tail> ',' <typed_const>
+                        ;
+
+<field_init_list>  : <field_init>
+                   | <field_init_list> ';' <field_init>
+                   ;
+
+<field_init>   : IDENT ':' <typed_const> ;
+
+# --- statements ----------------------------------------------------------
+
+<compound_stmt> : KW_BEGIN <stmt_list> KW_END
+                ;
+
+<stmt_list>    : <stmt>
+               | <stmt_list> ';' <stmt>
+               ;
+
+<stmt>         : <unlabelled_stmt>
+               | INT_LIT ':' <unlabelled_stmt>
+               | IDENT ':' <unlabelled_stmt>
+               ;
+
+<unlabelled_stmt> : <simple_stmt>
+                  | <structured_stmt>
+                  |
+                  ;
+
+<simple_stmt>  : <assignment_stmt>
+               | <proc_call_stmt>
+               | <goto_stmt>
+               | <raise_stmt>
+               ;
+
+<assignment_stmt> : <designator> ':=' <expr> ;
+<proc_call_stmt>  : <designator> ;
+<goto_stmt>       : KW_GOTO INT_LIT ;
+
+# `raise;` re-raises the current exception (only meaningful inside
+# an `except` block); `raise expr` raises a new exception value.
+# The optional `at expr` clause overrides the reported source
+# location and is most often used in RTL helpers.
+<raise_stmt> : KW_RAISE
+             | KW_RAISE <expr>
+             | KW_RAISE <expr> KW_AT <expr>
+             ;
+
+<structured_stmt> : <compound_stmt>
+                  | <if_stmt>
+                  | <while_stmt>
+                  | <repeat_stmt>
+                  | <for_stmt>
+                  | <case_stmt>
+                  | <with_stmt>
+                  | <try_stmt>
+                  ;
+
+<if_stmt>      : KW_IF <expr> KW_THEN <stmt>
+               | KW_IF <expr> KW_THEN <stmt> KW_ELSE <stmt>
+               ;
+
+<while_stmt>   : KW_WHILE <expr> KW_DO <stmt> ;
+
+<repeat_stmt>  : KW_REPEAT <stmt_list> KW_UNTIL <expr> ;
+
+<for_stmt>     : KW_FOR IDENT ':=' <expr> KW_TO     <expr> KW_DO <stmt>
+               | KW_FOR IDENT ':=' <expr> KW_DOWNTO <expr> KW_DO <stmt>
+               | KW_FOR IDENT KW_IN <expr> KW_DO <stmt>
+               ;
+
+<case_stmt>    : KW_CASE <expr> KW_OF <case_list> <case_tail> KW_END
+               ;
+
+<case_tail>    : ';' KW_ELSE <stmt_list>
+               | KW_ELSE <stmt_list>
+               | ';'
+               |
+               ;
+
+<case_list>    : <case_arm>
+               | <case_list> ';' <case_arm>
+               ;
+
+<case_arm>     : <const_list> ':' <stmt>
+               ;
+
+<with_stmt>    : KW_WITH <designator_list> KW_DO <stmt> ;
+
+<designator_list> : <designator>
+                  | <designator_list> ',' <designator>
+                  ;
+
+# Try statements come in two flavours — except / finally — and
+# can't be combined in a single statement (use nesting if you need
+# both). The except form takes either a free-form stmt_list (the
+# legacy "catch everything" form) or a sequence of typed handlers.
+<try_stmt> : KW_TRY <stmt_list> KW_FINALLY <stmt_list> KW_END
+           | KW_TRY <stmt_list> KW_EXCEPT <except_body> KW_END
+           ;
+
+<except_body> : <stmt_list>
+              | <handler_list>
+              | <handler_list> KW_ELSE <stmt_list>
+              ;
+
+<handler_list> : <handler>
+               | <handler_list> ';' <handler>
+               ;
+
+# Handler forms: bare `on T do S`, named `on E: T do S`, qualified
+# `on Unit.T do S`, named-and-qualified `on E: Unit.T do S`. The
+# LR(1) parser commits at the first IDENT and disambiguates one
+# token later on `.` / `:` / KW_DO.
+<handler> : KW_ON IDENT <handler_rest>
+          ;
+
+<handler_rest> : ':' <type_ident> KW_DO <stmt>
+               | '.' <qualified_tail> KW_DO <stmt>
+               | KW_DO <stmt>
+               ;
+
+<qualified_tail> : IDENT
+                 | <qualified_tail> '.' IDENT
+                 ;
+
+# --- expressions ---------------------------------------------------------
+#
+# Delphi precedence, highest to lowest:
+#   * unary not / @ / unary sign
+#   * multiplicative: *  /  div  mod  and  shl  shr  as
+#   * additive:       +  -  or   xor
+#   * relational:     =  <>  <  >  <=  >=  in  is
+
+<expr>         : <simple_expr>
+               | <simple_expr> '='  <simple_expr>
+               | <simple_expr> '<>' <simple_expr>
+               | <simple_expr> '<'  <simple_expr>
+               | <simple_expr> '>'  <simple_expr>
+               | <simple_expr> '<=' <simple_expr>
+               | <simple_expr> '>=' <simple_expr>
+               | <simple_expr> KW_IN <simple_expr>
+               | <simple_expr> KW_IS <type_ident>
+               ;
+
+<simple_expr>  : <term>
+               | '+' <term>
+               | '-' <term>
+               | <simple_expr> '+'    <term>
+               | <simple_expr> '-'    <term>
+               | <simple_expr> KW_OR  <term>
+               | <simple_expr> KW_XOR <term>
+               ;
+
+<term>         : <factor>
+               | <term> '*'    <factor>
+               | <term> '/'    <factor>
+               | <term> KW_DIV <factor>
+               | <term> KW_MOD <factor>
+               | <term> KW_AND <factor>
+               | <term> KW_SHL <factor>
+               | <term> KW_SHR <factor>
+               | <term> KW_AS  <type_ident>
+               ;
+
+# Parenthesised expressions live on <designator_atom> rather than
+# <factor> so chains like `(obj as TBase).Field` work — the paren
+# group is the head of the designator chain, and the trailing
+# `.Field` / `[i]` / `()` suffix is the chain continuation. With
+# `(expr)` on <factor> instead, the chain couldn't continue.
+<factor>       : <designator>
+               | INT_LIT
+               | REAL_LIT
+               | STRING_LIT
+               | KW_NIL
+               | KW_NOT <factor>
+               | '@' <designator>
+               | <set_ctor>
+               ;
+
+<set_ctor>     : '[' ']'
+               | '[' <set_member_list> ']'
+               ;
+<set_member_list> : <set_member>
+                  | <set_member_list> ',' <set_member>
+                  ;
+<set_member>   : <expr>
+               | <expr> '..' <expr>
+               ;
+
+# Designators carry the full Delphi suffix chain. The atom slot
+# allows `self`, `inherited`, and `inherited Method` — keeping
+# them at the leaf simplifies the chain rules below.
+<designator>   : <designator_atom>
+               | <designator> '.' IDENT
+               | <designator> '[' <expr_list> ']'
+               | <designator> '^'
+               | <designator> '(' <expr_list> ')'
+               | <designator> '(' ')'
+               ;
+
+<designator_atom> : IDENT
+                  | KW_SELF
+                  | KW_INHERITED
+                  | KW_INHERITED IDENT
+                  | '(' <expr> ')'
+                  ;
+
+<expr_list>    : <expr>
+               | <expr_list> ',' <expr>
+               ;
+
+<ident_list>   : IDENT
+               | <ident_list> ',' IDENT
+               ;
+
+# --- absolute clause ----------------------------------------------------
+#
+# `var X: T absolute Y;` — Y is either an identifier (another var
+# at the same address) or a numeric address. Used in low-level RTL
+# code to overlay a variable on existing memory.
+
+<abs_target> : <designator>
+             | INT_LIT
+             ;
