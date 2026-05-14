@@ -1,0 +1,1571 @@
+# Rust grammar — uplox first cut.
+#
+# Targets stable Rust as of the 2021 edition: enough of the language
+# to parse a typical small crate (a handful of modules, structs and
+# enums, trait + impl blocks, generic functions, match expressions,
+# closures, common macro invocations). Built around the standard
+# Rust Reference (doc.rust-lang.org/reference) syntactic layout.
+#
+# Where C# is famously hard for LR parsers because of the generic
+# `<` ambiguity, Rust is comparatively friendly. The two big LR wins
+# the language designers gave us:
+#
+#   * Generic arguments at call sites use **turbofish** (`Vec::<i32>
+#     ::new()`), not bare `<T>`. The `::<` prefix is its own token,
+#     so generics never collide with comparisons in expression
+#     context.
+#   * Casts are spelled `expr as Type`, not `(Type) expr`. The cast
+#     operator binds at a specific precedence between unary and
+#     comparison; there is no parenthesised-cast / parenthesised-
+#     expression ambiguity.
+#
+# The remaining Rust-specific parsing quirks that this grammar has
+# to address:
+#
+#   * Block-as-statement versus block-as-tail-expression. A block
+#     ending with `expr` (no trailing `;`) yields that expression
+#     as its value; with the `;` it's a statement. The grammar
+#     splits expressions into two flavours — `expr_with_block`
+#     (`if`, `match`, `loop`, `for`, `while`, `unsafe { … }`, plain
+#     blocks) and `expr_no_block` (everything else). Statements
+#     accept either kind; the trailing `;` is required for
+#     `expr_no_block` but optional for `expr_with_block`.
+#   * Closures `|x| …` versus bitwise-or `a | b`. Distinguished
+#     positionally — `|` at expression-start opens a closure
+#     parameter list, `|` after an expression continues a bitwise
+#     expression. Same for `||` (zero-parameter closure versus
+#     logical OR).
+#   * `&mut x` lexes as three tokens (`&`, `KW_MUT`, IDENT). The
+#     grammar's `<reference_expr>` and `<reference_type>` rules
+#     glue them together. Same for `&'a mut x` with an explicit
+#     lifetime.
+#   * Range expressions `a..b`, `a..=b`, `..b`, `a..`, `..` have
+#     their own precedence level just below comparison; the
+#     grammar gives them an explicit ladder rung.
+#   * `?` is a postfix operator on expressions. It binds tighter
+#     than unary minus / `!` / dereferences, matching the rustc
+#     parser.
+#
+# How the grammar handles Rust's LR(1) ambiguities.
+#
+# Rust's syntax is closer to LR(1)-friendly than C# (the
+# turbofish `::<T>` removes the generic versus less-than
+# ambiguity; `as` casts remove the cast versus paren-expr
+# ambiguity). What's left is a single attribute-path versus
+# expression-path reduce/reduce conflict on the `::` lookahead:
+# `simple_path` (attributes / visibility / use directives) and
+# `path_in_expression` (expression / pattern paths) both reduce
+# IDENT (and the qualified-name keyword set) through their
+# leaf-name non-terminal, and both can be reached from
+# expression-context states (because attributes nest inside
+# items which nest inside blocks which contain expressions).
+#
+# We resolve this with the **lexer-feedback** pattern: declare
+# synthetic IDENT_ATTR / KW_*_ATTR terminals and let a host
+# token filter (the same uplox mechanism C uses for
+# TYPEDEF_NAME disambiguation) rewrite IDENT to IDENT_ATTR
+# inside attribute / visibility / use path positions. The
+# grammar's `<attr_path_name>` non-terminal accepts the
+# synthetic tokens; `<path_name>` accepts the real ones. Two
+# distinct reductions, no conflict.
+#
+# Macros are supported in the common forms `name!(args)`,
+# `name![args]`, and `name!{args}` where `args` is parsed as a
+# comma-separated expression list. This handles `println!`,
+# `vec!`, `assert!`, `assert_eq!`, `format!`, `dbg!`, and the
+# overwhelming majority of macro invocations in practice. Macros
+# whose body uses non-expression syntax (`quote!{ fn foo() { … } }`,
+# `lazy_static!`, the contents of `macro_rules!` definitions
+# themselves) need the same token filter to rewrite the macro
+# body into an opaque token tree — the grammar exposes a
+# `MACRO_BODY_TT` synthetic terminal for that purpose.
+#
+# In scope:
+#
+#   * Items: `fn`, `struct` (regular, tuple, unit), `enum`, `trait`,
+#     `impl` (inherent + trait), `use` (with renames, globs, nested
+#     paths), `mod` (inline + external), `type` alias, `const`,
+#     `static`, `extern` blocks, `extern crate`.
+#   * Generic type parameters with bounds, where-clauses, default
+#     types, const generics, lifetime parameters.
+#   * Trait bounds with `+` separation, lifetime bounds, `?Sized`.
+#   * Types: primitives, paths with optional generics, references
+#     (`&T`, `&mut T`, `&'a T`, `&'a mut T`), raw pointers (`*const
+#     T`, `*mut T`), arrays (`[T; N]`), slices (`[T]`), tuples
+#     (`(T, U)`), unit (`()`), function pointers (`fn(T) -> U`),
+#     trait objects (`dyn Trait`, `dyn Trait + Send + 'a`), impl
+#     trait (`impl Trait`), inferred (`_`).
+#   * Patterns: literal, identifier (with `ref`/`mut` modifiers),
+#     wildcard `_`, rest `..`, tuple, slice, struct (with `..`
+#     rest), tuple struct, enum variant, reference (`&pat`),
+#     range (`a..=b`), or-pattern (`A | B`).
+#   * Statements: `let` bindings (with `else`), items, expression
+#     statements, the implicit tail expression of a block.
+#   * Expressions: full precedence ladder — assignment / range /
+#     logical-or / logical-and / comparison / bitwise-or /
+#     bitwise-xor / bitwise-and / shift / additive / multiplicative
+#     / `as` cast / unary / dereference / postfix (`?`, `.`,
+#     `[…]`, `(…)`, field, tuple-index) / atomic (literal, path,
+#     parenthesised, tuple, array, struct, closure, block, `if`,
+#     `match`, `loop`, `while`, `for`, `return`, `break`,
+#     `continue`, `unsafe`, macro). The `if let` and `while let`
+#     forms are included.
+#   * Attributes: outer (`#[…]`) and inner (`#![…]`) forms with
+#     arbitrary token trees as the argument — represented as a
+#     comma-separated meta-item list at the grammar level.
+#   * Visibility modifiers: `pub`, `pub(crate)`, `pub(super)`,
+#     `pub(in path)`, `pub(self)`.
+#   * `async fn`, `async move`, `async { … }`, `await` (postfix
+#     `.await`).
+#   * Macro invocations in expression, statement, item, and
+#     type positions with paren / bracket / brace delimiters.
+#
+# Out of scope (the first cut keeps things in 2021-edition
+# territory):
+#
+#   * `macro_rules!` definitions (the body is arbitrary token
+#     trees — needs a host-side token filter to slurp).
+#   * `procedural macro` declarations — same reason.
+#   * Higher-rank trait bounds beyond `for<'a>` in function
+#     pointer types: the lifetime-binder form `for<'a> Fn(&'a T)`
+#     is supported in function-pointer types only.
+#   * Stable-since-2024 `let-else` chains and the `let` ... `else`
+#     in conditional positions beyond a top-level `let_stmt`.
+#   * Trait aliases (`trait Foo = Bar`).
+#   * Specialisation, generic associated types, type alias impl
+#     trait — these are unstable / niche.
+#
+# Conflict-resolution decisions:
+#
+#   * Dangling `else` resolves greedily (`%shift KW_ELSE`), the
+#     standard for C-family + if-else languages.
+#   * Block-statement-vs-tail-expression: the grammar splits
+#     `expr_with_block` from `expr_no_block`. Statements accept
+#     `expr_with_block` without a trailing `;`; the tail position
+#     accepts either kind. The two-flavour split is explicit, not
+#     %shift-based.
+#   * Struct-literal-vs-block: `Foo { x: 1 }` is a struct literal
+#     in expression position. The construct shares `{ … }` with
+#     block. The grammar uses a dedicated `<struct_literal>`
+#     production guarded by the leading `<path>` IDENT, which is
+#     distinguishable from a bare block at LR(1) — the bare block
+#     starts with `{`, the struct literal starts with a path.
+
+%grammar rust
+
+
+%define lr.type lalr
+%options
+start = crate
+
+%shift
+KW_ELSE
+# Benign list / optional extensions — shift always extends the
+# leading construct. These are the standard "is this another
+# X or has the X-list ended" decisions that uplox's LALR mode
+# can't tell from one-token lookahead.
+HASH                                     # outer attribute opener
+KW_EXTERN KW_CONST KW_UNSAFE             # fn qualifier continuation
+LIFETIME                                 # break label
+LBRACE                                   # return / break value, range upper
+AMP KW_MUT KW_SELF KW_SELF_TYPE          # self-parameter prefix, path leaf
+KW_SUPER KW_CRATE KW_ASYNC               # path leaf, async fn qualifier
+IDENT                                    # path / pattern leaf
+LT LPAREN PATHSEP                        # type-path / trait-bound continuation
+AT PIPE                                  # pattern binding / or-pattern
+PLUS                                     # trait-bound `+` chain
+GT                                       # comparison rung — see header note
+SEMI                                     # expr_with_block as stmt — optional `;`
+
+%tokens
+
+WS            = /[ \t\r\n]+/                                  %skip
+LINE_COMMENT  = /\/\/[^\n]*/                                  %skip
+BLOCK_COMMENT = /\/\*([^*]|\*+[^*\/])*\*+\//                  %skip
+
+# Numeric literals. Integer literals accept hex / octal / binary
+# prefixes and the standard suffix set (u8, u16, ..., i128, usize,
+# isize). Float literals require either a fractional part or an
+# exponent, so `1` lexes as INT_LIT and `1.0` / `1e2` lex as
+# FLOAT_LIT.
+INT_LIT       = /(0x[0-9A-Fa-f_]+|0o[0-7_]+|0b[01_]+|[0-9][0-9_]*)([uUiI](8|16|32|64|128|size|ize)?|[fF](32|64))?/
+FLOAT_LIT     = /[0-9][0-9_]*\.[0-9][0-9_]*([eE][+-]?[0-9_]+)?([fF](32|64))?/
+FLOAT_EXP_LIT = /[0-9][0-9_]*[eE][+-]?[0-9_]+([fF](32|64))?/
+
+# Character and string literals, plus byte / raw variants.
+CHAR_LIT      = /'([^'\\\n]|\\.)+'/
+STRING_LIT    = /"([^"\\\n]|\\.)*"/
+BYTE_LIT      = /b'([^'\\\n]|\\.)+'/
+BYTE_STR_LIT  = /b"([^"\\\n]|\\.)*"/
+RAW_STR_LIT   = /r"[^"]*"/
+
+# Lifetimes: `'static`, `'a`, `'_`. Declared before CHAR_LIT in
+# the regex order so the lifetime form wins for `'<ident>` and
+# CHAR_LIT only matches `'<chars>'`. (Both regexes consume
+# `'<chars>` but only CHAR_LIT requires the closing `'`.)
+LIFETIME      = /'[A-Za-z_][A-Za-z0-9_]*/
+
+# --- declaration / module keywords ----------------------------------------
+KW_FN         = 'fn'
+KW_LET        = 'let'
+KW_MOD        = 'mod'
+KW_USE        = 'use'
+KW_PUB        = 'pub'
+KW_CRATE      = 'crate'
+KW_SUPER      = 'super'
+KW_SELF       = 'self'
+KW_SELF_TYPE  = 'Self'
+KW_EXTERN     = 'extern'
+
+# --- type-kind keywords ---------------------------------------------------
+KW_STRUCT     = 'struct'
+KW_ENUM       = 'enum'
+KW_TRAIT      = 'trait'
+KW_IMPL       = 'impl'
+KW_TYPE       = 'type'
+KW_UNION      = 'union'
+
+# --- modifier / qualifier keywords ----------------------------------------
+KW_CONST      = 'const'
+KW_STATIC     = 'static'
+KW_MUT        = 'mut'
+KW_REF        = 'ref'
+KW_MOVE       = 'move'
+KW_ASYNC      = 'async'
+KW_AWAIT      = 'await'
+KW_UNSAFE     = 'unsafe'
+KW_DYN        = 'dyn'
+KW_WHERE      = 'where'
+
+# --- control-flow keywords ------------------------------------------------
+KW_IF         = 'if'
+KW_ELSE       = 'else'
+KW_WHILE      = 'while'
+KW_LOOP       = 'loop'
+KW_FOR        = 'for'
+KW_MATCH      = 'match'
+KW_RETURN     = 'return'
+KW_BREAK      = 'break'
+KW_CONTINUE   = 'continue'
+KW_YIELD      = 'yield'
+
+# --- expression-keyword set -----------------------------------------------
+KW_AS         = 'as'
+KW_IN         = 'in'
+KW_TRUE       = 'true'
+KW_FALSE      = 'false'
+
+# Identifiers come last among the named-keyword set so longest-match
+# ties favour the keyword.
+IDENT         = /[A-Za-z_][A-Za-z0-9_]*/
+
+# --- multi-character operators (declared before single-char) --------------
+FAT_ARROW     = '=>'
+ARROW         = '->'
+PATHSEP_LT    = '::<'
+PATHSEP       = '::'
+DOTDOT_EQ     = '..='
+DOTDOTDOT     = '...'
+DOTDOT        = '..'
+LSHIFT_ASSIGN = '<<='
+RSHIFT_ASSIGN = '>>='
+LSHIFT        = '<<'
+RSHIFT        = '>>'
+LE            = '<='
+GE            = '>='
+EQEQ          = '=='
+NEQ           = '!='
+LOG_AND       = '&&'
+LOG_OR        = '||'
+PLUS_ASSIGN   = '+='
+MINUS_ASSIGN  = '-='
+STAR_ASSIGN   = '*='
+SLASH_ASSIGN  = '/='
+PERCENT_ASSIGN = '%='
+AMP_ASSIGN    = '&='
+PIPE_ASSIGN   = '|='
+CARET_ASSIGN  = '^='
+
+# --- single-character operators -------------------------------------------
+EQ            = '='
+LT            = '<'
+GT            = '>'
+PLUS          = '+'
+MINUS         = '-'
+STAR          = '*'
+SLASH         = '/'
+PERCENT       = '%'
+AMP           = '&'
+PIPE          = '|'
+CARET         = '^'
+TILDE         = '~'
+BANG          = '!'
+QUESTION      = '?'
+AT            = '@'
+HASH          = '#'
+LPAREN        = '('
+RPAREN        = ')'
+LBRACE        = '{'
+RBRACE        = '}'
+LBRACK        = '['
+RBRACK        = ']'
+COMMA         = ','
+SEMI          = ';'
+COLON         = ':'
+DOT           = '.'
+DOLLAR        = '$'
+UNDERSCORE    = '_'
+
+# --- synthetic terminals (filter-produced) --------------------------------
+#
+# Declared AFTER the real-token counterparts so longest-match
+# tie-breaking always picks the real token at lex time. The
+# host's `rust_filter` token filter rewrites IDENT / KW_SELF /
+# KW_SUPER / KW_CRATE / KW_SELF_TYPE → their ATTR variants when
+# the parser is inside an attribute / visibility / use path
+# position, and rewrites MACRO_BODY contents as opaque
+# token-trees when a macro invocation's body is non-expression
+# syntax. Without the filter, simple-path IDENTs lex as plain
+# IDENT and conflict with expression-path IDENT reductions on
+# the `::` continuation — same reduce/reduce class C grammars
+# resolve with the TYPEDEF_NAME filter.
+IDENT_ATTR        = /[A-Za-z_][A-Za-z0-9_]*/
+KW_SELF_ATTR      = /self/
+KW_SUPER_ATTR     = /super/
+KW_CRATE_ATTR     = /crate/
+KW_SELF_TYPE_ATTR = /Self/
+
+# MACRO_BODY_TT is the opaque token-tree the host's macro-body
+# filter emits when a macro invocation's body contains
+# non-expression syntax (statements, `macro_rules!` patterns,
+# etc.). The raw lexer never produces it. Hosts that don't
+# install the filter only get the simple expression-list form
+# of macro invocations.
+MACRO_BODY_TT = /[a-z]/
+
+%rules
+
+# --- crate ----------------------------------------------------------------
+
+<crate> : <inner_attrs_opt> <items>
+        ;
+
+<inner_attrs_opt> : <inner_attrs>
+                  |
+                  ;
+
+<inner_attrs> : <inner_attrs> <inner_attr>
+              | <inner_attr>
+              ;
+
+<inner_attr> : '#' '!' '[' <meta_list> ']'
+             ;
+
+<items> : <items> <item>
+        |
+        ;
+
+<item> : <outer_attrs_opt> <visibility_opt> <item_body>
+       ;
+
+<outer_attrs_opt> : <outer_attrs>
+                  |
+                  ;
+
+<outer_attrs> : <outer_attrs> <outer_attr>
+              | <outer_attr>
+              ;
+
+<outer_attr> : '#' '[' <meta_list> ']'
+             ;
+
+<meta_list> : <meta_item>
+            | <meta_list> ',' <meta_item>
+            ;
+
+# Meta items: bare path (`#[derive]`), key-value
+# (`#[name = "x"]`), and parenthesised meta-list
+# (`#[derive(Debug, Clone)]`). The key-value form accepts a
+# literal — the practical attribute set never needs more than
+# that (`#[doc = "…"]`, `#[cfg(target = "x86_64")]`,
+# `#[link(name = "z")]`).
+<meta_item> : <simple_path>
+            | <simple_path> '=' <literal_expr>
+            | <simple_path> '(' <meta_args_opt> ')'
+            ;
+
+<meta_args_opt> : <meta_list>
+                |
+                ;
+
+# Path-name leaf for expression / pattern / type paths.
+<path_name> : IDENT
+            | KW_SELF
+            | KW_SUPER
+            | KW_CRATE
+            | KW_SELF_TYPE
+            ;
+
+# Path-name leaf for simple paths (attributes / visibility / use).
+# Uses the filter-produced ATTR-variant synthetic terminals so the
+# IDENT reduction here is distinct from `<path_name> -> IDENT`,
+# eliminating the reduce/reduce conflict that the unified
+# path_name otherwise creates on the `::` lookahead.
+<attr_path_name> : IDENT_ATTR
+                 | KW_SELF_ATTR
+                 | KW_SUPER_ATTR
+                 | KW_CRATE_ATTR
+                 | KW_SELF_TYPE_ATTR
+                 ;
+
+# Simple paths — attributes, visibility, use directives, mod
+# referent. No generics.
+<simple_path> : <attr_path_name>
+              | <simple_path> '::' <attr_path_name>
+              ;
+
+# --- visibility -----------------------------------------------------------
+
+<visibility_opt> : KW_PUB
+                 | KW_PUB '(' KW_CRATE ')'
+                 | KW_PUB '(' KW_SUPER ')'
+                 | KW_PUB '(' KW_SELF ')'
+                 | KW_PUB '(' KW_IN <simple_path> ')'
+                 |
+                 ;
+
+# --- items ----------------------------------------------------------------
+
+<item_body> : <fn_item>
+            | <struct_item>
+            | <enum_item>
+            | <union_item>
+            | <trait_item>
+            | <impl_item>
+            | <use_item>
+            | <mod_item>
+            | <type_alias>
+            | <const_item>
+            | <static_item>
+            | <extern_block>
+            | <extern_crate>
+            | <macro_invocation_item>
+            ;
+
+# ---- functions -----------------------------------------------------------
+
+<fn_item> : <fn_qualifiers> KW_FN IDENT <generics_opt> '(' <fn_params_opt> ')' <fn_return_opt> <where_clause_opt> <fn_body>
+          ;
+
+<fn_qualifiers> : <fn_qualifiers> <fn_qualifier>
+                |
+                ;
+
+<fn_qualifier> : KW_CONST
+               | KW_ASYNC
+               | KW_UNSAFE
+               | KW_EXTERN
+               | KW_EXTERN STRING_LIT
+               ;
+
+<fn_body> : <block>
+          | ';'
+          ;
+
+<fn_return_opt> : '->' <type>
+                |
+                ;
+
+<fn_params_opt> : <fn_params>
+                |
+                ;
+
+<fn_params> : <self_param>
+            | <self_param> ',' <fn_param_list>
+            | <self_param> ','
+            | <fn_param_list>
+            | <fn_param_list> ','
+            ;
+
+# Self parameter shapes: `self`, `&self`, `&mut self`, `&'a self`,
+# `&'a mut self`, `mut self`, `self: T`.
+<self_param> : KW_SELF
+             | KW_MUT KW_SELF
+             | '&' KW_SELF
+             | '&' KW_MUT KW_SELF
+             | '&' LIFETIME KW_SELF
+             | '&' LIFETIME KW_MUT KW_SELF
+             | KW_SELF ':' <type>
+             | KW_MUT KW_SELF ':' <type>
+             ;
+
+<fn_param_list> : <fn_param>
+                | <fn_param_list> ',' <fn_param>
+                ;
+
+<fn_param> : <outer_attrs_opt> <pattern> ':' <type>
+           ;
+
+# ---- structs -------------------------------------------------------------
+
+<struct_item> : KW_STRUCT IDENT <generics_opt> <where_clause_opt> <struct_tail>
+              ;
+
+# Three shapes: braced (`struct Foo { x: T }`), tuple
+# (`struct Foo(T, U);`), unit (`struct Foo;`).
+<struct_tail> : '{' <struct_fields_opt> '}'
+              | '(' <tuple_fields_opt> ')' ';'
+              | ';'
+              ;
+
+<struct_fields_opt> : <struct_fields>
+                    | <struct_fields> ','
+                    |
+                    ;
+
+<struct_fields> : <struct_field>
+                | <struct_fields> ',' <struct_field>
+                ;
+
+<struct_field> : <outer_attrs_opt> <visibility_opt> IDENT ':' <type>
+               ;
+
+<tuple_fields_opt> : <tuple_fields>
+                   | <tuple_fields> ','
+                   |
+                   ;
+
+<tuple_fields> : <tuple_field>
+               | <tuple_fields> ',' <tuple_field>
+               ;
+
+<tuple_field> : <outer_attrs_opt> <visibility_opt> <type>
+              ;
+
+# ---- enums ---------------------------------------------------------------
+
+<enum_item> : KW_ENUM IDENT <generics_opt> <where_clause_opt> '{' <enum_variants_opt> '}'
+            ;
+
+<enum_variants_opt> : <enum_variants>
+                    | <enum_variants> ','
+                    |
+                    ;
+
+<enum_variants> : <enum_variant>
+                | <enum_variants> ',' <enum_variant>
+                ;
+
+# Variant shapes: unit (`Foo`), tuple (`Foo(T, U)`), struct
+# (`Foo { x: T }`), and discriminant (`Foo = expr`).
+<enum_variant> : <outer_attrs_opt> <visibility_opt> IDENT
+               | <outer_attrs_opt> <visibility_opt> IDENT '(' <tuple_fields_opt> ')'
+               | <outer_attrs_opt> <visibility_opt> IDENT '{' <struct_fields_opt> '}'
+               | <outer_attrs_opt> <visibility_opt> IDENT '=' <expr>
+               ;
+
+# ---- unions --------------------------------------------------------------
+
+<union_item> : KW_UNION IDENT <generics_opt> <where_clause_opt> '{' <struct_fields_opt> '}'
+             ;
+
+# ---- traits --------------------------------------------------------------
+
+<trait_item> : <trait_qualifiers> KW_TRAIT IDENT <generics_opt> <trait_supertraits_opt> <where_clause_opt> '{' <trait_members> '}'
+             ;
+
+<trait_qualifiers> : KW_UNSAFE
+                   |
+                   ;
+
+<trait_supertraits_opt> : ':' <type_bound_list>
+                        |
+                        ;
+
+<trait_members> : <trait_members> <trait_member>
+                |
+                ;
+
+<trait_member> : <outer_attrs_opt> <trait_member_kind>
+               ;
+
+<trait_member_kind> : <fn_item>
+                    | <type_alias>
+                    | <const_item>
+                    | <macro_invocation_item>
+                    ;
+
+# ---- impl blocks ---------------------------------------------------------
+
+<impl_item> : <impl_qualifiers> KW_IMPL <generics_opt> <impl_subject> <where_clause_opt> '{' <impl_members> '}'
+            ;
+
+<impl_qualifiers> : KW_UNSAFE
+                  |
+                  ;
+
+# Inherent impl `impl T { … }` versus trait impl `impl Trait for T { … }`.
+<impl_subject> : <type>
+               | <type> KW_FOR <type>
+               ;
+
+<impl_members> : <impl_members> <impl_member>
+               |
+               ;
+
+<impl_member> : <outer_attrs_opt> <visibility_opt> <impl_member_kind>
+              ;
+
+<impl_member_kind> : <fn_item>
+                   | <type_alias>
+                   | <const_item>
+                   | <macro_invocation_item>
+                   ;
+
+# ---- use / mod / type alias / const / static -----------------------------
+
+<use_item> : KW_USE <use_tree> ';'
+           ;
+
+<use_tree> : <simple_path>
+           | <simple_path> KW_AS IDENT
+           | <simple_path> KW_AS '_'
+           | <simple_path> '::' '*'
+           | <simple_path> '::' '{' <use_tree_list_opt> '}'
+           | '::' '{' <use_tree_list_opt> '}'
+           | '::' '*'
+           ;
+
+<use_tree_list_opt> : <use_tree_list>
+                    | <use_tree_list> ','
+                    |
+                    ;
+
+<use_tree_list> : <use_tree>
+                | <use_tree_list> ',' <use_tree>
+                ;
+
+<mod_item> : KW_MOD IDENT ';'
+           | KW_MOD IDENT '{' <inner_attrs_opt> <items> '}'
+           ;
+
+<type_alias> : KW_TYPE IDENT <generics_opt> <where_clause_opt> '=' <type> ';'
+             | KW_TYPE IDENT <generics_opt> <where_clause_opt> ';'
+             ;
+
+<const_item> : KW_CONST IDENT ':' <type> '=' <expr> ';'
+             | KW_CONST IDENT ':' <type> ';'
+             | KW_CONST '_' ':' <type> '=' <expr> ';'
+             ;
+
+<static_item> : KW_STATIC <static_mut_opt> IDENT ':' <type> '=' <expr> ';'
+              | KW_STATIC <static_mut_opt> IDENT ':' <type> ';'
+              ;
+
+<static_mut_opt> : KW_MUT
+                 |
+                 ;
+
+# ---- extern blocks / extern crate ----------------------------------------
+
+<extern_block> : KW_EXTERN <abi_opt> '{' <inner_attrs_opt> <extern_items> '}'
+               ;
+
+<abi_opt> : STRING_LIT
+          |
+          ;
+
+<extern_items> : <extern_items> <extern_item>
+               |
+               ;
+
+<extern_item> : <outer_attrs_opt> <visibility_opt> <extern_item_kind>
+              ;
+
+<extern_item_kind> : <fn_item>
+                   | <static_item>
+                   | <type_alias>
+                   | <macro_invocation_item>
+                   ;
+
+<extern_crate> : KW_EXTERN KW_CRATE IDENT ';'
+               | KW_EXTERN KW_CRATE IDENT KW_AS IDENT ';'
+               | KW_EXTERN KW_CRATE IDENT KW_AS '_' ';'
+               ;
+
+# ---- macro invocations as items ------------------------------------------
+
+<macro_invocation_item> : <macro_invocation> ';'
+                        | <macro_invocation_brace>
+                        ;
+
+# --- generics, where clauses, type bounds ---------------------------------
+
+<generics_opt> : '<' <generic_params> '>'
+               | '<' '>'
+               |
+               ;
+
+<generic_params> : <generic_param>
+                 | <generic_params> ',' <generic_param>
+                 ;
+
+<generic_param> : <outer_attrs_opt> LIFETIME <lifetime_bounds_opt>
+                | <outer_attrs_opt> IDENT <type_param_bounds_opt> <type_param_default_opt>
+                | <outer_attrs_opt> KW_CONST IDENT ':' <type> <const_param_default_opt>
+                ;
+
+<lifetime_bounds_opt> : ':' <lifetime_bound_list>
+                      |
+                      ;
+
+<lifetime_bound_list> : LIFETIME
+                      | <lifetime_bound_list> '+' LIFETIME
+                      ;
+
+<type_param_bounds_opt> : ':' <type_bound_list>
+                        |
+                        ;
+
+<type_param_default_opt> : '=' <type>
+                         |
+                         ;
+
+<const_param_default_opt> : '=' <expr>
+                          |
+                          ;
+
+<where_clause_opt> : KW_WHERE <where_predicates>
+                   |
+                   ;
+
+<where_predicates> : <where_predicate>
+                   | <where_predicates> ',' <where_predicate>
+                   | <where_predicates> ','
+                   ;
+
+<where_predicate> : <type> ':' <type_bound_list>
+                  | LIFETIME ':' <lifetime_bound_list>
+                  ;
+
+# Trait bounds list separated by `+`. Each entry is either a path
+# bound (`Trait`), a lifetime bound (`'a`), or an optional bound
+# (`?Sized`).
+<type_bound_list> : <type_bound>
+                  | <type_bound_list> '+' <type_bound>
+                  ;
+
+<type_bound> : <trait_bound>
+             | LIFETIME
+             ;
+
+<trait_bound> : <type_path>
+              | '?' <type_path>
+              | KW_FOR '<' <generic_params> '>' <type_path>
+              ;
+
+# --- types ----------------------------------------------------------------
+
+<type> : <type_no_bounds>
+       | <impl_trait_type>
+       | <trait_object_type>
+       ;
+
+<impl_trait_type> : KW_IMPL <type_bound_list>
+                  ;
+
+<trait_object_type> : KW_DYN <type_bound_list>
+                    ;
+
+<type_no_bounds> : <type_path>
+                 | <reference_type>
+                 | <raw_pointer_type>
+                 | <array_or_slice_type>
+                 | <tuple_type>
+                 | <fn_pointer_type>
+                 | <inferred_type>
+                 | <never_type>
+                 ;
+
+<type_path> : <type_path_segment>
+            | <type_path> '::' <type_path_segment>
+            ;
+
+<type_path_segment> : <path_name>
+                    | <path_name> '<' <type_args> '>'
+                    | <path_name> '<' '>'
+                    | <path_name> '(' <type_path_fn_inputs_opt> ')' <fn_return_opt>
+                    ;
+
+<type_path_fn_inputs_opt> : <type_list>
+                          | <type_list> ','
+                          |
+                          ;
+
+<type_list> : <type>
+            | <type_list> ',' <type>
+            ;
+
+# Generic type arguments: types, lifetimes, const exprs (in braces),
+# named (`Item = T`) — though the named form here is restricted to
+# unambiguous shape.
+<type_args> : <type_arg>
+            | <type_args> ',' <type_arg>
+            ;
+
+<type_arg> : <type>
+           | LIFETIME
+           | IDENT '=' <type>
+           | <block>
+           ;
+
+<reference_type> : '&' <type>
+                 | '&' KW_MUT <type>
+                 | '&' LIFETIME <type>
+                 | '&' LIFETIME KW_MUT <type>
+                 ;
+
+<raw_pointer_type> : '*' KW_CONST <type>
+                   | '*' KW_MUT <type>
+                   ;
+
+# Array `[T; N]` or slice `[T]`.
+<array_or_slice_type> : '[' <type> ']'
+                      | '[' <type> ';' <expr> ']'
+                      ;
+
+# Tuple `(T, U)`, parenthesised `(T)` (unary tuple needs trailing
+# comma to disambiguate), unit `()`.
+<tuple_type> : '(' ')'
+             | '(' <type> ',' ')'
+             | '(' <type> ',' <type_list_tail> ')'
+             | '(' <type> ',' <type_list_tail> ',' ')'
+             | '(' <type> ')'
+             ;
+
+<type_list_tail> : <type>
+                 | <type_list_tail> ',' <type>
+                 ;
+
+<fn_pointer_type> : <fn_pointer_qualifiers> KW_FN '(' <fn_ptr_params_opt> ')' <fn_return_opt>
+                  ;
+
+<fn_pointer_qualifiers> : <fn_pointer_qualifiers> <fn_pointer_qualifier>
+                        |
+                        ;
+
+<fn_pointer_qualifier> : KW_UNSAFE
+                       | KW_EXTERN
+                       | KW_EXTERN STRING_LIT
+                       | KW_FOR '<' <generic_params> '>'
+                       ;
+
+<fn_ptr_params_opt> : <fn_ptr_param_list>
+                    | <fn_ptr_param_list> ','
+                    |
+                    ;
+
+<fn_ptr_param_list> : <fn_ptr_param>
+                    | <fn_ptr_param_list> ',' <fn_ptr_param>
+                    ;
+
+<fn_ptr_param> : <type>
+               | IDENT ':' <type>
+               ;
+
+<inferred_type> : '_' ;
+<never_type>    : '!' ;
+
+# --- patterns -------------------------------------------------------------
+
+<pattern> : <pattern_no_top_alt>
+          | <pattern_no_top_alt> <or_pattern_tail>
+          ;
+
+<or_pattern_tail> : '|' <pattern_no_top_alt>
+                  | <or_pattern_tail> '|' <pattern_no_top_alt>
+                  ;
+
+# Patterns. The bare-identifier, path, and modifier-led
+# (`ref` / `mut` / `ref mut` X) shapes all share a single
+# production — <ident_or_path_pattern> — which carries the
+# optional modifier prefix, the path body, and the optional
+# trailing `@ pat`, `{…}`, or `(…)`. Unifying them avoids the
+# reduce/reduce conflict that parallel `modifier_pattern KW_MUT
+# IDENT` and `path_led_pattern path_in_expression` rules would
+# create at the IDENT-on-stack state, where the IDENT could
+# reduce two different ways.
+<pattern_no_top_alt> : <literal_pattern>
+                     | <wildcard_pattern>
+                     | <rest_pattern>
+                     | <reference_pattern>
+                     | <tuple_pattern>
+                     | <grouped_pattern>
+                     | <slice_pattern>
+                     | <ident_or_path_pattern>
+                     | <range_pattern>
+                     ;
+
+# Unified ident / path / modifier-led pattern. Two alternatives:
+# bare path-led, or modifier-prefixed path-led. The modifier
+# prefix non-terminal has NO empty alternative — the bare form
+# is its own production, avoiding the ε-derivable reduction
+# that competed with the non-empty reduction on
+# FIRST(path_in_expression) tokens.
+<ident_or_path_pattern> : <path_in_expression> <pattern_path_tail>
+                        | <modifier_prefix> <path_in_expression> <pattern_path_tail>
+                        ;
+
+<modifier_prefix> : KW_REF
+                  | KW_MUT
+                  | KW_REF KW_MUT
+                  ;
+
+<pattern_path_tail> : '@' <pattern_no_top_alt>
+                    | '{' <struct_pat_fields_opt> '}'
+                    | '(' <tuple_pat_items_opt> ')'
+                    |
+                    ;
+
+<literal_pattern> : INT_LIT
+                  | FLOAT_LIT
+                  | FLOAT_EXP_LIT
+                  | CHAR_LIT
+                  | STRING_LIT
+                  | BYTE_LIT
+                  | BYTE_STR_LIT
+                  | RAW_STR_LIT
+                  | KW_TRUE
+                  | KW_FALSE
+                  | '-' INT_LIT
+                  | '-' FLOAT_LIT
+                  | '-' FLOAT_EXP_LIT
+                  ;
+
+
+<wildcard_pattern> : '_' ;
+<rest_pattern>     : '..' ;
+
+<reference_pattern> : '&' <pattern_no_top_alt>
+                    | '&' KW_MUT <pattern_no_top_alt>
+                    | '&&' <pattern_no_top_alt>
+                    ;
+
+
+<struct_pat_fields_opt> : <struct_pat_fields>
+                        | <struct_pat_fields> ','
+                        | <struct_pat_fields> ',' '..'
+                        | '..'
+                        |
+                        ;
+
+<struct_pat_fields> : <struct_pat_field>
+                    | <struct_pat_fields> ',' <struct_pat_field>
+                    ;
+
+# Struct pattern fields. Shorthand `mut field` / `ref field` /
+# `ref mut field` forms are accepted as `<ident_or_path_pattern>`
+# under struct_pat_field; the unified pattern non-terminal
+# avoids duplicate KW_MUT IDENT reductions.
+<struct_pat_field> : <outer_attrs_opt> IDENT ':' <pattern>
+                   | <outer_attrs_opt> INT_LIT ':' <pattern>
+                   | <outer_attrs_opt> IDENT
+                   | <outer_attrs_opt> KW_REF IDENT
+                   | <outer_attrs_opt> KW_MUT IDENT
+                   | <outer_attrs_opt> KW_REF KW_MUT IDENT
+                   ;
+
+<tuple_pattern> : '(' ')'
+                | '(' <pattern> ',' ')'
+                | '(' <pattern> ',' <tuple_pat_items_tail> ')'
+                | '(' <pattern> ',' <tuple_pat_items_tail> ',' ')'
+                ;
+
+<tuple_pat_items_opt> : <tuple_pat_items>
+                      | <tuple_pat_items> ','
+                      |
+                      ;
+
+<tuple_pat_items> : <pattern>
+                  | <tuple_pat_items> ',' <pattern>
+                  ;
+
+<tuple_pat_items_tail> : <pattern>
+                       | <tuple_pat_items_tail> ',' <pattern>
+                       ;
+
+<grouped_pattern> : '(' <pattern> ')'
+                  ;
+
+<slice_pattern> : '[' <slice_pat_items_opt> ']'
+                ;
+
+<slice_pat_items_opt> : <tuple_pat_items>
+                      | <tuple_pat_items> ','
+                      |
+                      ;
+
+# Range patterns: `a..=b` (inclusive), `a..b` (exclusive,
+# half-open). Bounds restricted to literal-shaped patterns. The
+# path-led bound is handled through path_led_pattern's bare-path
+# form, so range_pattern's bounds are literals only here.
+<range_pattern> : <literal_pattern> '..=' <literal_pattern>
+                | <literal_pattern> '..' <literal_pattern>
+                ;
+
+# --- paths in expressions / patterns --------------------------------------
+#
+# Distinct from <simple_path> (used in attributes, visibility, use)
+# and <type_path> (used in types). Expression / pattern paths
+# carry the turbofish (`::<…>`) form for explicit type arguments
+# at call / construction sites.
+
+# Expression / pattern path. Distinct from <simple_path> (no
+# generics) and from <type_path> (no `+` bound continuation) —
+# parallel structure avoids LALR-merge with simple_path which
+# would unite FOLLOW sets across attribute / expression / pattern
+# contexts and break the ref_mut_pattern vs path_segment reduce
+# choice on PIPE.
+<path_in_expression> : <path_name>
+                     | <path_name> PATHSEP_LT <type_args> '>'
+                     | <path_in_expression> '::' <path_name>
+                     | <path_in_expression> '::' <path_name> PATHSEP_LT <type_args> '>'
+                     ;
+
+# --- statements -----------------------------------------------------------
+
+<block> : '{' <inner_attrs_opt> <stmts_opt> '}'
+        ;
+
+<stmts_opt> : <stmts>
+            | <stmts> <tail_expr>
+            | <tail_expr>
+            |
+            ;
+
+<stmts> : <stmts> <stmt>
+        | <stmt>
+        ;
+
+# Tail expression: the final expression of a block, contributing
+# the block's value when no trailing `;` is present.
+<tail_expr> : <expr_no_block>
+            ;
+
+<stmt> : <item>
+       | <let_stmt>
+       | <expr_no_block> ';'
+       | <expr_with_block>
+       | <expr_with_block> ';'
+       | ';'
+       ;
+
+<let_stmt> : <outer_attrs_opt> KW_LET <pattern> <let_type_opt> <let_init_opt> ';'
+           | <outer_attrs_opt> KW_LET <pattern> <let_type_opt> '=' <expr> KW_ELSE <block> ';'
+           ;
+
+<let_type_opt> : ':' <type>
+               |
+               ;
+
+<let_init_opt> : '=' <expr>
+               |
+               ;
+
+# --- expressions ----------------------------------------------------------
+#
+# Rust precedence ladder, highest first:
+#   * paths, literals, parens, tuples, arrays, blocks, control-flow
+#   * method / field / index / call / `?` (postfix chain)
+#   * unary `-`, `!`, `*`, `&`, `&mut`
+#   * `as` (type cast)
+#   * `* / %`
+#   * `+ -`
+#   * `<< >>`
+#   * `&`
+#   * `^`
+#   * `|`
+#   * `== != < > <= >=`
+#   * `&&`
+#   * `||`
+#   * `..` / `..=` (range)
+#   * `=` and compound assignment
+#   * `break`, `return`, `continue` are part of expressions at the
+#     atomic level; their position in the ladder is via the
+#     `expr_with_block` carve-out.
+
+<expr> : <expr_no_block>
+       | <expr_with_block>
+       ;
+
+# `return X`, `break X`, `|x| X`, and friends sit at the top of
+# `<expr_no_block>` so they:
+#   (1) compose with the precedence ladder via assignment_expr
+#       (so `let y = return X + 1` parses as
+#       `let y = return (X + 1)`),
+#   (2) can act as statements via `<stmt> : <expr_no_block> ';'`
+#       (so `return;` / `break;` / `continue;` parse cleanly),
+#   (3) take the entire right-hand side as their value because
+#       the embedded `<expr>` is parsed at full expression
+#       precedence — the Rust spec calls these "expressions of
+#       weakest precedence" since they consume the right
+#       operand greedily. Putting them at atom level would
+#       inherit precedence-ladder FOLLOW and stop too early.
+
+<expr_no_block> : <assignment_expr>
+                | <return_expr>
+                | <break_expr>
+                | <continue_expr>
+                | <closure_expr>
+                ;
+
+<assignment_expr> : <range_expr>
+                  | <range_expr> '=' <assignment_expr>
+                  | <range_expr> '+=' <assignment_expr>
+                  | <range_expr> '-=' <assignment_expr>
+                  | <range_expr> '*=' <assignment_expr>
+                  | <range_expr> '/=' <assignment_expr>
+                  | <range_expr> '%=' <assignment_expr>
+                  | <range_expr> '&=' <assignment_expr>
+                  | <range_expr> '|=' <assignment_expr>
+                  | <range_expr> '^=' <assignment_expr>
+                  | <range_expr> '<<=' <assignment_expr>
+                  | <range_expr> '>>=' <assignment_expr>
+                  ;
+
+# Range expressions have all four open / closed combinations.
+<range_expr> : <logical_or_expr>
+             | <logical_or_expr> '..' <logical_or_expr>
+             | <logical_or_expr> '..='  <logical_or_expr>
+             | <logical_or_expr> '..'
+             | '..' <logical_or_expr>
+             | '..=' <logical_or_expr>
+             | '..'
+             ;
+
+<logical_or_expr> : <logical_and_expr>
+                  | <logical_or_expr> '||' <logical_and_expr>
+                  ;
+
+<logical_and_expr> : <comparison_expr>
+                   | <logical_and_expr> '&&' <comparison_expr>
+                   ;
+
+<comparison_expr> : <bitor_expr>
+                  | <bitor_expr> '==' <bitor_expr>
+                  | <bitor_expr> '!=' <bitor_expr>
+                  | <bitor_expr> '<'  <bitor_expr>
+                  | <bitor_expr> '>'  <bitor_expr>
+                  | <bitor_expr> '<=' <bitor_expr>
+                  | <bitor_expr> '>=' <bitor_expr>
+                  ;
+
+<bitor_expr> : <bitxor_expr>
+             | <bitor_expr> '|' <bitxor_expr>
+             ;
+
+<bitxor_expr> : <bitand_expr>
+              | <bitxor_expr> '^' <bitand_expr>
+              ;
+
+<bitand_expr> : <shift_expr>
+              | <bitand_expr> '&' <shift_expr>
+              ;
+
+<shift_expr> : <additive_expr>
+             | <shift_expr> '<<' <additive_expr>
+             | <shift_expr> '>>' <additive_expr>
+             ;
+
+<additive_expr> : <multiplicative_expr>
+                | <additive_expr> '+' <multiplicative_expr>
+                | <additive_expr> '-' <multiplicative_expr>
+                ;
+
+<multiplicative_expr> : <cast_expr>
+                      | <multiplicative_expr> '*' <cast_expr>
+                      | <multiplicative_expr> '/' <cast_expr>
+                      | <multiplicative_expr> '%' <cast_expr>
+                      ;
+
+<cast_expr> : <unary_expr>
+            | <cast_expr> KW_AS <type_no_bounds>
+            ;
+
+# Unary operators: `-`, `!` (logical not / bitwise not), `*`
+# (dereference), `&` / `&mut` (reference-of).
+<unary_expr> : <postfix_expr>
+             | '-' <unary_expr>
+             | '!' <unary_expr>
+             | '*' <unary_expr>
+             | '&' <unary_expr>
+             | '&' KW_MUT <unary_expr>
+             | '&&' <unary_expr>
+             | '&&' KW_MUT <unary_expr>
+             ;
+
+# Postfix chain: method call, field access, tuple index, indexing,
+# call, `?` propagation, `.await`.
+<postfix_expr> : <atom_expr>
+               | <postfix_expr> '.' IDENT
+               | <postfix_expr> '.' IDENT '::<' <type_args> '>'
+               | <postfix_expr> '.' INT_LIT
+               | <postfix_expr> '.' KW_AWAIT
+               | <postfix_expr> '?'
+               | <postfix_expr> '[' <expr> ']'
+               | <postfix_expr> '(' <call_args_opt> ')'
+               ;
+
+<call_args_opt> : <call_args>
+                | <call_args> ','
+                |
+                ;
+
+<call_args> : <expr>
+            | <call_args> ',' <expr>
+            ;
+
+# Atomic / primary expressions. `self` reaches here through
+# <path_expr> → <path_in_expression> → <path_expr_segment> →
+# KW_SELF, so we don't list it separately. `return` / `break` /
+# `continue` / closures are NOT atomic — they hoist to the
+# `<expr>` top level so their embedded expression has the
+# expression-terminator FOLLOW set instead of the precedence
+# ladder's mid-rung FOLLOW set.
+<atom_expr> : <literal_expr>
+            | <path_expr>
+            | <paren_or_tuple_expr>
+            | <array_expr>
+            | <struct_literal>
+            | <macro_invocation>
+            | <macro_invocation_brace>
+            ;
+
+<literal_expr> : INT_LIT
+               | FLOAT_LIT
+               | FLOAT_EXP_LIT
+               | CHAR_LIT
+               | STRING_LIT
+               | BYTE_LIT
+               | BYTE_STR_LIT
+               | RAW_STR_LIT
+               | KW_TRUE
+               | KW_FALSE
+               ;
+
+<path_expr> : <path_in_expression>
+            ;
+
+# `()` is the unit value; `(expr)` is a parenthesised expression;
+# `(expr, expr, …)` (≥ 2 elements, or one with trailing comma) is
+# a tuple literal.
+<paren_or_tuple_expr> : '(' ')'
+                      | '(' <expr> ')'
+                      | '(' <expr> ',' ')'
+                      | '(' <expr> ',' <call_args> ')'
+                      | '(' <expr> ',' <call_args> ',' ')'
+                      ;
+
+# Arrays: `[1, 2, 3]`, `[0; 32]` (repeat-form).
+<array_expr> : '[' ']'
+             | '[' <call_args> ']'
+             | '[' <call_args> ',' ']'
+             | '[' <expr> ';' <expr> ']'
+             ;
+
+# Struct literal expression. Path-led, distinguishing from a bare
+# block.
+<struct_literal> : <path_in_expression> '{' <struct_lit_fields_opt> '}'
+                 ;
+
+<struct_lit_fields_opt> : <struct_lit_fields>
+                        | <struct_lit_fields> ','
+                        | <struct_lit_fields> ',' '..' <expr>
+                        | '..' <expr>
+                        |
+                        ;
+
+<struct_lit_fields> : <struct_lit_field>
+                    | <struct_lit_fields> ',' <struct_lit_field>
+                    ;
+
+<struct_lit_field> : IDENT
+                   | IDENT ':' <expr>
+                   | INT_LIT ':' <expr>
+                   ;
+
+# Closures `|x, y| expr` or `|x, y| { stmts }`. The optional
+# `move` keyword forces capture-by-value. Inlining the qualifier
+# prefixes avoids the ε-derivable head that otherwise creates an
+# LR(1) conflict against the bare `|` opener.
+<closure_expr> : '|' <closure_params_opt> '|' <closure_return_opt> <closure_body>
+               | '||' <closure_return_opt> <closure_body>
+               | KW_MOVE '|' <closure_params_opt> '|' <closure_return_opt> <closure_body>
+               | KW_MOVE '||' <closure_return_opt> <closure_body>
+               | KW_ASYNC '|' <closure_params_opt> '|' <closure_return_opt> <closure_body>
+               | KW_ASYNC '||' <closure_return_opt> <closure_body>
+               | KW_ASYNC KW_MOVE '|' <closure_params_opt> '|' <closure_return_opt> <closure_body>
+               | KW_ASYNC KW_MOVE '||' <closure_return_opt> <closure_body>
+               ;
+
+<closure_params_opt> : <closure_params>
+                     | <closure_params> ','
+                     |
+                     ;
+
+<closure_params> : <closure_param>
+                 | <closure_params> ',' <closure_param>
+                 ;
+
+<closure_param> : <outer_attrs_opt> <pattern>
+                | <outer_attrs_opt> <pattern> ':' <type>
+                ;
+
+<closure_return_opt> : '->' <type_no_bounds>
+                     |
+                     ;
+
+# Closure body is always an expression. A block body
+# (`|x| { … }`) reaches us through expr → expr_with_block →
+# block_expr. The grammar carves nothing special for it.
+<closure_body> : <expr>
+               ;
+
+<return_expr> : KW_RETURN <expr_opt>
+              ;
+
+<break_expr> : KW_BREAK <break_label_opt> <expr_opt>
+             ;
+
+<continue_expr> : KW_CONTINUE <break_label_opt>
+                ;
+
+<break_label_opt> : LIFETIME
+                  |
+                  ;
+
+<expr_opt> : <expr>
+           |
+           ;
+
+# Expression with a trailing block — flow-control + block forms.
+# Statements accept these without a trailing `;`.
+<expr_with_block> : <block_expr>
+                  | <unsafe_block_expr>
+                  | <async_block_expr>
+                  | <loop_expr>
+                  | <while_expr>
+                  | <while_let_expr>
+                  | <for_expr>
+                  | <if_expr>
+                  | <if_let_expr>
+                  | <match_expr>
+                  ;
+
+<block_expr> : <block>
+             ;
+
+<unsafe_block_expr> : KW_UNSAFE <block>
+                    ;
+
+<async_block_expr> : KW_ASYNC <block>
+                   | KW_ASYNC KW_MOVE <block>
+                   ;
+
+<loop_expr> : <label_opt> KW_LOOP <block>
+            ;
+
+<label_opt> : LIFETIME ':'
+            |
+            ;
+
+<while_expr> : <label_opt> KW_WHILE <expr_no_struct> <block>
+             ;
+
+<while_let_expr> : <label_opt> KW_WHILE KW_LET <pattern> '=' <expr_no_struct> <block>
+                 ;
+
+<for_expr> : <label_opt> KW_FOR <pattern> KW_IN <expr_no_struct> <block>
+           ;
+
+<if_expr> : KW_IF <expr_no_struct> <block>
+          | KW_IF <expr_no_struct> <block> KW_ELSE <else_tail>
+          ;
+
+<else_tail> : <block>
+            | <if_expr>
+            | <if_let_expr>
+            ;
+
+<if_let_expr> : KW_IF KW_LET <pattern> '=' <expr_no_struct> <block>
+              | KW_IF KW_LET <pattern> '=' <expr_no_struct> <block> KW_ELSE <else_tail>
+              ;
+
+<match_expr> : KW_MATCH <expr_no_struct> '{' <inner_attrs_opt> <match_arms_opt> '}'
+             ;
+
+<match_arms_opt> : <match_arms>
+                 |
+                 ;
+
+<match_arms> : <match_arm>
+             | <match_arms> <match_arm>
+             ;
+
+<match_arm> : <outer_attrs_opt> <pattern> <match_arm_guard_opt> '=>' <match_arm_body>
+            ;
+
+<match_arm_guard_opt> : KW_IF <expr>
+                      |
+                      ;
+
+# Match arm body: expression with a `,` separator, or an
+# expr_with_block which doesn't need the separator.
+<match_arm_body> : <expr_no_block> ','
+                 | <expr_with_block>
+                 | <expr_with_block> ','
+                 ;
+
+# `<expr_no_struct>` is the condition-position counterpart of
+# `<expr>` — same precedence ladder, but the atom slot omits the
+# struct-literal alternative. The if / while / for / match body
+# block's leading `{` would otherwise be ambiguous with a struct
+# literal trailing the condition. The full parallel ladder mirrors
+# `<expr>` exactly with `<atom_no_struct>` substituted for
+# `<atom_expr>` at the leaf.
+# Same shape as <expr_no_block> — return / break / continue /
+# closure live at the top so their embedded expression carries
+# the expression-terminator FOLLOW set. The body block of if /
+# while / for / match is what distinguishes this no_struct
+# flavour from <expr>.
+<expr_no_struct> : <expr_no_struct_assignment>
+                 | <return_expr>
+                 | <break_expr>
+                 | <continue_expr>
+                 | <closure_expr>
+                 ;
+
+<expr_no_struct_assignment> : <expr_no_struct_range>
+                            | <expr_no_struct_range> '=' <expr_no_struct_assignment>
+                            | <expr_no_struct_range> '+=' <expr_no_struct_assignment>
+                            | <expr_no_struct_range> '-=' <expr_no_struct_assignment>
+                            | <expr_no_struct_range> '*=' <expr_no_struct_assignment>
+                            | <expr_no_struct_range> '/=' <expr_no_struct_assignment>
+                            | <expr_no_struct_range> '%=' <expr_no_struct_assignment>
+                            | <expr_no_struct_range> '&=' <expr_no_struct_assignment>
+                            | <expr_no_struct_range> '|=' <expr_no_struct_assignment>
+                            | <expr_no_struct_range> '^=' <expr_no_struct_assignment>
+                            | <expr_no_struct_range> '<<=' <expr_no_struct_assignment>
+                            | <expr_no_struct_range> '>>=' <expr_no_struct_assignment>
+                            ;
+
+<expr_no_struct_range> : <expr_no_struct_logor>
+                       | <expr_no_struct_logor> '..' <expr_no_struct_logor>
+                       | <expr_no_struct_logor> '..=' <expr_no_struct_logor>
+                       | <expr_no_struct_logor> '..'
+                       | '..' <expr_no_struct_logor>
+                       | '..=' <expr_no_struct_logor>
+                       | '..'
+                       ;
+
+<expr_no_struct_logor> : <expr_no_struct_logand>
+                       | <expr_no_struct_logor> '||' <expr_no_struct_logand>
+                       ;
+
+<expr_no_struct_logand> : <expr_no_struct_cmp>
+                        | <expr_no_struct_logand> '&&' <expr_no_struct_cmp>
+                        ;
+
+<expr_no_struct_cmp> : <expr_no_struct_bitor>
+                     | <expr_no_struct_bitor> '==' <expr_no_struct_bitor>
+                     | <expr_no_struct_bitor> '!=' <expr_no_struct_bitor>
+                     | <expr_no_struct_bitor> '<'  <expr_no_struct_bitor>
+                     | <expr_no_struct_bitor> '>'  <expr_no_struct_bitor>
+                     | <expr_no_struct_bitor> '<=' <expr_no_struct_bitor>
+                     | <expr_no_struct_bitor> '>=' <expr_no_struct_bitor>
+                     ;
+
+<expr_no_struct_bitor> : <expr_no_struct_bitxor>
+                       | <expr_no_struct_bitor> '|' <expr_no_struct_bitxor>
+                       ;
+
+<expr_no_struct_bitxor> : <expr_no_struct_bitand>
+                        | <expr_no_struct_bitxor> '^' <expr_no_struct_bitand>
+                        ;
+
+<expr_no_struct_bitand> : <expr_no_struct_shift>
+                        | <expr_no_struct_bitand> '&' <expr_no_struct_shift>
+                        ;
+
+<expr_no_struct_shift> : <expr_no_struct_add>
+                       | <expr_no_struct_shift> '<<' <expr_no_struct_add>
+                       | <expr_no_struct_shift> '>>' <expr_no_struct_add>
+                       ;
+
+<expr_no_struct_add> : <expr_no_struct_mul>
+                     | <expr_no_struct_add> '+' <expr_no_struct_mul>
+                     | <expr_no_struct_add> '-' <expr_no_struct_mul>
+                     ;
+
+<expr_no_struct_mul> : <expr_no_struct_cast>
+                     | <expr_no_struct_mul> '*' <expr_no_struct_cast>
+                     | <expr_no_struct_mul> '/' <expr_no_struct_cast>
+                     | <expr_no_struct_mul> '%' <expr_no_struct_cast>
+                     ;
+
+<expr_no_struct_cast> : <expr_no_struct_unary>
+                      | <expr_no_struct_cast> KW_AS <type_no_bounds>
+                      ;
+
+<expr_no_struct_unary> : <expr_no_struct_postfix>
+                       | '-' <expr_no_struct_unary>
+                       | '!' <expr_no_struct_unary>
+                       | '*' <expr_no_struct_unary>
+                       | '&' <expr_no_struct_unary>
+                       | '&' KW_MUT <expr_no_struct_unary>
+                       | '&&' <expr_no_struct_unary>
+                       | '&&' KW_MUT <expr_no_struct_unary>
+                       ;
+
+<expr_no_struct_postfix> : <atom_no_struct>
+                         | <expr_no_struct_postfix> '.' IDENT
+                         | <expr_no_struct_postfix> '.' IDENT '::<' <type_args> '>'
+                         | <expr_no_struct_postfix> '.' INT_LIT
+                         | <expr_no_struct_postfix> '.' KW_AWAIT
+                         | <expr_no_struct_postfix> '?'
+                         | <expr_no_struct_postfix> '[' <expr> ']'
+                         | <expr_no_struct_postfix> '(' <call_args_opt> ')'
+                         ;
+
+# The `_no_struct` atom drops the <struct_literal> alternative.
+# `self` reaches here through <path_expr>. As with <atom_expr>,
+# `return` / `break` / `continue` / closures live at the
+# <expr_no_struct> top level, not here.
+<atom_no_struct> : <literal_expr>
+                 | <path_expr>
+                 | <paren_or_tuple_expr>
+                 | <array_expr>
+                 | <macro_invocation>
+                 | <macro_invocation_brace>
+                 | <expr_with_block>
+                 ;
+
+# --- macro invocations ----------------------------------------------------
+#
+# Three delimiter shapes. Bodies parse as a comma-separated
+# expression list — this covers `println!`, `vec!`, `assert!`,
+# `assert_eq!`, `format!`, `dbg!`, and the bulk of real-world
+# macro use. Macros whose body is non-expression syntax
+# (`quote!{ … }`, `macro_rules!` patterns, custom DSLs) need the
+# MACRO_BODY_TT token filter (see header note).
+
+# Macro names use <path_in_expression> rather than <simple_path>
+# so that simple_path is confined to attribute / visibility / use
+# contexts — keeping its IDENT-reduction state disjoint from the
+# expression chain's path_name reduction state.
+<macro_invocation> : <path_in_expression> '!' '(' <call_args_opt> ')'
+                   | <path_in_expression> '!' '[' <call_args_opt> ']'
+                   ;
+
+<macro_invocation_brace> : <path_in_expression> '!' '{' <call_args_opt> '}'
+                         ;
