@@ -32,8 +32,21 @@ the message alone.
 from __future__ import annotations
 
 import re
+from typing import Optional
 
-from .ir import GrammarIR, HookDecl, Position, Production, Rule, Symbol, TokenDecl
+from .ir import (
+    ColumnClause,
+    ColumnsConfig,
+    ContinuationConfig,
+    GrammarIR,
+    HookDecl,
+    LayoutConfig,
+    Position,
+    Production,
+    Rule,
+    Symbol,
+    TokenDecl,
+)
 
 _HOOK_WHENS = ("pre_shift", "pre_reduce", "post_reduce", "on_error")
 
@@ -87,6 +100,9 @@ _SECTIONS = (
     "shift",
     "reduce",
     "ast_drop",
+    "layout",
+    "columns",
+    "continuation",
 )
 _SECTION_RE = re.compile(r"\s*%(" + "|".join(_SECTIONS) + r")\b\s*(.*)$")
 _KEYWORD_PREFIX_RE = re.compile(r"\s*%keyword_prefix\s+(\S+)\s*$")
@@ -142,6 +158,12 @@ def read_source(text: str, filename: str = "<source>") -> GrammarIR:
             _parse_reduce(ir, section_buf, filename)
         elif section == "ast_drop":
             _parse_ast_drop(ir, section_buf, filename)
+        elif section == "layout":
+            _parse_layout(ir, section_buf, filename)
+        elif section == "columns":
+            _parse_columns(ir, section_buf, filename)
+        elif section == "continuation":
+            _parse_continuation(ir, section_buf, filename)
         elif section == "rules":
             text = "\n".join(t for _l, t in section_buf)
             ir.options["__rules_text__"] = text
@@ -205,6 +227,16 @@ def read_source(text: str, filename: str = "<source>") -> GrammarIR:
         section_buf.append((lineno, line))
 
     flush()
+
+    # %columns and %layout are mutually exclusive — fixed-column languages
+    # don't have indentation-sensitive structure, and indentation-sensitive
+    # languages don't have fixed-column layout. Declaring both is a
+    # configuration error.
+    if ir.columns is not None and ir.layout is not None:
+        raise ReaderError(
+            f"{filename}: `%columns` and `%layout` are mutually exclusive — "
+            f"fixed-column and indentation-sensitive lexing don't compose"
+        )
 
     # Default start symbol = first rule's LHS, if not set in options. We do not
     # parse rules here — the LR builder fills this in once it parses the rules
@@ -381,6 +413,311 @@ def _parse_ast_drop(ir: GrammarIR, lines: list[tuple[int, str]], filename: str) 
                     f"{filename}:{lineno}: %ast_drop entry {word!r} is not a valid identifier"
                 )
             ir.ast_drop_tokens.add(word)
+
+
+_LAYOUT_KEYS = {
+    "indent_token",
+    "dedent_token",
+    "newline_token",
+    "flow_open",
+    "flow_close",
+    "tab_width",
+    "blank_lines",
+    "comment_lines",
+}
+_LAYOUT_BLANK_LINES = {"skip", "emit_newline"}
+
+
+def _parse_layout(ir: GrammarIR, lines: list[tuple[int, str]], filename: str) -> None:
+    """Parse a ``%layout`` block: ``key = value`` lines configuring the
+    indentation-tracking filter. See ``docs/proposals/layout.md``.
+    """
+    if ir.layout is not None:
+        raise ReaderError(f"{filename}: duplicate `%layout` directive")
+    cfg: dict[str, object] = {}
+    first_lineno: Optional[int] = None
+    for lineno, line in lines:
+        if first_lineno is None:
+            first_lineno = lineno
+        if "=" not in line:
+            raise ReaderError(
+                f"{filename}:{lineno}: `%layout` line must be `key = value`"
+            )
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip()
+        if key not in _LAYOUT_KEYS:
+            raise ReaderError(
+                f"{filename}:{lineno}: unknown %layout key {key!r}; "
+                f"known keys: {sorted(_LAYOUT_KEYS)}"
+            )
+        if key in ("flow_open", "flow_close"):
+            # Space-separated list of either bare terminal names or
+            # quoted literals (we keep them as-is and let the lex stage
+            # resolve literals to declared token names).
+            entries = _split_layout_list(value, filename, lineno, key)
+            cfg[key] = entries
+        elif key == "tab_width":
+            try:
+                cfg[key] = int(value)
+            except ValueError as exc:
+                raise ReaderError(
+                    f"{filename}:{lineno}: %layout tab_width must be an integer; got {value!r}"
+                ) from exc
+        elif key in ("blank_lines", "comment_lines"):
+            if value not in _LAYOUT_BLANK_LINES:
+                raise ReaderError(
+                    f"{filename}:{lineno}: %layout {key} must be one of "
+                    f"{sorted(_LAYOUT_BLANK_LINES)}; got {value!r}"
+                )
+            cfg[key] = value
+        else:
+            cfg[key] = value
+    for required in ("indent_token", "dedent_token", "newline_token"):
+        if required not in cfg:
+            raise ReaderError(
+                f"{filename}: %layout block missing required key {required!r}"
+            )
+    ir.layout = LayoutConfig(
+        indent_token=str(cfg["indent_token"]),
+        dedent_token=str(cfg["dedent_token"]),
+        newline_token=str(cfg["newline_token"]),
+        flow_open=list(cfg.get("flow_open", [])),  # type: ignore[arg-type]
+        flow_close=list(cfg.get("flow_close", [])),  # type: ignore[arg-type]
+        tab_width=int(cfg.get("tab_width", 8)),  # type: ignore[arg-type]
+        blank_lines=str(cfg.get("blank_lines", "skip")),
+        comment_lines=str(cfg.get("comment_lines", "skip")),
+        position=Position(filename, first_lineno or 0, 1),
+    )
+
+
+def _split_layout_list(
+    value: str, filename: str, lineno: int, key: str
+) -> list[str]:
+    """Split ``"'(' '[' '{' "`` or ``"LPAREN LBRACK LBRACE"`` into a list."""
+    out: list[str] = []
+    i = 0
+    while i < len(value):
+        c = value[i]
+        if c.isspace():
+            i += 1
+            continue
+        if c == "'":
+            j = i + 1
+            while j < len(value) and value[j] != "'":
+                if value[j] == "\\" and j + 1 < len(value):
+                    j += 2
+                else:
+                    j += 1
+            if j >= len(value):
+                raise ReaderError(
+                    f"{filename}:{lineno}: unterminated literal in %layout {key}"
+                )
+            out.append(_unquote_literal(value[i + 1 : j]))
+            i = j + 1
+        else:
+            j = i
+            while j < len(value) and not value[j].isspace():
+                j += 1
+            out.append(value[i:j])
+            i = j
+    return out
+
+
+_COLS_LINE_RE = re.compile(
+    r"^\s*cols\s+(?P<start>\d+)(?:\s*-\s*(?P<end>\d+))?\s+(?P<rest>.*)$"
+)
+_COLS_WIDTH_RE = re.compile(r"^\s*width\s*=\s*(?P<n>\d+)\s*$")
+_COLS_CLAUSE_KEYS = {
+    "mode",
+    "comment_if",
+    "continuation_if",
+    "continuation_if_nonblank",
+    "continuation_token",
+    "debug_if",
+    "debug_token",
+}
+_COLS_MODES = {"body", "label", "areaA", "areaB", "skip"}
+
+
+def _parse_columns(ir: GrammarIR, lines: list[tuple[int, str]], filename: str) -> None:
+    """Parse a ``%columns`` block. Each non-``width`` line is
+    ``cols <start>[-<end>] key=value [key=value ...]``. See
+    ``docs/proposals/columns.md``.
+    """
+    if ir.columns is not None:
+        raise ReaderError(f"{filename}: duplicate `%columns` directive")
+    cfg = ColumnsConfig(position=Position(filename, lines[0][0] if lines else 0, 1))
+    for lineno, line in lines:
+        wm = _COLS_WIDTH_RE.match(line)
+        if wm:
+            cfg.width = int(wm.group("n"))
+            continue
+        m = _COLS_LINE_RE.match(line)
+        if not m:
+            raise ReaderError(
+                f"{filename}:{lineno}: `%columns` line must be `cols N[-M] key=value ...` "
+                f"or `width = N`"
+            )
+        start = int(m.group("start"))
+        end = int(m.group("end")) if m.group("end") else start
+        rest = m.group("rest").strip()
+        clause = ColumnClause(
+            col_start=start,
+            col_end=end,
+            position=Position(filename, lineno, 1),
+        )
+        # rest is a sequence of key=value pairs, separated by whitespace,
+        # with values being either quoted literals or bare identifiers.
+        for key, value in _parse_kv_pairs(rest, filename, lineno):
+            if key not in _COLS_CLAUSE_KEYS:
+                raise ReaderError(
+                    f"{filename}:{lineno}: unknown %columns clause key {key!r}; "
+                    f"known keys: {sorted(_COLS_CLAUSE_KEYS)}"
+                )
+            if key == "mode":
+                if value not in _COLS_MODES:
+                    raise ReaderError(
+                        f"{filename}:{lineno}: %columns mode {value!r} not one of "
+                        f"{sorted(_COLS_MODES)}"
+                    )
+                clause.mode = value
+            elif key == "comment_if":
+                clause.comment_if = value
+            elif key == "continuation_if":
+                clause.continuation_if = value
+            elif key == "continuation_if_nonblank":
+                clause.continuation_if_nonblank = True
+                clause.continuation_token = value
+            elif key == "continuation_token":
+                clause.continuation_token = value
+            elif key == "debug_if":
+                clause.debug_if = value
+            elif key == "debug_token":
+                clause.debug_token = value
+        cfg.clauses.append(clause)
+    ir.columns = cfg
+
+
+def _parse_kv_pairs(
+    text: str, filename: str, lineno: int
+) -> list[tuple[str, str]]:
+    """Parse ``key = value [key = value ...]`` with quoted-literal values
+    or bare identifiers. Returns the pairs in declared order.
+    """
+    out: list[tuple[str, str]] = []
+    i = 0
+    while i < len(text):
+        if text[i].isspace():
+            i += 1
+            continue
+        # Read key.
+        j = i
+        while j < len(text) and (text[j].isalnum() or text[j] == "_"):
+            j += 1
+        if j == i:
+            raise ReaderError(
+                f"{filename}:{lineno}: expected key at column {i + 1} in {text!r}"
+            )
+        key = text[i:j]
+        i = j
+        while i < len(text) and text[i].isspace():
+            i += 1
+        if i >= len(text) or text[i] != "=":
+            # Key with no value — treat as boolean flag (value = "")
+            out.append((key, ""))
+            continue
+        i += 1  # skip '='
+        while i < len(text) and text[i].isspace():
+            i += 1
+        if i >= len(text):
+            raise ReaderError(
+                f"{filename}:{lineno}: missing value for key {key!r}"
+            )
+        if text[i] == "'":
+            j = i + 1
+            while j < len(text) and text[j] != "'":
+                if text[j] == "\\" and j + 1 < len(text):
+                    j += 2
+                else:
+                    j += 1
+            if j >= len(text):
+                raise ReaderError(
+                    f"{filename}:{lineno}: unterminated literal in value for {key!r}"
+                )
+            out.append((key, _unquote_literal(text[i + 1 : j])))
+            i = j + 1
+        else:
+            j = i
+            while j < len(text) and not text[j].isspace():
+                j += 1
+            out.append((key, text[i:j]))
+            i = j
+    return out
+
+
+_CONTINUATION_KEYS = {
+    "marker",
+    "marker_token",
+    "at_column",
+    "applies_in_brackets",
+    "preserve_position",
+}
+
+
+def _parse_continuation(
+    ir: GrammarIR, lines: list[tuple[int, str]], filename: str
+) -> None:
+    """Parse a ``%continuation`` block. See ``docs/proposals/continuation.md``."""
+    if ir.continuation is not None:
+        raise ReaderError(f"{filename}: duplicate `%continuation` directive")
+    cfg = ContinuationConfig(position=Position(filename, lines[0][0] if lines else 0, 1))
+    for lineno, line in lines:
+        if "=" not in line:
+            raise ReaderError(
+                f"{filename}:{lineno}: `%continuation` line must be `key = value`"
+            )
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip()
+        if key not in _CONTINUATION_KEYS:
+            raise ReaderError(
+                f"{filename}:{lineno}: unknown %continuation key {key!r}; "
+                f"known keys: {sorted(_CONTINUATION_KEYS)}"
+            )
+        if key == "marker":
+            # Two forms: quoted single character, or the special form
+            # ``'<char>' at_column <N>`` (parsed as one entry here).
+            if value.startswith("'"):
+                # Find closing quote and check for `at_column N` suffix.
+                end_quote = value.index("'", 1)
+                cfg.marker_char = _unquote_literal(value[1:end_quote])
+                rest = value[end_quote + 1 :].strip()
+                if rest:
+                    m = re.match(r"at_column\s+(\d+)\s*$", rest)
+                    if not m:
+                        raise ReaderError(
+                            f"{filename}:{lineno}: expected `at_column N` after "
+                            f"quoted marker; got {rest!r}"
+                        )
+                    cfg.at_column = int(m.group(1))
+            else:
+                # Bare identifier — a named token.
+                cfg.marker_token = value
+        elif key == "marker_token":
+            cfg.marker_token = value
+        elif key == "at_column":
+            cfg.at_column = int(value)
+        elif key == "applies_in_brackets":
+            cfg.applies_in_brackets = value.lower() in ("true", "yes", "1")
+        elif key == "preserve_position":
+            cfg.preserve_position = value.lower() in ("true", "yes", "1")
+    if cfg.marker_char is None and cfg.marker_token is None:
+        raise ReaderError(
+            f"{filename}: %continuation block missing `marker = '<char>'` or "
+            f"`marker = <TOKEN>` line"
+        )
+    ir.continuation = cfg
 
 
 def _parse_keywords(ir: GrammarIR, lines: list[tuple[int, str]], filename: str) -> None:

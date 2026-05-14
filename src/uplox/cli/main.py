@@ -37,13 +37,17 @@ from ..lex.build import balanced_tokens
 from ..tables import (
     ast_to_json,
     balanced_from_json,
+    columns_from_json,
+    continuation_from_json,
     dfa_from_json,
     dfa_to_json,
     dump_bundle,
     empty_bundle,
+    layout_from_json,
     table_from_json,
     table_to_json,
 )
+from ..lex.filters import ColumnDispatcher, apply_filters
 
 
 def _cmd_version(_args: argparse.Namespace) -> int:
@@ -65,7 +69,13 @@ def _cmd_build(args: argparse.Namespace) -> int:
 
     bundle = empty_bundle(ir.name)
     bundle["lex"] = dfa_to_json(
-        dfa, tokens=tokens, skip=skip, balanced=balanced_tokens(ir)
+        dfa,
+        tokens=tokens,
+        skip=skip,
+        balanced=balanced_tokens(ir),
+        layout=ir.layout,
+        columns=ir.columns,
+        continuation=ir.continuation,
     )
 
     if not args.lex_only:
@@ -120,6 +130,9 @@ def _cmd_parse(args: argparse.Namespace) -> int:
         skip_tokens=frozenset(skip),
         balanced=balanced_from_json(bundle["lex"]),
     )
+    columns_cfg = columns_from_json(bundle["lex"])
+    layout_cfg = layout_from_json(bundle["lex"])
+    continuation_cfg = continuation_from_json(bundle["lex"])
     table = table_from_json(bundle["parse"])
 
     if args.input == "-":
@@ -128,16 +141,29 @@ def _cmd_parse(args: argparse.Namespace) -> int:
         with open(args.input, "r", encoding="utf-8") as fh:
             text = fh.read()
 
+    # Build the token-producing iterator. Column dispatch happens
+    # first (inside the dispatcher); continuation + layout filters
+    # apply afterwards. Bundles without any of the three configs
+    # parse identically to pre-feature uplox.
+    def _stream():
+        if columns_cfg is not None:
+            raw = ColumnDispatcher(config=columns_cfg, scanner=scanner).scan(text)
+        else:
+            raw = scanner.scan(text)
+        return apply_filters(
+            raw, continuation=continuation_cfg, layout=layout_cfg
+        )
+
     try:
         if args.glr:
-            tree = glr_parse(glr_from_lr(table), scanner.scan(text))
+            tree = glr_parse(glr_from_lr(table), _stream())
         else:
             # The LR runtime is a smoke tool here; we don't try to resolve
             # hooks the way a real host driver would. Unknown names no-op so
             # any grammar builds and parses end-to-end.
             tree = run_parser(
                 table,
-                scanner.scan(text),
+                _stream(),
                 hooks=HookRegistry(ignore_missing=True),
             )
     except (ParseError, GLRParseError) as e:

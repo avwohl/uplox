@@ -1,0 +1,650 @@
+# Fortran 77 (FORTRAN 77 / ANSI X3.9-1978) — fixed-form source.
+#
+# Fortran 77 is a card-image language: each source line is laid out
+# in fixed columns inherited from the original 80-column punched-card
+# era.
+#
+#     column  1     2  3  4  5  6   7..72             73..80
+#             └─── label area ──┘   │  └── body ──┘   sequence
+#                                   continuation indicator
+#
+# Column 1 with `C`, `c`, `*`, or `!` → entire line is a comment.
+# Columns 1–5 → optional statement label (integer 1..99999).
+# Column 6 → continuation indicator: any non-space, non-zero
+#            character means "this line continues the previous
+#            statement"; the layout filter joins the bodies into
+#            one logical line before the parser sees them.
+# Columns 7–72 → actual statement body. Whitespace inside the body
+#            is irrelevant; `END IF` and `ENDIF` are the same token.
+# Columns 73–80 → ignored (card sequence number area).
+#
+# The grammar uses the `%columns` directive to dispatch column
+# ranges to lexer modes and the `%continuation` directive to
+# collapse continuation lines. See ``docs/proposals/columns.md``
+# and ``docs/proposals/continuation.md`` for the algorithms.
+#
+# In scope:
+#
+#   * Program units: PROGRAM, SUBROUTINE, FUNCTION, BLOCK DATA.
+#   * Specification statements: INTEGER / REAL / DOUBLE PRECISION /
+#     COMPLEX / LOGICAL / CHARACTER type declarations with optional
+#     length / dimension. DIMENSION, COMMON, EQUIVALENCE,
+#     IMPLICIT, EXTERNAL, INTRINSIC, PARAMETER, DATA, SAVE.
+#   * Executable statements: assignment, CALL, GOTO (unconditional,
+#     computed, assigned), IF (logical, arithmetic, block),
+#     DO loops, CONTINUE, STOP, PAUSE, READ, WRITE, PRINT, OPEN,
+#     CLOSE, REWIND, BACKSPACE, ENDFILE, FORMAT, RETURN, END.
+#   * Expressions with the standard six-precedence ladder
+#     (.OR. / .AND. / .NOT. / comparison / additive /
+#     multiplicative / exponential).
+#   * Substring expressions `STR(I:J)` and array subscripts
+#     `A(I, J)`.
+#   * Hollerith literals `5Habcde` and standard string literals
+#     `'abc''def'`.
+#
+# Out of scope (Fortran-90 and later additions):
+#
+#   * Free-form source. F90 free-form needs a different grammar;
+#     this one is fixed-form only.
+#   * MODULE / USE / INTERFACE / generic procedures.
+#   * Derived types (TYPE blocks), pointers, allocatables.
+#   * KIND parameters on type declarations.
+#   * Array constructors and array-valued expressions beyond the
+#     classic subscripted variable.
+#
+# Case-insensitivity: Fortran 77 is case-insensitive. The grammar
+# accepts uppercase keyword spellings only; hosts should
+# upper-case the input before the lexer sees it.
+
+%grammar fortran77
+
+
+%define lr.type lalr
+%options
+start = program_unit
+
+%shift
+KW_ELSE
+# Greedy extensions on ε-derivable optionals — shift always
+# extends the leading construct rather than reducing the empty
+# alternative.
+KW_INTEGER KW_REAL KW_DOUBLE KW_COMPLEX KW_LOGICAL KW_CHARACTER
+KW_IF
+IDENT INTEGER_LIT STRING_LIT
+# SLASH and STAR appear in both expression precedence-ladder
+# extensions and statement-level delimiters (COMMON /name/,
+# DATA value lists). Shift extends the expression (multiplication
+# / division); the delimiter form is rejected by context.
+SLASH STAR COMMA
+
+%columns
+# F77 column layout — see header note and ``docs/proposals/columns.md``.
+# `comment_if` at column 1 drops the whole line. Columns 1-5 are
+# statement labels (the lexer naturally picks up the integer).
+# Column 6's non-blank, non-zero character is the continuation
+# marker — the `%continuation` directive below consumes the
+# `CONTINUE_LINE` token it emits and joins physical lines into
+# one logical line. Columns 7-72 are the body. Columns beyond 72
+# are silently dropped.
+width = 72
+cols 1     comment_if = 'Cc*!'
+cols 1-5   mode = label
+cols 6     continuation_if_nonblank = CONTINUE_LINE
+cols 7-72  mode = body
+
+%continuation
+# Column-6 non-blank in F77 is a continuation marker — the column
+# dispatcher emits CONTINUE_LINE for each such marker, and this
+# directive collapses it together with the preceding NEWLINE so the
+# parser sees one logical line per logical statement.
+marker = CONTINUE_LINE
+
+%tokens
+
+# Inline whitespace inside the column-7-to-72 body is insignificant
+# (`END IF` and `ENDIF` are the same statement). The lexer skips
+# it. Newlines remain significant — they're how the parser knows a
+# statement ends.
+WS         = /[ \t]+/                                          %skip
+NL         = /\n+/                                             %skip
+
+# Numeric literals. F77 reals can be single or double precision
+# (`1.0`, `1.0D0`); we treat them as one token shape and let the
+# host distinguish via the suffix.
+INTEGER_LIT = /[0-9]+/
+REAL_LIT    = /[0-9]+\.[0-9]*([eEdD][+-]?[0-9]+)?|[0-9]+[eEdD][+-]?[0-9]+/
+
+# String literals: F77 single-quoted with doubled-quote escape.
+STRING_LIT = /'([^']|'')*'/
+
+# Hollerith literals: `<n>H<n-characters>`. Distinctive prefix; the
+# host computes the byte count after lexing.
+HOLLERITH  = /[0-9]+[Hh]/
+
+# Logical literals are written `.TRUE.` and `.FALSE.`; matched
+# before the operator-set so the dots aren't mistaken.
+LOGICAL_LIT = /\.[Tt][Rr][Uu][Ee]\.|\.[Ff][Aa][Ll][Ss][Ee]\./
+
+# Dotted operators. Listed before generic IDENT so the dots are
+# recognised as one token.
+OP_OR   = /\.[Oo][Rr]\./
+OP_AND  = /\.[Aa][Nn][Dd]\./
+OP_NOT  = /\.[Nn][Oo][Tt]\./
+OP_EQV  = /\.[Ee][Qq][Vv]\./
+OP_NEQV = /\.[Nn][Ee][Qq][Vv]\./
+OP_EQ   = /\.[Ee][Qq]\./
+OP_NE   = /\.[Nn][Ee]\./
+OP_LT   = /\.[Ll][Tt]\./
+OP_LE   = /\.[Ll][Ee]\./
+OP_GT   = /\.[Gg][Tt]\./
+OP_GE   = /\.[Gg][Ee]\./
+
+# Statement keywords. Fortran 77 is case-insensitive but the
+# grammar accepts uppercase; hosts pre-case the input.
+KW_PROGRAM    = 'PROGRAM'
+KW_SUBROUTINE = 'SUBROUTINE'
+KW_FUNCTION   = 'FUNCTION'
+KW_BLOCKDATA  = 'BLOCKDATA'
+KW_END        = 'END'
+KW_RETURN     = 'RETURN'
+KW_STOP       = 'STOP'
+KW_PAUSE      = 'PAUSE'
+KW_CALL       = 'CALL'
+KW_CONTINUE   = 'CONTINUE'
+KW_GOTO       = 'GOTO'
+KW_GO         = 'GO'
+KW_TO         = 'TO'
+KW_IF         = 'IF'
+KW_THEN       = 'THEN'
+KW_ELSE       = 'ELSE'
+KW_ELSEIF     = 'ELSEIF'
+KW_ENDIF      = 'ENDIF'
+KW_DO         = 'DO'
+KW_ENDDO      = 'ENDDO'
+KW_WHILE      = 'WHILE'
+KW_READ       = 'READ'
+KW_WRITE      = 'WRITE'
+KW_PRINT      = 'PRINT'
+KW_OPEN       = 'OPEN'
+KW_CLOSE      = 'CLOSE'
+KW_REWIND     = 'REWIND'
+KW_BACKSPACE  = 'BACKSPACE'
+KW_ENDFILE    = 'ENDFILE'
+KW_INQUIRE    = 'INQUIRE'
+KW_FORMAT     = 'FORMAT'
+
+# Type-declaration keywords.
+KW_INTEGER   = 'INTEGER'
+KW_REAL      = 'REAL'
+KW_DOUBLE    = 'DOUBLE'
+KW_PRECISION = 'PRECISION'
+KW_COMPLEX   = 'COMPLEX'
+KW_LOGICAL   = 'LOGICAL'
+KW_CHARACTER = 'CHARACTER'
+KW_DIMENSION = 'DIMENSION'
+KW_COMMON    = 'COMMON'
+KW_EQUIVALENCE = 'EQUIVALENCE'
+KW_IMPLICIT  = 'IMPLICIT'
+KW_NONE      = 'NONE'
+KW_EXTERNAL  = 'EXTERNAL'
+KW_INTRINSIC = 'INTRINSIC'
+KW_PARAMETER = 'PARAMETER'
+KW_DATA      = 'DATA'
+KW_SAVE      = 'SAVE'
+
+# Identifier — declared after keywords for longest-match priority.
+IDENT = /[A-Za-z][A-Za-z0-9_]*/
+
+# Operators.
+EQ      = '='
+PLUS    = '+'
+MINUS   = '-'
+STAR    = '*'
+SLASH   = '/'
+STARSTAR = '**'
+LPAREN  = '('
+RPAREN  = ')'
+COMMA   = ','
+COLON   = ':'
+DOT     = '.'
+
+# Synthetic tokens (column-dispatcher-produced). Declared with
+# regexes that never match (real tokens win longest-match); the
+# CONTINUE_LINE token is emitted by the dispatcher when a column-6
+# non-blank character is seen.
+CONTINUE_LINE = /\x01/
+
+%rules
+
+# A Fortran 77 file is one or more program units. Most files have
+# one MAIN plus zero or more subprograms.
+<program_unit> : <main_program>
+               | <subroutine>
+               | <function>
+               | <block_data>
+               ;
+
+<main_program> : <program_header_opt> <body> <end_stmt>
+               ;
+
+<program_header_opt> : KW_PROGRAM IDENT
+                     |
+                     ;
+
+<subroutine> : KW_SUBROUTINE IDENT <param_list_opt> <body> <end_stmt>
+             ;
+
+<function> : <type_spec_opt> KW_FUNCTION IDENT <param_list_opt> <body> <end_stmt>
+           ;
+
+<block_data> : KW_BLOCKDATA <ident_opt> <body> <end_stmt>
+             ;
+
+<param_list_opt> : '(' <ident_list> ')'
+                 | '(' ')'
+                 |
+                 ;
+
+<ident_list> : IDENT
+             | <ident_list> ',' IDENT
+             ;
+
+<ident_opt> : IDENT
+            |
+            ;
+
+<end_stmt> : KW_END
+           ;
+
+# A program unit's body is a sequence of statements.
+<body> : <body> <stmt>
+       |
+       ;
+
+# A statement may be preceded by a numeric label in columns 1-5.
+# The column dispatcher emits the label as an ordinary INTEGER_LIT
+# token; the grammar accepts either a label-led or unlabelled form.
+<stmt> : <spec_stmt>
+       | <executable_stmt>
+       | <format_stmt>
+       | INTEGER_LIT <spec_stmt>
+       | INTEGER_LIT <executable_stmt>
+       | INTEGER_LIT <format_stmt>
+       ;
+
+# --- specification statements ---------------------------------------------
+
+<spec_stmt> : <type_decl_stmt>
+            | <dimension_stmt>
+            | <common_stmt>
+            | <equivalence_stmt>
+            | <implicit_stmt>
+            | <external_stmt>
+            | <intrinsic_stmt>
+            | <parameter_stmt>
+            | <data_stmt>
+            | <save_stmt>
+            ;
+
+<type_decl_stmt> : <type_spec> <entity_decl_list>
+                 ;
+
+<type_spec> : KW_INTEGER
+            | KW_REAL
+            | KW_DOUBLE KW_PRECISION
+            | KW_COMPLEX
+            | KW_LOGICAL
+            | KW_CHARACTER
+            | KW_CHARACTER '*' INTEGER_LIT
+            | KW_CHARACTER '*' '(' '*' ')'
+            ;
+
+<type_spec_opt> : <type_spec>
+                |
+                ;
+
+<entity_decl_list> : <entity_decl>
+                   | <entity_decl_list> ',' <entity_decl>
+                   ;
+
+<entity_decl> : IDENT
+              | IDENT '*' INTEGER_LIT
+              | IDENT '(' <array_spec> ')'
+              | IDENT '(' <array_spec> ')' '*' INTEGER_LIT
+              ;
+
+<array_spec> : <dim_bound>
+             | <array_spec> ',' <dim_bound>
+             ;
+
+<dim_bound> : <expr>
+            | <expr> ':' <expr>
+            | <expr> ':' '*'
+            | '*'
+            ;
+
+<dimension_stmt> : KW_DIMENSION <array_decl_list>
+                 ;
+
+<array_decl_list> : <array_decl>
+                  | <array_decl_list> ',' <array_decl>
+                  ;
+
+<array_decl> : IDENT '(' <array_spec> ')' ;
+
+<common_stmt> : KW_COMMON <common_block_list>
+              ;
+
+<common_block_list> : <common_block>
+                    | <common_block_list> ',' <common_block>
+                    | <common_block_list> <common_block>
+                    ;
+
+<common_block> : '/' <ident_opt> '/' <common_var_list>
+               | <common_var_list>
+               ;
+
+<common_var_list> : IDENT
+                  | IDENT '(' <array_spec> ')'
+                  | <common_var_list> ',' IDENT
+                  | <common_var_list> ',' IDENT '(' <array_spec> ')'
+                  ;
+
+<equivalence_stmt> : KW_EQUIVALENCE <equiv_set_list>
+                   ;
+
+<equiv_set_list> : <equiv_set>
+                 | <equiv_set_list> ',' <equiv_set>
+                 ;
+
+<equiv_set> : '(' <var_ref_list> ')' ;
+
+<var_ref_list> : <var_ref>
+              | <var_ref_list> ',' <var_ref>
+              ;
+
+<implicit_stmt> : KW_IMPLICIT KW_NONE
+                | KW_IMPLICIT <implicit_spec_list>
+                ;
+
+<implicit_spec_list> : <implicit_spec>
+                     | <implicit_spec_list> ',' <implicit_spec>
+                     ;
+
+<implicit_spec> : <type_spec> '(' <letter_range_list> ')' ;
+
+<letter_range_list> : <letter_range>
+                    | <letter_range_list> ',' <letter_range>
+                    ;
+
+<letter_range> : IDENT
+               | IDENT '-' IDENT
+               ;
+
+<external_stmt>  : KW_EXTERNAL <ident_list> ;
+<intrinsic_stmt> : KW_INTRINSIC <ident_list> ;
+<parameter_stmt> : KW_PARAMETER '(' <param_assign_list> ')' ;
+
+<param_assign_list> : <param_assign>
+                    | <param_assign_list> ',' <param_assign>
+                    ;
+
+<param_assign> : IDENT '=' <expr> ;
+
+<data_stmt> : KW_DATA <data_set_list>
+            ;
+
+<data_set_list> : <data_set>
+                | <data_set_list> ',' <data_set>
+                | <data_set_list> <data_set>
+                ;
+
+<data_set> : <var_ref_list> '/' <data_value_list> '/'
+           ;
+
+<data_value_list> : <data_value>
+                  | <data_value_list> ',' <data_value>
+                  ;
+
+<data_value> : <expr>
+             | INTEGER_LIT '*' <expr>
+             ;
+
+<save_stmt> : KW_SAVE
+            | KW_SAVE <save_entity_list>
+            ;
+
+<save_entity_list> : <save_entity>
+                   | <save_entity_list> ',' <save_entity>
+                   ;
+
+<save_entity> : IDENT
+              | '/' IDENT '/'
+              ;
+
+# --- executable statements ------------------------------------------------
+
+<executable_stmt> : <assignment_stmt>
+                  | <goto_stmt>
+                  | <if_stmt>
+                  | <do_stmt>
+                  | <call_stmt>
+                  | <return_stmt>
+                  | <stop_stmt>
+                  | <pause_stmt>
+                  | <continue_stmt>
+                  | <io_stmt>
+                  | KW_ENDIF
+                  | KW_ENDDO
+                  ;
+
+<assignment_stmt> : <var_ref> '=' <expr>
+                  ;
+
+<goto_stmt> : KW_GOTO INTEGER_LIT
+            | KW_GO KW_TO INTEGER_LIT
+            | KW_GOTO '(' <label_list> ')' <expr>
+            | KW_GOTO '(' <label_list> ')' ',' <expr>
+            ;
+
+<label_list> : INTEGER_LIT
+             | <label_list> ',' INTEGER_LIT
+             ;
+
+# IF has three shapes in F77: arithmetic (`IF (expr) L1, L2, L3`),
+# logical (`IF (expr) stmt`), and block (`IF (expr) THEN ...`).
+<if_stmt> : KW_IF '(' <expr> ')' INTEGER_LIT ',' INTEGER_LIT ',' INTEGER_LIT
+          | KW_IF '(' <expr> ')' <executable_stmt>
+          | KW_IF '(' <expr> ')' KW_THEN
+          | KW_ELSE
+          | KW_ELSEIF '(' <expr> ')' KW_THEN
+          | KW_ELSE KW_IF '(' <expr> ')' KW_THEN
+          ;
+
+# DO loops: classic `DO N I = a, b[, step]` and DO WHILE.
+<do_stmt> : KW_DO INTEGER_LIT IDENT '=' <expr> ',' <expr>
+          | KW_DO INTEGER_LIT IDENT '=' <expr> ',' <expr> ',' <expr>
+          | KW_DO IDENT '=' <expr> ',' <expr>
+          | KW_DO IDENT '=' <expr> ',' <expr> ',' <expr>
+          | KW_DO KW_WHILE '(' <expr> ')'
+          | KW_DO INTEGER_LIT KW_WHILE '(' <expr> ')'
+          ;
+
+<call_stmt> : KW_CALL IDENT
+            | KW_CALL IDENT '(' ')'
+            | KW_CALL IDENT '(' <arg_list> ')'
+            ;
+
+<arg_list> : <arg>
+           | <arg_list> ',' <arg>
+           ;
+
+<arg> : <expr>
+      | '*' INTEGER_LIT
+      ;
+
+<return_stmt> : KW_RETURN
+              | KW_RETURN <expr>
+              ;
+
+<stop_stmt> : KW_STOP
+            | KW_STOP INTEGER_LIT
+            | KW_STOP STRING_LIT
+            ;
+
+<pause_stmt> : KW_PAUSE
+             | KW_PAUSE INTEGER_LIT
+             | KW_PAUSE STRING_LIT
+             ;
+
+<continue_stmt> : KW_CONTINUE
+                ;
+
+<io_stmt> : KW_READ '(' <io_spec_list> ')' <io_list_opt>
+          | KW_WRITE '(' <io_spec_list> ')' <io_list_opt>
+          | KW_PRINT <format_id>
+          | KW_PRINT <format_id> ',' <io_list>
+          | KW_OPEN '(' <io_spec_list> ')'
+          | KW_CLOSE '(' <io_spec_list> ')'
+          | KW_REWIND '(' <io_spec_list> ')'
+          | KW_REWIND INTEGER_LIT
+          | KW_BACKSPACE '(' <io_spec_list> ')'
+          | KW_BACKSPACE INTEGER_LIT
+          | KW_ENDFILE '(' <io_spec_list> ')'
+          | KW_ENDFILE INTEGER_LIT
+          | KW_INQUIRE '(' <io_spec_list> ')'
+          ;
+
+<io_spec_list> : <io_spec>
+               | <io_spec_list> ',' <io_spec>
+               ;
+
+<io_spec> : <expr>
+          | IDENT '=' <expr>
+          | IDENT '=' '*'
+          | '*'
+          ;
+
+<format_id> : INTEGER_LIT
+            | '*'
+            | STRING_LIT
+            | IDENT
+            ;
+
+<io_list_opt> : <io_list>
+              |
+              ;
+
+<io_list> : <expr>
+          | <io_list> ',' <expr>
+          ;
+
+<format_stmt> : KW_FORMAT '(' <format_body> ')'
+              ;
+
+# FORMAT bodies are arbitrary characters until the matching `)`;
+# we accept anything reasonable here and let the host validate.
+<format_body> : <format_item_list>
+              |
+              ;
+
+<format_item_list> : <format_item>
+                   | <format_item_list> ',' <format_item>
+                   | <format_item_list> '/' <format_item>
+                   | <format_item_list> '/'
+                   ;
+
+<format_item> : INTEGER_LIT IDENT
+              | INTEGER_LIT IDENT INTEGER_LIT
+              | INTEGER_LIT IDENT INTEGER_LIT '.' INTEGER_LIT
+              | IDENT
+              | IDENT INTEGER_LIT
+              | IDENT INTEGER_LIT '.' INTEGER_LIT
+              | STRING_LIT
+              | HOLLERITH
+              | '(' <format_item_list> ')'
+              | INTEGER_LIT '(' <format_item_list> ')'
+              ;
+
+# --- expressions ----------------------------------------------------------
+#
+# F77 precedence ladder (lowest to highest):
+#   1. .EQV. / .NEQV.
+#   2. .OR.
+#   3. .AND.
+#   4. .NOT.
+#   5. .EQ. / .NE. / .LT. / .LE. / .GT. / .GE.
+#   6. + -
+#   7. * /
+#   8. **  (right-associative)
+#   9. unary + -
+
+<expr> : <eqv_expr>
+       ;
+
+<eqv_expr> : <or_expr>
+           | <eqv_expr> OP_EQV  <or_expr>
+           | <eqv_expr> OP_NEQV <or_expr>
+           ;
+
+<or_expr> : <and_expr>
+          | <or_expr> OP_OR <and_expr>
+          ;
+
+<and_expr> : <not_expr>
+           | <and_expr> OP_AND <not_expr>
+           ;
+
+<not_expr> : <rel_expr>
+           | OP_NOT <not_expr>
+           ;
+
+<rel_expr> : <add_expr>
+           | <add_expr> OP_EQ <add_expr>
+           | <add_expr> OP_NE <add_expr>
+           | <add_expr> OP_LT <add_expr>
+           | <add_expr> OP_LE <add_expr>
+           | <add_expr> OP_GT <add_expr>
+           | <add_expr> OP_GE <add_expr>
+           ;
+
+<add_expr> : <mult_expr>
+           | <add_expr> '+' <mult_expr>
+           | <add_expr> '-' <mult_expr>
+           | '+' <mult_expr>
+           | '-' <mult_expr>
+           ;
+
+<mult_expr> : <pow_expr>
+            | <mult_expr> '*' <pow_expr>
+            | <mult_expr> '/' <pow_expr>
+            ;
+
+# Exponentiation is right-associative — encoded via right
+# recursion.
+<pow_expr> : <primary>
+           | <primary> '**' <pow_expr>
+           ;
+
+<primary> : <var_ref>
+          | INTEGER_LIT
+          | REAL_LIT
+          | STRING_LIT
+          | LOGICAL_LIT
+          | HOLLERITH
+          | '(' <expr> ')'
+          ;
+
+# Variable / array / function-call reference. F77 doesn't
+# syntactically distinguish array indexing from function calls;
+# both look like `IDENT(args)`.
+<var_ref> : IDENT
+          | IDENT '(' <subscript_list> ')'
+          | IDENT '(' <expr> ':' <expr> ')'
+          | IDENT '(' <expr> ':' ')'
+          | IDENT '(' ':' <expr> ')'
+          ;
+
+<subscript_list> : <expr>
+                 | <subscript_list> ',' <expr>
+                 ;

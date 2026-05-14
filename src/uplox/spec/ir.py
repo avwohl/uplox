@@ -129,6 +129,68 @@ class HookDecl:
 
 
 @dataclass
+class LayoutConfig:
+    """``%layout`` directive — runtime INDENT/DEDENT/NEWLINE emission.
+
+    Names the three synthetic terminals the layout filter will emit, plus
+    the flow-bracket tokens that suspend indentation tracking. See
+    ``docs/proposals/layout.md`` for the algorithm.
+    """
+
+    indent_token: str
+    dedent_token: str
+    newline_token: str
+    flow_open: list[str] = field(default_factory=list)
+    flow_close: list[str] = field(default_factory=list)
+    tab_width: int = 8
+    blank_lines: str = "skip"        # "skip" | "emit_newline"
+    comment_lines: str = "skip"      # "skip" | "emit_newline"
+    position: Optional[Position] = None
+
+
+@dataclass
+class ColumnClause:
+    """One ``cols <range>`` clause within a ``%columns`` block."""
+
+    col_start: int                    # 1-indexed, inclusive
+    col_end: int                      # 1-indexed, inclusive (col_start for single column)
+    mode: str = "body"                # body | label | areaA | areaB | skip
+    comment_if: Optional[str] = None  # characters that trigger comment-mode
+    continuation_if: Optional[str] = None        # exact characters
+    continuation_if_nonblank: bool = False       # any non-space, non-zero
+    continuation_token: Optional[str] = None     # token name to emit on match
+    debug_if: Optional[str] = None
+    debug_token: Optional[str] = None
+    position: Optional[Position] = None
+
+
+@dataclass
+class ColumnsConfig:
+    """``%columns`` directive — column-range dispatch for fixed-format
+    grammars (F77, COBOL). See ``docs/proposals/columns.md``.
+    """
+
+    width: int = 80
+    clauses: list[ColumnClause] = field(default_factory=list)
+    position: Optional[Position] = None
+
+
+@dataclass
+class ContinuationConfig:
+    """``%continuation`` directive — line-continuation marker handling.
+    See ``docs/proposals/continuation.md``.
+    """
+
+    # Exactly one of ``marker_char`` or ``marker_token`` is set.
+    marker_char: Optional[str] = None
+    marker_token: Optional[str] = None
+    at_column: Optional[int] = None
+    applies_in_brackets: bool = False
+    preserve_position: bool = True
+    position: Optional[Position] = None
+
+
+@dataclass
 class GrammarIR:
     name: str
     start_symbol: Optional[str] = None
@@ -164,3 +226,9 @@ class GrammarIR:
     # grammars without any AST annotation. The set is consulted by the AST
     # plan compiler — the LR / lexer pipeline ignores it.
     ast_drop_tokens: set[str] = field(default_factory=set)
+    # Lexer-feedback configs for context-sensitive tokenisation. All three
+    # are optional and default to None. See ``docs/proposals/{layout,
+    # columns,continuation}.md`` for the directive specs.
+    layout: Optional[LayoutConfig] = None
+    columns: Optional[ColumnsConfig] = None
+    continuation: Optional[ContinuationConfig] = None

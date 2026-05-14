@@ -7,13 +7,14 @@
 # delimiters. LR(1) can't see whitespace as structure — every
 # attempt to do so directly produces conflicts everywhere.
 #
-# We resolve this the standard way: a host token filter tracks
-# indentation and emits three synthetic terminals — `INDENT`,
-# `DEDENT`, `NEWLINE` — that the grammar consumes like opening
-# braces, closing braces, and statement separators. This is the
-# same pattern Python LR grammars (and tree-sitter-python) use,
-# and the same uplox mechanism `c_subset` uses for typedef-name
-# disambiguation.
+# We resolve this with the `%layout` directive, which configures
+# the uplox runtime to emit three synthetic terminals — `INDENT`,
+# `DEDENT`, `NEWLINE` — based on column tracking, with the flow
+# brackets configured to suspend tracking. The grammar consumes
+# the synthetic tokens like opening braces, closing braces, and
+# statement separators. The directive replaces what used to be a
+# per-host filter spec; see `docs/proposals/layout.md` for the
+# algorithm.
 #
 # What the filter does:
 #
@@ -84,6 +85,21 @@
 %define lr.type lalr
 %options
 start = yaml_stream
+
+%shift
+# At document boundaries the parser sees NEWLINE both as
+# end-of-document and as the optional separator between `---` /
+# `<node>` / `...`. Shift extends the current document with the
+# NEWLINE (consuming it greedily). The next document's leading
+# NEWLINE is absorbed by `<newline_opt>` in `<documents>`.
+NEWLINE
+
+%layout
+indent_token  = INDENT
+dedent_token  = DEDENT
+newline_token = NEWLINE
+flow_open     = '{' '['
+flow_close    = '}' ']'
 
 %tokens
 
@@ -167,11 +183,24 @@ NEWLINE = /\x03/                # filter-emitted significant line break
 
 # --- stream / documents ---------------------------------------------------
 
-<yaml_stream> : <documents>
+# NEWLINEs are emitted by the layout filter between content lines at
+# the base column. At the top level of a YAML stream — between
+# documents and around the `---` / `...` markers — they're just
+# whitespace and the grammar absorbs them silently.
+<yaml_stream> : <newline_opt> <documents> <newline_opt>
+              ;
+
+<newline_opt> : <newline_seq>
+              |
+              ;
+
+<newline_seq> : NEWLINE
+              | <newline_seq> NEWLINE
               ;
 
 <documents> : <document>
             | <documents> <document>
+            | <documents> <newline_seq> <document>
             ;
 
 <document> : <directives_opt> <document_body>
@@ -192,11 +221,14 @@ NEWLINE = /\x03/                # filter-emitted significant line break
 # optional bookends but never stand alone — a "bare `---`"
 # document would be syntactically ambiguous with the start of
 # the next document's node. Empty documents are written
-# explicitly: `--- null`, `--- ~`, or `--- {}`.
+# explicitly: `--- null`, `--- ~`, or `--- {}`. NEWLINEs around
+# the markers are absorbed by `<newline_opt>` — the layout filter
+# emits one between the `---` line and the node line, and another
+# between the node line and the `...` line.
 <document_body> : <node>
-                | <node> '...'
-                | '---' <node>
-                | '---' <node> '...'
+                | <node> <newline_opt> '...'
+                | '---' <newline_opt> <node>
+                | '---' <newline_opt> <node> <newline_opt> '...'
                 ;
 
 # --- nodes ----------------------------------------------------------------

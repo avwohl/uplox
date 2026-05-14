@@ -1,0 +1,656 @@
+# COBOL fixed-format (ANSI X3.23-1985) — sized to the core
+# IDENTIFICATION / ENVIRONMENT / DATA / PROCEDURE division shape
+# that real programs use.
+#
+# COBOL is a card-image language like Fortran 77 — each source
+# line partitions into fixed column ranges with different lexical
+# meaning:
+#
+#     columns 1-6   7      8-11      12-72             73-80
+#             seq   ind    area-A    area-B            identification
+#
+# Column 1-6   → sequence number (ignored).
+# Column 7     → indicator. `*` or `/` = comment line; `-` =
+#                continuation of the prior line; `D` = debug
+#                (treated as comment except when debug mode is on);
+#                space = normal.
+# Column 8-11  → Area A. Division headers (IDENTIFICATION DIVISION),
+#                section names, paragraph names, FD entries, and
+#                01 / 77 level numbers must begin here.
+# Column 12-72 → Area B. Sentences and statements live here.
+#                Most level numbers (02-49, 66, 88) and most
+#                statement keywords appear here too.
+# Column 73-80 → identification (ignored).
+#
+# The grammar uses `%columns` to handle the column dispatch and
+# `%continuation` to collapse continuation lines. The Area A /
+# Area B distinction is preserved by emitting synthetic
+# `AREA_A_START` and `AREA_B_START` tokens at the boundaries —
+# the grammar can require certain productions (division /
+# section / paragraph headers, FD / 01 / 77 entries) to start in
+# Area A.
+#
+# In scope:
+#
+#   * IDENTIFICATION DIVISION header and paragraphs
+#     (PROGRAM-ID, AUTHOR, INSTALLATION, DATE-WRITTEN, etc.).
+#   * ENVIRONMENT DIVISION with CONFIGURATION and INPUT-OUTPUT
+#     SECTIONs (SOURCE-COMPUTER, OBJECT-COMPUTER, FILE-CONTROL,
+#     SELECT statements).
+#   * DATA DIVISION with FILE / WORKING-STORAGE / LINKAGE
+#     sections, FD entries, level-numbered data items (01..49,
+#     66, 77, 88), PIC clauses, USAGE clauses, VALUE clauses,
+#     OCCURS clauses, REDEFINES.
+#   * PROCEDURE DIVISION with paragraphs and the standard
+#     statement set: MOVE, COMPUTE, ADD, SUBTRACT, MULTIPLY,
+#     DIVIDE, IF / ELSE / END-IF, PERFORM (simple, TIMES, UNTIL,
+#     VARYING, THRU), READ, WRITE, REWRITE, DELETE, OPEN, CLOSE,
+#     ACCEPT, DISPLAY, STOP RUN, EXIT, GOBACK, CALL, GO TO,
+#     EVALUATE, STRING, UNSTRING.
+#   * Conditional expressions: relational, class, sign, logical
+#     (AND / OR / NOT).
+#   * Literals: numeric, alphanumeric (single-quoted and
+#     double-quoted), figurative constants (ZERO, SPACE,
+#     QUOTE, HIGH-VALUE, LOW-VALUE, NULL).
+#
+# Out of scope:
+#
+#   * OBJECT-ORIENTED COBOL (CLASS-ID, METHOD-ID, etc.).
+#   * REPORT WRITER, SCREEN SECTION, COMMUNICATION SECTION.
+#   * Embedded SQL / CICS (host languages handle EXEC blocks).
+#   * Free-format COBOL 2002+.
+#   * COPY / REPLACE preprocessing (a host preprocessor runs
+#     first).
+#
+# Like Fortran, COBOL is case-insensitive. The grammar accepts
+# uppercase keyword spellings; hosts upper-case the input.
+
+%grammar cobol
+
+
+%define lr.type lalr
+%options
+start = program
+
+%columns
+# COBOL column layout — see header.
+width = 72
+cols 1-6   mode = skip
+cols 7     comment_if = '*/'
+cols 7     continuation_if = '-' continuation_token = CONTINUE_LINE
+cols 7     debug_if = 'D' debug_token = DEBUG_LINE
+cols 8-11  mode = areaA
+cols 12-72 mode = areaB
+
+%continuation
+# Column-7 hyphen is COBOL's continuation indicator. The
+# dispatcher emits CONTINUE_LINE for each one; this directive
+# drops the marker so the parser sees the joined body.
+marker = CONTINUE_LINE
+
+%shift
+# Greedy extensions for ε-derivable list optionals.
+IDENT NUMBER_LIT STRING_LIT
+PERIOD
+# Statement keywords — after `paragraph-name.`, any of these
+# extends the paragraph with sentences rather than reducing
+# the paragraph as empty.
+KW_MOVE KW_COMPUTE KW_ADD KW_SUBTRACT KW_MULTIPLY KW_DIVIDE
+KW_IF KW_PERFORM KW_READ KW_WRITE KW_REWRITE KW_DELETE
+KW_OPEN KW_CLOSE KW_ACCEPT KW_DISPLAY KW_STOP KW_EXIT
+KW_GOBACK KW_CALL KW_GO KW_EVALUATE
+# Various keyword continuations that extend rather than end.
+KW_IS KW_EQUAL KW_LESS KW_GREATER KW_THAN
+KW_TO KW_FROM KW_GIVING KW_BY KW_INTO KW_USING
+KW_AND KW_OR KW_NOT
+KW_ELSE
+KW_TIMES KW_UNTIL KW_VARYING KW_THRU KW_THROUGH
+KW_END_IF KW_END_PERFORM KW_END_EVALUATE
+KW_WHEN KW_OTHER
+KW_RUN
+KW_PIC KW_PICTURE KW_USAGE KW_VALUE KW_VALUES KW_OCCURS
+KW_REDEFINES KW_INDEXED
+
+%tokens
+
+WS       = /[ \t]+/                                          %skip
+NL       = /\n+/                                             %skip
+
+# Numeric literals. COBOL allows leading sign and a decimal point.
+NUMBER_LIT = /[+-]?[0-9]+(\.[0-9]+)?/
+
+# String literals — single-quoted or double-quoted.
+STRING_LIT = /'([^']|'')*'|"([^"]|"")*"/
+
+# COBOL keywords. A small but representative subset; an
+# exhaustive grammar adds ~100 more.
+KW_IDENTIFICATION = 'IDENTIFICATION'
+KW_ENVIRONMENT    = 'ENVIRONMENT'
+KW_DATA           = 'DATA'
+KW_PROCEDURE      = 'PROCEDURE'
+KW_DIVISION       = 'DIVISION'
+KW_SECTION        = 'SECTION'
+KW_PROGRAM_ID     = 'PROGRAM-ID'
+KW_AUTHOR         = 'AUTHOR'
+KW_INSTALLATION   = 'INSTALLATION'
+KW_DATE_WRITTEN   = 'DATE-WRITTEN'
+KW_DATE_COMPILED  = 'DATE-COMPILED'
+KW_SECURITY       = 'SECURITY'
+KW_CONFIGURATION  = 'CONFIGURATION'
+KW_SOURCE_COMPUTER = 'SOURCE-COMPUTER'
+KW_OBJECT_COMPUTER = 'OBJECT-COMPUTER'
+KW_INPUT_OUTPUT   = 'INPUT-OUTPUT'
+KW_FILE_CONTROL   = 'FILE-CONTROL'
+KW_SELECT         = 'SELECT'
+KW_ASSIGN         = 'ASSIGN'
+KW_FILE           = 'FILE'
+KW_FD             = 'FD'
+KW_WORKING_STORAGE = 'WORKING-STORAGE'
+KW_LINKAGE        = 'LINKAGE'
+
+KW_PIC            = 'PIC'
+KW_PICTURE        = 'PICTURE'
+KW_USAGE          = 'USAGE'
+KW_VALUE          = 'VALUE'
+KW_VALUES         = 'VALUES'
+KW_OCCURS         = 'OCCURS'
+KW_TIMES          = 'TIMES'
+KW_REDEFINES      = 'REDEFINES'
+KW_INDEXED        = 'INDEXED'
+KW_BY             = 'BY'
+
+KW_MOVE           = 'MOVE'
+KW_COMPUTE        = 'COMPUTE'
+KW_ADD            = 'ADD'
+KW_SUBTRACT       = 'SUBTRACT'
+KW_MULTIPLY       = 'MULTIPLY'
+KW_DIVIDE         = 'DIVIDE'
+KW_TO             = 'TO'
+KW_FROM           = 'FROM'
+KW_GIVING         = 'GIVING'
+KW_INTO           = 'INTO'
+KW_BY_OP          = 'BY'
+KW_IF             = 'IF'
+KW_THEN           = 'THEN'
+KW_ELSE           = 'ELSE'
+KW_END_IF         = 'END-IF'
+KW_PERFORM        = 'PERFORM'
+KW_UNTIL          = 'UNTIL'
+KW_VARYING        = 'VARYING'
+KW_THRU           = 'THRU'
+KW_THROUGH        = 'THROUGH'
+KW_END_PERFORM    = 'END-PERFORM'
+KW_READ           = 'READ'
+KW_WRITE          = 'WRITE'
+KW_REWRITE        = 'REWRITE'
+KW_DELETE         = 'DELETE'
+KW_OPEN           = 'OPEN'
+KW_CLOSE          = 'CLOSE'
+KW_ACCEPT         = 'ACCEPT'
+KW_DISPLAY        = 'DISPLAY'
+KW_STOP           = 'STOP'
+KW_RUN            = 'RUN'
+KW_EXIT           = 'EXIT'
+KW_GOBACK         = 'GOBACK'
+KW_CALL           = 'CALL'
+KW_USING          = 'USING'
+KW_GO             = 'GO'
+KW_EVALUATE       = 'EVALUATE'
+KW_WHEN           = 'WHEN'
+KW_OTHER          = 'OTHER'
+KW_END_EVALUATE   = 'END-EVALUATE'
+
+KW_AND            = 'AND'
+KW_OR             = 'OR'
+KW_NOT            = 'NOT'
+KW_IS             = 'IS'
+KW_EQUAL          = 'EQUAL'
+KW_LESS           = 'LESS'
+KW_GREATER        = 'GREATER'
+KW_THAN           = 'THAN'
+
+# Figurative constants.
+KW_ZERO       = 'ZERO'
+KW_ZEROS      = 'ZEROS'
+KW_ZEROES     = 'ZEROES'
+KW_SPACE      = 'SPACE'
+KW_SPACES     = 'SPACES'
+KW_QUOTE      = 'QUOTE'
+KW_QUOTES     = 'QUOTES'
+KW_HIGH_VALUE = 'HIGH-VALUE'
+KW_LOW_VALUE  = 'LOW-VALUE'
+KW_NULL       = 'NULL'
+
+# Identifier — letters, digits, and hyphens (COBOL convention).
+# Declared last so keyword tokens win longest-match.
+IDENT = /[A-Za-z][A-Za-z0-9\-]*/
+
+# Punctuation.
+PERIOD   = '.'
+COMMA    = ','
+SEMI     = ';'
+LPAREN   = '('
+RPAREN   = ')'
+COLON    = ':'
+
+# Arithmetic operators (used inside COMPUTE).
+PLUS     = '+'
+MINUS    = '-'
+STAR     = '*'
+SLASH    = '/'
+STARSTAR = '**'
+
+# Relational operators (used in conditions).
+EQ_SIGN  = '='
+LT_SIGN  = '<'
+GT_SIGN  = '>'
+
+# Synthetic tokens (filter-emitted). Declared with placeholder
+# regexes that never match — the column dispatcher injects
+# CONTINUE_LINE and DEBUG_LINE based on column-7 indicators, and
+# the AREA_A_START / AREA_B_START markers come from the
+# `areaA` / `areaB` column modes (when implemented; today the
+# modes are passive and don't emit markers).
+CONTINUE_LINE = /\x01/
+DEBUG_LINE    = /\x02/
+
+%rules
+
+# Top-level: a COBOL program is the four divisions in order.
+# IDENTIFICATION is required; the others are optional in theory
+# but virtually always present in practice.
+<program> : <identification_division>
+          | <identification_division> <environment_division>
+          | <identification_division> <data_division>
+          | <identification_division> <environment_division> <data_division>
+          | <identification_division> <procedure_division>
+          | <identification_division> <environment_division> <procedure_division>
+          | <identification_division> <data_division> <procedure_division>
+          | <identification_division> <environment_division> <data_division> <procedure_division>
+          ;
+
+# --- IDENTIFICATION DIVISION ----------------------------------------------
+
+<identification_division> : KW_IDENTIFICATION KW_DIVISION '.' <id_paragraph_list>
+                          ;
+
+<id_paragraph_list> : <id_paragraph>
+                    | <id_paragraph_list> <id_paragraph>
+                    ;
+
+<id_paragraph> : KW_PROGRAM_ID '.' IDENT '.'
+               | KW_PROGRAM_ID '.' IDENT
+               | KW_AUTHOR '.' <text_to_period>
+               | KW_INSTALLATION '.' <text_to_period>
+               | KW_DATE_WRITTEN '.' <text_to_period>
+               | KW_DATE_COMPILED '.' <text_to_period>
+               | KW_SECURITY '.' <text_to_period>
+               ;
+
+# Free-form text up to a period — captured as a flat sequence of
+# IDENT / NUMBER / STRING tokens. The host's semantic phase can
+# rejoin into a single comment string.
+<text_to_period> : <text_token_list> '.'
+                 | '.'
+                 ;
+
+<text_token_list> : <text_token>
+                  | <text_token_list> <text_token>
+                  ;
+
+<text_token> : IDENT
+             | NUMBER_LIT
+             | STRING_LIT
+             | COMMA
+             | SEMI
+             ;
+
+# --- ENVIRONMENT DIVISION -------------------------------------------------
+
+<environment_division> : KW_ENVIRONMENT KW_DIVISION '.' <env_section_list>
+                       ;
+
+<env_section_list> : <env_section>
+                   | <env_section_list> <env_section>
+                   ;
+
+<env_section> : <configuration_section>
+              | <input_output_section>
+              ;
+
+<configuration_section> : KW_CONFIGURATION KW_SECTION '.' <config_paragraph_list>
+                        ;
+
+<config_paragraph_list> : <config_paragraph>
+                        | <config_paragraph_list> <config_paragraph>
+                        ;
+
+<config_paragraph> : KW_SOURCE_COMPUTER '.' <text_to_period>
+                   | KW_OBJECT_COMPUTER '.' <text_to_period>
+                   ;
+
+<input_output_section> : KW_INPUT_OUTPUT KW_SECTION '.' <io_paragraph_list>
+                       ;
+
+<io_paragraph_list> : <io_paragraph>
+                    | <io_paragraph_list> <io_paragraph>
+                    ;
+
+<io_paragraph> : KW_FILE_CONTROL '.' <select_list>
+               ;
+
+<select_list> : <select_stmt>
+              | <select_list> <select_stmt>
+              ;
+
+<select_stmt> : KW_SELECT IDENT KW_ASSIGN KW_TO IDENT '.'
+              | KW_SELECT IDENT KW_ASSIGN KW_TO STRING_LIT '.'
+              ;
+
+# --- DATA DIVISION --------------------------------------------------------
+
+<data_division> : KW_DATA KW_DIVISION '.' <data_section_list>
+                ;
+
+<data_section_list> : <data_section>
+                    | <data_section_list> <data_section>
+                    ;
+
+<data_section> : <file_section>
+               | <working_storage_section>
+               | <linkage_section>
+               ;
+
+<file_section> : KW_FILE KW_SECTION '.' <fd_list>
+               | KW_FILE KW_SECTION '.'
+               ;
+
+<fd_list> : <fd_entry>
+          | <fd_list> <fd_entry>
+          ;
+
+<fd_entry> : KW_FD IDENT '.' <data_item_list>
+           | KW_FD IDENT '.'
+           ;
+
+<working_storage_section> : KW_WORKING_STORAGE KW_SECTION '.' <data_item_list>
+                          | KW_WORKING_STORAGE KW_SECTION '.'
+                          ;
+
+<linkage_section> : KW_LINKAGE KW_SECTION '.' <data_item_list>
+                  | KW_LINKAGE KW_SECTION '.'
+                  ;
+
+<data_item_list> : <data_item>
+                 | <data_item_list> <data_item>
+                 ;
+
+# A data item: level number, name, optional clauses, terminating
+# period. Level 88 entries are condition-names; we accept them
+# with the same shape.
+<data_item> : NUMBER_LIT IDENT <data_clause_list> '.'
+            | NUMBER_LIT IDENT '.'
+            | NUMBER_LIT '.'
+            ;
+
+<data_clause_list> : <data_clause>
+                   | <data_clause_list> <data_clause>
+                   ;
+
+<data_clause> : KW_PIC <pic_spec>
+              | KW_PICTURE <pic_spec>
+              | KW_USAGE <text_token>
+              | KW_USAGE KW_IS <text_token>
+              | KW_VALUE <literal>
+              | KW_VALUE KW_IS <literal>
+              | KW_VALUES <literal_list>
+              | KW_OCCURS NUMBER_LIT KW_TIMES
+              | KW_OCCURS NUMBER_LIT
+              | KW_REDEFINES IDENT
+              | KW_INDEXED KW_BY IDENT
+              ;
+
+# PIC clauses are notoriously messy strings (`9(5)V99`, `X(20)`,
+# `Z,ZZ9.99-`). We accept them as a stream of IDENT / NUMBER /
+# punctuation tokens up to the next clause keyword or period;
+# the host reassembles.
+<pic_spec> : <pic_token_list>
+           ;
+
+<pic_token_list> : <pic_token>
+                 | <pic_token_list> <pic_token>
+                 ;
+
+<pic_token> : IDENT
+            | NUMBER_LIT
+            | '(' NUMBER_LIT ')'
+            ;
+
+<literal_list> : <literal>
+               | <literal_list> <literal>
+               | <literal_list> ',' <literal>
+               ;
+
+<literal> : NUMBER_LIT
+          | STRING_LIT
+          | <figurative_constant>
+          ;
+
+<figurative_constant> : KW_ZERO
+                      | KW_ZEROS
+                      | KW_ZEROES
+                      | KW_SPACE
+                      | KW_SPACES
+                      | KW_QUOTE
+                      | KW_QUOTES
+                      | KW_HIGH_VALUE
+                      | KW_LOW_VALUE
+                      | KW_NULL
+                      ;
+
+# --- PROCEDURE DIVISION ---------------------------------------------------
+
+<procedure_division> : KW_PROCEDURE KW_DIVISION '.' <procedure_body>
+                     | KW_PROCEDURE KW_DIVISION KW_USING <ident_list> '.' <procedure_body>
+                     ;
+
+<ident_list> : IDENT
+             | <ident_list> IDENT
+             ;
+
+<procedure_body> : <paragraph_list>
+                 |
+                 ;
+
+<paragraph_list> : <paragraph>
+                 | <paragraph_list> <paragraph>
+                 ;
+
+<paragraph> : IDENT '.' <sentence_list>
+            | IDENT '.'
+            | <sentence>
+            ;
+
+<sentence_list> : <sentence>
+                | <sentence_list> <sentence>
+                ;
+
+<sentence> : <statement_list> '.'
+           ;
+
+<statement_list> : <statement>
+                 | <statement_list> <statement>
+                 ;
+
+<statement> : <move_stmt>
+            | <compute_stmt>
+            | <add_stmt>
+            | <subtract_stmt>
+            | <multiply_stmt>
+            | <divide_stmt>
+            | <if_stmt>
+            | <perform_stmt>
+            | <read_stmt>
+            | <write_stmt>
+            | <open_stmt>
+            | <close_stmt>
+            | <display_stmt>
+            | <accept_stmt>
+            | <stop_stmt>
+            | <exit_stmt>
+            | <goback_stmt>
+            | <call_stmt>
+            | <go_stmt>
+            | <evaluate_stmt>
+            ;
+
+<move_stmt> : KW_MOVE <operand> KW_TO <operand_list>
+            ;
+
+<compute_stmt> : KW_COMPUTE IDENT '=' <arith_expr>
+               ;
+
+<add_stmt> : KW_ADD <operand_list> KW_TO <operand_list>
+           | KW_ADD <operand_list> KW_TO <operand_list> KW_GIVING <operand_list>
+           | KW_ADD <operand_list> KW_GIVING <operand_list>
+           ;
+
+<subtract_stmt> : KW_SUBTRACT <operand_list> KW_FROM <operand_list>
+                | KW_SUBTRACT <operand_list> KW_FROM <operand> KW_GIVING <operand_list>
+                ;
+
+<multiply_stmt> : KW_MULTIPLY <operand> KW_BY <operand_list>
+                | KW_MULTIPLY <operand> KW_BY <operand> KW_GIVING <operand_list>
+                ;
+
+<divide_stmt> : KW_DIVIDE <operand> KW_INTO <operand_list>
+              | KW_DIVIDE <operand> KW_INTO <operand> KW_GIVING <operand_list>
+              | KW_DIVIDE <operand> KW_BY <operand> KW_GIVING <operand_list>
+              ;
+
+<operand>      : IDENT
+               | <literal>
+               ;
+
+<operand_list> : <operand>
+               | <operand_list> <operand>
+               | <operand_list> ',' <operand>
+               ;
+
+<if_stmt> : KW_IF <condition> <then_clause>
+          | KW_IF <condition> <then_clause> KW_ELSE <statement_list>
+          | KW_IF <condition> <then_clause> KW_ELSE <statement_list> KW_END_IF
+          | KW_IF <condition> <then_clause> KW_END_IF
+          ;
+
+<then_clause> : KW_THEN <statement_list>
+              | <statement_list>
+              ;
+
+<perform_stmt> : KW_PERFORM IDENT
+               | KW_PERFORM IDENT KW_THRU IDENT
+               | KW_PERFORM IDENT KW_THROUGH IDENT
+               | KW_PERFORM IDENT NUMBER_LIT KW_TIMES
+               | KW_PERFORM <statement_list> KW_END_PERFORM
+               | KW_PERFORM KW_UNTIL <condition> <statement_list> KW_END_PERFORM
+               | KW_PERFORM KW_VARYING IDENT KW_FROM <operand> KW_BY <operand> KW_UNTIL <condition> <statement_list> KW_END_PERFORM
+               ;
+
+<read_stmt>    : KW_READ IDENT
+               | KW_READ IDENT KW_INTO IDENT
+               ;
+
+<write_stmt>   : KW_WRITE IDENT
+               | KW_WRITE IDENT KW_FROM IDENT
+               ;
+
+<open_stmt>    : KW_OPEN <text_token_list>
+               ;
+
+<close_stmt>   : KW_CLOSE <ident_list>
+               ;
+
+<display_stmt> : KW_DISPLAY <operand_list>
+               ;
+
+<accept_stmt>  : KW_ACCEPT IDENT
+               | KW_ACCEPT IDENT KW_FROM IDENT
+               ;
+
+<stop_stmt>    : KW_STOP KW_RUN
+               | KW_STOP <literal>
+               ;
+
+<exit_stmt>    : KW_EXIT
+               ;
+
+<goback_stmt>  : KW_GOBACK
+               ;
+
+<call_stmt>    : KW_CALL <operand>
+               | KW_CALL <operand> KW_USING <ident_list>
+               ;
+
+<go_stmt>      : KW_GO KW_TO IDENT
+               ;
+
+<evaluate_stmt> : KW_EVALUATE <operand> <when_list> KW_END_EVALUATE
+                ;
+
+<when_list> : <when_clause>
+            | <when_list> <when_clause>
+            ;
+
+<when_clause> : KW_WHEN <operand> <statement_list>
+              | KW_WHEN KW_OTHER <statement_list>
+              ;
+
+# --- conditions -----------------------------------------------------------
+
+<condition> : <simple_condition>
+            | <condition> KW_AND <simple_condition>
+            | <condition> KW_OR <simple_condition>
+            | KW_NOT <simple_condition>
+            ;
+
+<simple_condition> : <operand> <relop> <operand>
+                   | '(' <condition> ')'
+                   | <operand>
+                   ;
+
+<relop> : '='
+        | '<'
+        | '>'
+        | KW_IS KW_EQUAL KW_TO
+        | KW_IS KW_LESS KW_THAN
+        | KW_IS KW_GREATER KW_THAN
+        | KW_EQUAL KW_TO
+        | KW_LESS KW_THAN
+        | KW_GREATER KW_THAN
+        ;
+
+# --- arithmetic expressions (for COMPUTE) ---------------------------------
+
+<arith_expr> : <arith_term>
+             | <arith_expr> '+' <arith_term>
+             | <arith_expr> '-' <arith_term>
+             ;
+
+<arith_term> : <arith_factor>
+             | <arith_term> '*' <arith_factor>
+             | <arith_term> '/' <arith_factor>
+             ;
+
+<arith_factor> : <arith_power>
+               | '+' <arith_power>
+               | '-' <arith_power>
+               ;
+
+<arith_power> : <arith_primary>
+              | <arith_primary> '**' <arith_power>
+              ;
+
+<arith_primary> : IDENT
+                | NUMBER_LIT
+                | '(' <arith_expr> ')'
+                ;
