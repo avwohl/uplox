@@ -1,0 +1,1295 @@
+# C# grammar — uplox first cut.
+#
+# Targets the language as it stood in C# 8 — modern enough to cover
+# real-world code (LINQ method-call style, async / await, nullable
+# annotations, expression-bodied members, switch with patterns,
+# property accessors with `init`) without the LR(k>1) features added
+# in C# 9-12 (records, top-level statements, file-scoped namespaces,
+# recursive list patterns, required members).
+#
+# Built around the standard ECMA-334 / Roslyn syntactic layout:
+#
+#   * Compilation units: `extern alias` directives, `using`
+#     directives (plain, static, and alias forms), namespace
+#     declarations with their own nested using-set, and namespace
+#     members.
+#   * Type declarations: `class`, `struct`, `interface`, `enum`,
+#     `delegate`, all with the standard modifier set (public,
+#     private, protected, internal, static, abstract, sealed,
+#     virtual, partial, readonly, ref, unsafe), generic type
+#     parameters with `where T : ...` constraint clauses, and
+#     base-list inheritance.
+#   * Members: fields, methods, properties (auto-properties, full
+#     accessor properties with `get` / `set` / `init`,
+#     expression-bodied), events (field-like and accessor-style),
+#     indexers, constructors with `: base(...)` / `: this(...)`
+#     initialisers, finalisers (`~T()`), operator overloads,
+#     conversion operators (`implicit` / `explicit`), nested types,
+#     constants.
+#   * Statements: blocks, local declarations, expression statements,
+#     `if / else`, `switch` (case + statement-list), `while`,
+#     `do / while`, `for`, `foreach`, `break`, `continue`, `return`,
+#     `throw`, `try / catch / finally` with optional `when` filter,
+#     `using` (statement and declaration), `lock`,
+#     `yield return` / `yield break`, `checked` / `unchecked` blocks,
+#     `goto` (label, case, default), labelled statements.
+#   * Expressions: the full C# precedence ladder — null-coalescing,
+#     conditional `?:`, logical `||` / `&&`, bitwise `|` / `^` / `&`,
+#     equality `==` / `!=`, relational `< <= > >=` plus `is` and
+#     `as`, shifts, additive, multiplicative, unary, primary
+#     (member access, indexer, invocation, `new`, `typeof`,
+#     `sizeof`, `nameof`, `default`, `checked`, `unchecked`, casts,
+#     post / pre increment), generic method invocations
+#     (`obj.Method<int>(args)`), lambdas in both expression-body
+#     and statement-body form with all four parameter shapes (bare
+#     IDENT, empty parens, multi-implicit-paren, explicitly typed).
+#   * Types: predefined keyword types, qualified identifier types,
+#     generic types (`List<T>`, `Dictionary<K, V>`, nested
+#     `Outer<T>.Inner<U>`), array types (`T[]`, `T[,]`), nullable
+#     types (`T?`), pointer types (`T*`), tuple types
+#     (`(int a, string b)`).
+#   * Patterns: constant, type, declaration (`is T x`), var, discard.
+#   * Attributes: `[Foo(args)]` clauses with target specifiers
+#     (`[assembly: ...]`, `[return: ...]`).
+#
+# How the grammar handles C#'s known LR(k>1) ambiguities.
+#
+# C# was designed for hand-written recursive-descent parsing, and
+# strict LR(1) parsers can't handle it without help. The four known
+# ambiguity classes (per ECMA-334 §7.5.4.2 and Roslyn's parser
+# heuristics) are:
+#
+#   1. `a < b > c` — `<...>` could be a generic type argument list
+#      (`a<b>c`) or a chained comparison.
+#   2. `(T) x` versus `(expr)` — opening `(` could begin a cast or
+#      a parenthesised expression.
+#   3. `(x, y) => …` versus `(x, y)` — `(...)` could be a lambda
+#      parameter list or a tuple expression.
+#   4. `Foo x = …;` at statement position — IDENT could begin a
+#      local variable declaration or an expression statement.
+#
+# Roslyn handles each with unbounded lookahead and reset points; the
+# Mono mcs compiler (the canonical LR-family C# parser) handles them
+# by promoting the disambiguation into the tokenizer — separate
+# token kinds get emitted for the type-argument `<` / `>`, the
+# lambda-opening `(`, the cast-opening `(`, and the type-starting
+# IDENT. This grammar follows the Mono pattern.
+#
+# The grammar declares five synthetic terminals that the raw lexer
+# never emits directly — `LT_GENERIC`, `GT_GENERIC`, `LPAREN_LAMBDA`,
+# `LPAREN_CAST`, and `IDENT_TYPE`. Hosts install a **token filter**
+# (the same uplox mechanism C grammars use for typedef-name
+# disambiguation) that scans ahead from each `<`, `(`, and
+# statement-start IDENT and rewrites the terminal kind based on the
+# ECMA-334 §7.5.4.2 rules:
+#
+#   * `<` becomes `LT_GENERIC` if the matching `>` is followed by
+#     one of the ECMA-334 disambiguating-set tokens
+#     ( `(` `)` `]` `}` `:` `;` `,` `.` `?` `==` `!=` `|` `^` `&&`
+#       `||` `&` `[` `<` `<=` `>=` `is` `as` `{` `=>` EOF ),
+#     and the closing `>` is then emitted as `GT_GENERIC`. In
+#     pattern / tuple / `out` / `is` positions the rule loosens to
+#     also accept an IDENT after `>`.
+#   * `(` becomes `LPAREN_LAMBDA` if the matching `)` is followed
+#     immediately by `=>`, after a scan that confirms the contents
+#     parse as a lambda parameter list (IDENT [, IDENT]* — or
+#     `<type> IDENT [, …]` — with optional `ref` / `out` / `in` /
+#     `params` modifiers and optional `[attrs]`).
+#   * `(` becomes `LPAREN_CAST` if the contents scan as a complete
+#     type and the token after the matching `)` is in the
+#     "CanFollowCast" set (identifier, literal, `this`, `base`,
+#     `new`, `typeof`, `~`, `!`, `++`, `--`, `(`, `[`, but not
+#     `+`, `-`, `*`, `&` — the binary-operator carve-out).
+#   * `IDENT` becomes `IDENT_TYPE` at statement-start if a
+#     scan-ahead confirms a local-variable-declaration shape:
+#     scanning past a complete type (handling `.`-chains, `<…>`,
+#     `[]`, `?`, `*`) leaves an IDENT followed by `=`, `,`, `;`,
+#     or `in` (the foreach binder).
+#
+# The filter is host-side, language-specific, and parser-aware —
+# Mono's `cs-tokenizer.cs` is the reference implementation; the
+# uplox port lives in `uplox.hooks.CSharpTokenFilter` (Python),
+# `csharp_token_filter.c` (C), etc. The grammar itself stays
+# strictly LR(1).
+#
+# One further mechanical detail: nested generics close with `>>`,
+# which the raw lexer happily merges into a single RSHIFT token.
+# The filter splits RSHIFT into two consecutive `GT_GENERIC` tokens
+# whenever the parser is inside an open generic context (its
+# `<type_arg_list>` non-terminal). Same pattern Mono uses; the
+# alternative is to never lex `>>` and require shift expressions
+# to read `> >`, which breaks every existing C# parser visualisation.
+#
+# Out of scope (the first cut keeps the grammar in C# 8 territory):
+#
+#   * Records (C# 9): `record class` / `record struct`, primary
+#     constructors, `with` expressions.
+#   * Top-level statements (C# 9) and file-scoped namespaces (C# 10).
+#   * Recursive pattern matching: positional, property, list,
+#     relational patterns. The simple type/declaration patterns
+#     (`is T`, `is T x`, `is var x`) are supported.
+#   * `nint` / `nuint` native-int types (C# 9).
+#   * Required members, the `field` accessor (C# 11+).
+#   * LINQ query expressions (`from x in xs select x`). LINQ in
+#     method-call style still works.
+#   * Inline assembler / `stackalloc` / pointer dereference syntax
+#     beyond the type-level `T*` form.
+#   * `dynamic` as a special type — accepted as a plain identifier.
+
+%grammar csharp
+
+
+%define lr.type lalr
+%options
+start = compilation_unit
+
+%shift
+KW_ELSE
+KW_EXTERN
+LBRACK
+INC
+DEC
+LPAREN
+# Greedy resolution of the remaining LR(1) ambiguities:
+#   * EQ: in object / collection initializers and for-loop
+#     initialisers, `IDENT '=' …` may parse as the start of a
+#     named-init / var-init or as an assignment expression. Shift
+#     extends the init / declarator form (the canonical
+#     interpretation), letting the parser commit to declaration
+#     before falling back to expression-with-assignment.
+#   * LBRACE: after an array type (`T[]`), `{ … }` may begin an
+#     array initializer or be the next block. Shift takes the
+#     initializer — `new int[5] { 1, 2, … }` is the dominant case.
+#   * QUESTION: after a type, `?` may extend the type to nullable
+#     or begin a ternary in expression context. Shift extends to
+#     nullable; ternary after a type-test (`obj is T ? a : b`)
+#     needs parens around the test (`(obj is T) ? a : b`).
+EQ
+LBRACE
+QUESTION
+
+%reduce
+# After a switch section's statement list, `default` / `case`
+# starts the next section's labels, not part of the current
+# section. Reduce closes the current section first so the next
+# label sequence parses cleanly under the fresh switch_section.
+KW_DEFAULT
+
+%tokens
+
+WS            = /[ \t\r\n]+/                                  %skip
+LINE_COMMENT  = /\/\/[^\n]*/                                  %skip
+BLOCK_COMMENT = /\/\*([^*]|\*+[^*\/])*\*+\//                  %skip
+
+# Numeric literals. Integer suffixes: u / l / ul / lu. Real
+# suffixes: f / d / m (single / double / decimal).
+INT_LIT       = /(0[xX][0-9A-Fa-f_]+|0[bB][01_]+|[0-9][0-9_]*)([uU]?[lL]?|[lL][uU]?)?/
+REAL_LIT      = /([0-9][0-9_]*\.[0-9_]+([eE][+-]?[0-9_]+)?|[0-9][0-9_]*[eE][+-]?[0-9_]+|[0-9][0-9_]*)[fFdDmM]/
+REAL_LIT_DOT  = /[0-9][0-9_]*\.[0-9_]+([eE][+-]?[0-9_]+)?[fFdDmM]?/
+REAL_LIT_EXP  = /[0-9][0-9_]*[eE][+-]?[0-9_]+[fFdDmM]?/
+
+CHAR_LIT      = /'([^'\\\n]|\\.)+'/
+STRING_LIT    = /"([^"\\\n]|\\.)*"/
+VSTRING_LIT   = /@"([^"]|"")*"/
+ISTRING_LIT   = /\$"([^"\\\n]|\\.)*"/
+IVSTRING_LIT  = /\$@"([^"]|"")*"/
+
+# --- declaration / namespace keywords ------------------------------------
+KW_NAMESPACE  = 'namespace'
+KW_USING      = 'using'
+KW_EXTERN     = 'extern'
+KW_ALIAS      = 'alias'
+KW_GLOBAL     = 'global'
+
+# --- type-kind keywords --------------------------------------------------
+KW_CLASS      = 'class'
+KW_STRUCT     = 'struct'
+KW_INTERFACE  = 'interface'
+KW_ENUM       = 'enum'
+KW_DELEGATE   = 'delegate'
+
+# --- modifier keywords ---------------------------------------------------
+KW_PUBLIC     = 'public'
+KW_PRIVATE    = 'private'
+KW_PROTECTED  = 'protected'
+KW_INTERNAL   = 'internal'
+KW_STATIC     = 'static'
+KW_ABSTRACT   = 'abstract'
+KW_SEALED     = 'sealed'
+KW_VIRTUAL    = 'virtual'
+KW_OVERRIDE   = 'override'
+KW_NEW        = 'new'
+KW_READONLY   = 'readonly'
+KW_CONST      = 'const'
+KW_VOLATILE   = 'volatile'
+KW_PARTIAL    = 'partial'
+KW_ASYNC      = 'async'
+KW_UNSAFE     = 'unsafe'
+KW_FIXED      = 'fixed'
+KW_EXPLICIT   = 'explicit'
+KW_IMPLICIT   = 'implicit'
+
+# --- member-shape keywords -----------------------------------------------
+KW_GET        = 'get'
+KW_SET        = 'set'
+KW_INIT       = 'init'
+KW_ADD        = 'add'
+KW_REMOVE     = 'remove'
+# `value` is C#'s contextual implicit-parameter name inside `set`
+# and `init` accessors. We treat it as a plain IDENT — the semantic
+# phase distinguishes its accessor-bound meaning from a
+# user-declared `value` variable / field elsewhere.
+KW_EVENT      = 'event'
+KW_THIS       = 'this'
+KW_BASE       = 'base'
+KW_OPERATOR   = 'operator'
+KW_PARAMS     = 'params'
+KW_REF        = 'ref'
+KW_OUT        = 'out'
+KW_IN         = 'in'
+KW_WHERE      = 'where'
+
+# --- predefined type keywords --------------------------------------------
+KW_VOID       = 'void'
+KW_BOOL       = 'bool'
+KW_BYTE       = 'byte'
+KW_SBYTE      = 'sbyte'
+KW_SHORT      = 'short'
+KW_USHORT     = 'ushort'
+KW_INT        = 'int'
+KW_UINT       = 'uint'
+KW_LONG       = 'long'
+KW_ULONG      = 'ulong'
+KW_CHAR       = 'char'
+KW_FLOAT      = 'float'
+KW_DOUBLE     = 'double'
+KW_DECIMAL    = 'decimal'
+KW_STRING     = 'string'
+KW_OBJECT     = 'object'
+
+# --- statement keywords --------------------------------------------------
+KW_IF         = 'if'
+KW_ELSE       = 'else'
+KW_WHILE      = 'while'
+KW_DO         = 'do'
+KW_FOR        = 'for'
+KW_FOREACH    = 'foreach'
+KW_SWITCH     = 'switch'
+KW_CASE       = 'case'
+KW_DEFAULT    = 'default'
+KW_BREAK      = 'break'
+KW_CONTINUE   = 'continue'
+KW_RETURN     = 'return'
+KW_THROW      = 'throw'
+KW_TRY        = 'try'
+KW_CATCH      = 'catch'
+KW_FINALLY    = 'finally'
+KW_LOCK       = 'lock'
+KW_GOTO       = 'goto'
+KW_YIELD      = 'yield'
+KW_CHECKED    = 'checked'
+KW_UNCHECKED  = 'unchecked'
+KW_WHEN       = 'when'
+
+# --- expression keywords -------------------------------------------------
+KW_TRUE       = 'true'
+KW_FALSE      = 'false'
+KW_NULL       = 'null'
+KW_TYPEOF     = 'typeof'
+KW_SIZEOF     = 'sizeof'
+KW_NAMEOF     = 'nameof'
+KW_AS         = 'as'
+KW_IS         = 'is'
+KW_VAR        = 'var'
+KW_AWAIT      = 'await'
+
+# --- attribute target keywords -------------------------------------------
+KW_ASSEMBLY   = 'assembly'
+KW_MODULE     = 'module'
+KW_FIELD      = 'field'
+KW_METHOD     = 'method'
+KW_PROPERTY   = 'property'
+KW_PARAM      = 'param'
+KW_TYPE       = 'type'
+KW_TYPEVAR    = 'typevar'
+
+# Identifier — declared after all keyword tokens so longest-match
+# ties favour the keyword.
+IDENT         = /[A-Za-z_][A-Za-z0-9_]*/
+
+# --- multi-character operators (declared before single-char) -------------
+ARROW         = '=>'
+ARROWPTR      = '->'
+NULLCOAL_ASSIGN = '??='
+LSHIFT_ASSIGN = '<<='
+RSHIFT_ASSIGN = '>>='
+PLUS_ASSIGN   = '+='
+MINUS_ASSIGN  = '-='
+STAR_ASSIGN   = '*='
+SLASH_ASSIGN  = '/='
+PERCENT_ASSIGN = '%='
+AMP_ASSIGN    = '&='
+PIPE_ASSIGN   = '|='
+CARET_ASSIGN  = '^='
+EQEQ          = '=='
+NEQ           = '!='
+LE            = '<='
+GE            = '>='
+LSHIFT        = '<<'
+# `>>` lexes as RSHIFT in shift / shift-assign contexts; the filter
+# splits it into two consecutive GT_GENERIC tokens when the parser
+# is inside an open type-argument list, the same trick the Mono mcs
+# tokenizer uses for nested generics.
+RSHIFT        = '>>'
+LOG_AND       = '&&'
+LOG_OR        = '||'
+NULL_COAL     = '??'
+NULL_DOT      = '?.'
+NULL_INDEX    = '?['
+INC           = '++'
+DEC           = '--'
+DOTDOT        = '..'
+SCOPE         = '::'
+
+EQ            = '='
+LT            = '<'
+GT            = '>'
+PLUS          = '+'
+MINUS         = '-'
+STAR          = '*'
+SLASH         = '/'
+PERCENT       = '%'
+AMP           = '&'
+PIPE          = '|'
+CARET         = '^'
+TILDE         = '~'
+BANG          = '!'
+QUESTION      = '?'
+LPAREN        = '('
+RPAREN        = ')'
+LBRACE        = '{'
+RBRACE        = '}'
+LBRACK        = '['
+RBRACK        = ']'
+COMMA         = ','
+SEMI          = ';'
+COLON         = ':'
+DOT           = '.'
+
+# --- synthetic terminals (filter-produced) -------------------------------
+#
+# The raw lexer never emits these — they're declared AFTER all the
+# corresponding real tokens so the lexer's longest-match
+# tie-breaking always picks the real token. The host's
+# `csharp_filter` token filter rewrites IDENT → IDENT_TYPE, LT →
+# LT_GENERIC, GT → GT_GENERIC, LPAREN → LPAREN_LAMBDA / LPAREN_CAST
+# / LPAREN_TUPLE per the ECMA-334 §7.5.4.2 rules described in the
+# header. Same pattern that `c_subset.uplox` uses for TYPEDEF_NAME.
+
+IDENT_TYPE    = /[A-Za-z_][A-Za-z0-9_]*/
+LT_GENERIC    = /</
+GT_GENERIC    = />/
+LPAREN_LAMBDA = /\(/
+LPAREN_CAST   = /\(/
+LPAREN_TUPLE  = /\(/
+
+%rules
+
+# --- compilation unit ----------------------------------------------------
+
+# The compilation-unit prelude — `extern alias` and `using`
+# directives — and the namespace prelude share the same shape. We
+# fold them into one repeatable `<header_directives>` list to
+# avoid the "is this another extern alias or has the using-list
+# started" reduce/reduce ambiguity that a strict ordering would
+# create. The semantic phase enforces that `extern alias` lines
+# precede `using` lines.
+<compilation_unit> : <header_directives> <global_attrs_opt> <namespace_member_decls>
+                   ;
+
+<header_directives> : <header_directives> <header_directive>
+                    |
+                    ;
+
+<header_directive> : <extern_alias_dir>
+                   | <using_dir>
+                   ;
+
+<extern_alias_dir> : KW_EXTERN KW_ALIAS IDENT ';' ;
+
+<using_dir> : KW_USING <qualified_ident> ';'
+            | KW_USING KW_STATIC <qualified_ident> ';'
+            | KW_USING IDENT '=' <type> ';'
+            ;
+
+<global_attrs_opt> : <global_attrs_opt> <global_attr>
+                   |
+                   ;
+
+<global_attr> : '[' <attr_target> ':' <attr_list> ']' ;
+
+<namespace_member_decls> : <namespace_member_decls> <namespace_member_decl>
+                         |
+                         ;
+
+<namespace_member_decl> : <namespace_decl>
+                        | <type_decl>
+                        ;
+
+<namespace_decl> : KW_NAMESPACE <qualified_ident> '{' <header_directives> <namespace_member_decls> '}' <semi_opt>
+                 ;
+
+<semi_opt> : ';'
+           |
+           ;
+
+# Plain qualified identifiers — never carry generic args or array
+# / nullable suffixes. Used for namespaces, using directives,
+# attribute names, and explicit-interface qualifier prefixes.
+<qualified_ident> : IDENT
+                  | <qualified_ident> '.' IDENT
+                  ;
+
+# --- attributes ----------------------------------------------------------
+
+<attrs_opt> : <attrs_opt> <attr_section>
+            |
+            ;
+
+<attr_section> : '[' <attr_list> ']'
+               | '[' <attr_target> ':' <attr_list> ']'
+               ;
+
+<attr_target> : KW_ASSEMBLY | KW_MODULE | KW_FIELD | KW_METHOD
+              | KW_PROPERTY | KW_PARAM | KW_EVENT | KW_TYPE
+              | KW_TYPEVAR | KW_RETURN
+              ;
+
+<attr_list> : <attr>
+            | <attr_list> ',' <attr>
+            ;
+
+<attr> : <qualified_ident> <attr_args_opt> ;
+
+<attr_args_opt> : '(' ')'
+                | '(' <attr_arg_list> ')'
+                |
+                ;
+
+<attr_arg_list> : <attr_arg>
+                | <attr_arg_list> ',' <attr_arg>
+                ;
+
+<attr_arg> : <expr>
+           | IDENT '=' <expr>
+           | IDENT ':' <expr>
+           ;
+
+# --- modifiers -----------------------------------------------------------
+
+<modifiers_opt> : <modifiers_opt> <modifier>
+                |
+                ;
+
+# `const` is not in the modifier set. It introduces the
+# `<constant_decl>` and `<local_const_decl>` productions directly;
+# treating it as one of many modifiers would create a reduce/reduce
+# conflict against the constant_decl's `KW_CONST <type> ...` shape,
+# since the modifier-trailing position also accepts a type. C#
+# spec-wise, `const` precedes any access modifiers anyway (you
+# write `public const int X = 1`, with `const` as part of the
+# const-decl head rather than the modifier list).
+<modifier> : KW_PUBLIC | KW_PRIVATE | KW_PROTECTED | KW_INTERNAL
+           | KW_STATIC | KW_ABSTRACT | KW_SEALED | KW_VIRTUAL
+           | KW_OVERRIDE | KW_NEW | KW_READONLY
+           | KW_VOLATILE | KW_PARTIAL | KW_ASYNC | KW_UNSAFE
+           | KW_EXTERN | KW_REF
+           ;
+
+# --- type declarations ---------------------------------------------------
+
+<type_decl> : <attrs_opt> <modifiers_opt> <class_decl>
+            | <attrs_opt> <modifiers_opt> <struct_decl>
+            | <attrs_opt> <modifiers_opt> <interface_decl>
+            | <attrs_opt> <modifiers_opt> <enum_decl>
+            | <attrs_opt> <modifiers_opt> <delegate_decl>
+            ;
+
+<class_decl> : KW_CLASS IDENT <type_params_opt> <base_list_opt> <constraints_opt> '{' <class_member_decls> '}' <semi_opt>
+             ;
+
+<struct_decl> : KW_STRUCT IDENT <type_params_opt> <base_list_opt> <constraints_opt> '{' <class_member_decls> '}' <semi_opt>
+              ;
+
+<interface_decl> : KW_INTERFACE IDENT <type_params_opt> <base_list_opt> <constraints_opt> '{' <class_member_decls> '}' <semi_opt>
+                 ;
+
+<enum_decl> : KW_ENUM IDENT <enum_base_opt> '{' <enum_body> '}' <semi_opt>
+            ;
+
+<enum_base_opt> : ':' <type>
+                |
+                ;
+
+<enum_body> : <enum_member_list>
+            | <enum_member_list> ','
+            |
+            ;
+
+<enum_member_list> : <enum_member>
+                   | <enum_member_list> ',' <enum_member>
+                   ;
+
+<enum_member> : <attrs_opt> IDENT
+              | <attrs_opt> IDENT '=' <expr>
+              ;
+
+<delegate_decl> : KW_DELEGATE <type> IDENT <type_params_opt> '(' <param_list_opt> ')' <constraints_opt> ';'
+                ;
+
+# --- generic type parameters / constraints ------------------------------
+#
+# Declaration-side `<T, U>` uses LT_GENERIC / GT_GENERIC — the
+# token filter recognises these positions and emits the synthetic
+# brackets. Without the filter, the same `<` would lex as plain LT
+# and clash with the relational operator.
+
+<type_params_opt> : LT_GENERIC <type_param_list> GT_GENERIC
+                  |
+                  ;
+
+<type_param_list> : <type_param>
+                  | <type_param_list> ',' <type_param>
+                  ;
+
+<type_param> : IDENT
+             | KW_IN IDENT
+             | KW_OUT IDENT
+             ;
+
+<constraints_opt> : <constraints_opt> <constraint_clause>
+                  |
+                  ;
+
+<constraint_clause> : KW_WHERE IDENT ':' <constraint_list>
+                    ;
+
+<constraint_list> : <constraint>
+                  | <constraint_list> ',' <constraint>
+                  ;
+
+<constraint> : KW_CLASS
+             | KW_STRUCT
+             | KW_NEW '(' ')'
+             | <type>
+             ;
+
+# --- base list ----------------------------------------------------------
+
+<base_list_opt> : ':' <type_list>
+                |
+                ;
+
+<type_list> : <type>
+            | <type_list> ',' <type>
+            ;
+
+# --- class / struct / interface members ---------------------------------
+
+<class_member_decls> : <class_member_decls> <class_member_decl>
+                     |
+                     ;
+
+<class_member_decl> : <field_decl>
+                    | <method_decl>
+                    | <property_decl>
+                    | <event_decl>
+                    | <indexer_decl>
+                    | <constructor_decl>
+                    | <destructor_decl>
+                    | <operator_decl>
+                    | <conversion_op_decl>
+                    | <constant_decl>
+                    | <nested_type_decl>
+                    ;
+
+<nested_type_decl> : <type_decl> ;
+
+<field_decl> : <attrs_opt> <modifiers_opt> <type> <var_declarators> ';'
+             ;
+
+<var_declarators> : <var_declarator>
+                  | <var_declarators> ',' <var_declarator>
+                  ;
+
+<var_declarator> : IDENT
+                 | IDENT '=' <var_initializer>
+                 ;
+
+<var_initializer> : <expr>
+                  | <array_initializer>
+                  ;
+
+<array_initializer> : '{' '}'
+                    | '{' <var_initializer_list> '}'
+                    | '{' <var_initializer_list> ',' '}'
+                    ;
+
+<var_initializer_list> : <var_initializer>
+                       | <var_initializer_list> ',' <var_initializer>
+                       ;
+
+<constant_decl> : <attrs_opt> <modifiers_opt> KW_CONST <type> <const_declarators> ';'
+                ;
+
+<const_declarators> : <const_declarator>
+                    | <const_declarators> ',' <const_declarator>
+                    ;
+
+<const_declarator> : IDENT '=' <expr> ;
+
+<method_decl> : <attrs_opt> <modifiers_opt> <type> <qualified_ident> <type_params_opt> '(' <param_list_opt> ')' <constraints_opt> <method_body>
+              ;
+
+<method_body> : <block>
+              | '=>' <expr> ';'
+              | ';'
+              ;
+
+<param_list_opt> : <param_list>
+                 |
+                 ;
+
+<param_list> : <param>
+             | <param_list> ',' <param>
+             ;
+
+<param> : <attrs_opt> <param_modifiers_opt> <type> IDENT <param_default_opt>
+        ;
+
+<param_modifiers_opt> : KW_REF
+                      | KW_OUT
+                      | KW_IN
+                      | KW_PARAMS
+                      | KW_THIS
+                      |
+                      ;
+
+<param_default_opt> : '=' <expr>
+                    |
+                    ;
+
+# --- properties / indexers / events -------------------------------------
+
+<property_decl> : <attrs_opt> <modifiers_opt> <type> <qualified_ident> '{' <accessor_decls> '}'
+                | <attrs_opt> <modifiers_opt> <type> <qualified_ident> '{' <accessor_decls> '}' '=' <expr> ';'
+                | <attrs_opt> <modifiers_opt> <type> <qualified_ident> '=>' <expr> ';'
+                ;
+
+<accessor_decls> : <accessor_decls> <accessor_decl>
+                 | <accessor_decl>
+                 ;
+
+<accessor_decl> : <attrs_opt> <modifiers_opt> KW_GET <accessor_body>
+                | <attrs_opt> <modifiers_opt> KW_SET <accessor_body>
+                | <attrs_opt> <modifiers_opt> KW_INIT <accessor_body>
+                | <attrs_opt> <modifiers_opt> KW_ADD <accessor_body>
+                | <attrs_opt> <modifiers_opt> KW_REMOVE <accessor_body>
+                ;
+
+<accessor_body> : <block>
+                | '=>' <expr> ';'
+                | ';'
+                ;
+
+<indexer_decl> : <attrs_opt> <modifiers_opt> <type> <indexer_name> '[' <param_list> ']' '{' <accessor_decls> '}'
+               | <attrs_opt> <modifiers_opt> <type> <indexer_name> '[' <param_list> ']' '=>' <expr> ';'
+               ;
+
+<indexer_name> : KW_THIS
+               | <qualified_ident> '.' KW_THIS
+               ;
+
+<event_decl> : <attrs_opt> <modifiers_opt> KW_EVENT <type> <var_declarators> ';'
+             | <attrs_opt> <modifiers_opt> KW_EVENT <type> <qualified_ident> '{' <accessor_decls> '}'
+             ;
+
+# --- constructors / destructors / operators -----------------------------
+
+<constructor_decl> : <attrs_opt> <modifiers_opt> IDENT '(' <param_list_opt> ')' <ctor_initializer_opt> <method_body>
+                   ;
+
+<ctor_initializer_opt> : ':' KW_BASE '(' <arg_list_opt> ')'
+                       | ':' KW_THIS '(' <arg_list_opt> ')'
+                       |
+                       ;
+
+<destructor_decl> : <attrs_opt> <modifiers_opt> '~' IDENT '(' ')' <method_body>
+                  ;
+
+<operator_decl> : <attrs_opt> <modifiers_opt> <type> KW_OPERATOR <overloadable_op> '(' <param_list> ')' <method_body>
+                ;
+
+<overloadable_op> : '+' | '-' | '!' | '~' | '++' | '--'
+                  | '*' | '/' | '%' | '&' | '|' | '^'
+                  | '<<' | '>>' | '==' | '!=' | '<' | '>'
+                  | '<=' | '>=' | KW_TRUE | KW_FALSE
+                  ;
+
+<conversion_op_decl> : <attrs_opt> <modifiers_opt> <conversion_kind> KW_OPERATOR <type> '(' <param> ')' <method_body>
+                     ;
+
+<conversion_kind> : KW_IMPLICIT | KW_EXPLICIT ;
+
+# --- types --------------------------------------------------------------
+#
+# Type-position `<` / `>` are LT_GENERIC / GT_GENERIC — guaranteed
+# distinct from the relational operators by the token filter.
+# IDENT inside a type can be either plain IDENT or IDENT_TYPE; the
+# filter only forces IDENT_TYPE at statement-start positions where
+# the decl/expr split needs the disambiguation, and accepting both
+# means the same <type> non-terminal works everywhere.
+
+<type> : <non_array_type>
+       | <array_type>
+       ;
+
+<non_array_type> : <named_type>
+                 | <predefined_type>
+                 | <tuple_type>
+                 | <non_array_type> '?'
+                 | <non_array_type> '*'
+                 ;
+
+# Type names always lead with IDENT_TYPE. The token filter marks
+# the FIRST IDENT of every type-position occurrence (declaration
+# member types, post-`is` / `as` / `typeof` / `new` / cast, generic
+# type-argument list entries, `foreach` and `catch` binders). The
+# chain continuation `.IDENT` uses plain IDENT — there's no
+# ambiguity once we're inside a known type-chain state.
+<named_type> : IDENT_TYPE <type_arg_list_opt>
+             | <named_type> '.' IDENT <type_arg_list_opt>
+             ;
+
+<type_arg_list_opt> : LT_GENERIC <type_arg_list> GT_GENERIC
+                    |
+                    ;
+
+<type_arg_list> : <type>
+                | <type_arg_list> ',' <type>
+                ;
+
+<predefined_type> : KW_VOID | KW_BOOL | KW_BYTE | KW_SBYTE
+                  | KW_SHORT | KW_USHORT | KW_INT | KW_UINT
+                  | KW_LONG | KW_ULONG | KW_CHAR | KW_FLOAT
+                  | KW_DOUBLE | KW_DECIMAL | KW_STRING | KW_OBJECT
+                  ;
+
+# Tuple types use LPAREN_TUPLE — the filter-emitted marker that
+# distinguishes them from parenthesised expressions and parameter
+# lists.
+<tuple_type> : LPAREN_TUPLE <tuple_element> ',' <tuple_element_list> ')'
+             ;
+
+<tuple_element_list> : <tuple_element>
+                     | <tuple_element_list> ',' <tuple_element>
+                     ;
+
+<tuple_element> : <type>
+                | <type> IDENT
+                ;
+
+<array_type> : <non_array_type> <rank_specifiers>
+             ;
+
+<rank_specifiers> : <rank_specifier>
+                  | <rank_specifiers> <rank_specifier>
+                  ;
+
+<rank_specifier> : '[' ']'
+                 | '[' <commas> ']'
+                 ;
+
+<commas> : ','
+         | <commas> ','
+         ;
+
+# --- statements ---------------------------------------------------------
+
+<block> : '{' <stmt_list_opt> '}'
+        ;
+
+<stmt_list_opt> : <stmt_list>
+                |
+                ;
+
+<stmt_list> : <stmt>
+            | <stmt_list> <stmt>
+            ;
+
+<stmt> : <labelled_stmt>
+       | <declaration_stmt>
+       | <embedded_stmt>
+       ;
+
+<labelled_stmt> : IDENT ':' <stmt>
+                ;
+
+# Local declaration statements always begin with one of:
+#   * a predefined keyword type (`int x = …;`);
+#   * the `var` contextual keyword;
+#   * `ref` followed by the above;
+#   * `const` followed by a type;
+#   * an IDENT_TYPE — the token filter emits this only at
+#     statement-start positions where a scan-ahead confirms a
+#     local-variable-declaration shape (see header).
+<declaration_stmt> : <local_var_decl> ';'
+                   | <local_const_decl> ';'
+                   ;
+
+<local_var_decl> : <type> <var_declarators>
+                 | KW_VAR <var_declarators>
+                 | KW_REF <type> <var_declarators>
+                 ;
+
+<local_const_decl> : KW_CONST <type> <const_declarators>
+                   ;
+
+<embedded_stmt> : <block>
+                | <empty_stmt>
+                | <expression_stmt>
+                | <if_stmt>
+                | <switch_stmt>
+                | <while_stmt>
+                | <do_stmt>
+                | <for_stmt>
+                | <foreach_stmt>
+                | <break_stmt>
+                | <continue_stmt>
+                | <return_stmt>
+                | <throw_stmt>
+                | <try_stmt>
+                | <using_stmt>
+                | <lock_stmt>
+                | <yield_stmt>
+                | <checked_stmt>
+                | <unchecked_stmt>
+                | <goto_stmt>
+                ;
+
+<empty_stmt> : ';' ;
+
+<expression_stmt> : <stmt_expr> ';'
+                  ;
+
+# Statement-expression set — only side-effecting shapes are valid
+# at statement position.
+<stmt_expr> : <invocation_expr>
+            | <object_creation_expr>
+            | <assignment>
+            | <postfix_inc_dec_expr>
+            | <prefix_inc_dec_expr>
+            | <await_expr>
+            ;
+
+<invocation_expr> : <unary_expr> '(' <arg_list_opt> ')'
+                  ;
+
+<postfix_inc_dec_expr> : <unary_expr> '++'
+                       | <unary_expr> '--'
+                       ;
+
+<prefix_inc_dec_expr> : '++' <unary_expr>
+                      | '--' <unary_expr>
+                      ;
+
+<await_expr> : KW_AWAIT <unary_expr> ;
+
+<if_stmt> : KW_IF '(' <expr> ')' <embedded_stmt>
+          | KW_IF '(' <expr> ')' <embedded_stmt> KW_ELSE <embedded_stmt>
+          ;
+
+<switch_stmt> : KW_SWITCH '(' <expr> ')' '{' <switch_section_list_opt> '}'
+              ;
+
+<switch_section_list_opt> : <switch_section_list>
+                          |
+                          ;
+
+<switch_section_list> : <switch_section>
+                      | <switch_section_list> <switch_section>
+                      ;
+
+<switch_section> : <switch_labels> <stmt_list>
+                 ;
+
+<switch_labels> : <switch_label>
+                | <switch_labels> <switch_label>
+                ;
+
+<switch_label> : KW_CASE <pattern> ':'
+               | KW_CASE <pattern> KW_WHEN <expr> ':'
+               | KW_DEFAULT ':'
+               ;
+
+<while_stmt> : KW_WHILE '(' <expr> ')' <embedded_stmt>
+             ;
+
+<do_stmt> : KW_DO <embedded_stmt> KW_WHILE '(' <expr> ')' ';'
+          ;
+
+<for_stmt> : KW_FOR '(' <for_initializer_opt> ';' <for_condition_opt> ';' <for_iterator_opt> ')' <embedded_stmt>
+           ;
+
+<for_initializer_opt> : <local_var_decl>
+                      | <stmt_expr_list>
+                      |
+                      ;
+
+<for_condition_opt> : <expr>
+                    |
+                    ;
+
+<for_iterator_opt> : <stmt_expr_list>
+                   |
+                   ;
+
+<stmt_expr_list> : <stmt_expr>
+                 | <stmt_expr_list> ',' <stmt_expr>
+                 ;
+
+<foreach_stmt> : KW_FOREACH '(' <foreach_var> KW_IN <expr> ')' <embedded_stmt>
+               ;
+
+<foreach_var> : <type> IDENT
+              | KW_VAR IDENT
+              | KW_REF <type> IDENT
+              ;
+
+<break_stmt> : KW_BREAK ';' ;
+<continue_stmt> : KW_CONTINUE ';' ;
+
+<return_stmt> : KW_RETURN ';'
+              | KW_RETURN <expr> ';'
+              ;
+
+<throw_stmt> : KW_THROW ';'
+             | KW_THROW <expr> ';'
+             ;
+
+<try_stmt> : KW_TRY <block> <catch_clauses>
+           | KW_TRY <block> <catch_clauses> KW_FINALLY <block>
+           | KW_TRY <block> KW_FINALLY <block>
+           ;
+
+<catch_clauses> : <catch_clauses> <catch_clause>
+                | <catch_clause>
+                ;
+
+<catch_clause> : KW_CATCH <block>
+               | KW_CATCH '(' <type> ')' <catch_filter_opt> <block>
+               | KW_CATCH '(' <type> IDENT ')' <catch_filter_opt> <block>
+               ;
+
+<catch_filter_opt> : KW_WHEN '(' <expr> ')'
+                   |
+                   ;
+
+<using_stmt> : KW_USING '(' <using_resource> ')' <embedded_stmt>
+             | KW_USING <local_var_decl> ';'
+             ;
+
+<using_resource> : <local_var_decl>
+                 | <expr>
+                 ;
+
+<lock_stmt> : KW_LOCK '(' <expr> ')' <embedded_stmt>
+            ;
+
+<yield_stmt> : KW_YIELD KW_RETURN <expr> ';'
+             | KW_YIELD KW_BREAK ';'
+             ;
+
+<checked_stmt> : KW_CHECKED <block> ;
+<unchecked_stmt> : KW_UNCHECKED <block> ;
+
+<goto_stmt> : KW_GOTO IDENT ';'
+            | KW_GOTO KW_CASE <expr> ';'
+            | KW_GOTO KW_DEFAULT ';'
+            ;
+
+# --- patterns -----------------------------------------------------------
+#
+# Simple patterns only — the C# 7 / 8 set. Constant patterns reuse
+# the expression non-terminal (semantic phase enforces constness);
+# type and declaration patterns share the `<type>` form with an
+# optional IDENT binder.
+<pattern> : <expr>
+          | <type>
+          | <type> IDENT
+          | KW_VAR IDENT
+          ;
+
+# --- expressions --------------------------------------------------------
+#
+# C# precedence ladder (highest first):
+#   primary, unary, multiplicative, additive, shift, relational +
+#   type-test, equality, bitwise-and, bitwise-xor, bitwise-or,
+#   logical-and, logical-or, null-coalescing, conditional `?:`,
+#   assignment / lambda.
+
+<expr> : <assignment>
+       | <non_assignment_expr>
+       ;
+
+<non_assignment_expr> : <conditional_expr>
+                      | <lambda_expr>
+                      ;
+
+<assignment> : <unary_expr> <assignment_op> <expr>
+             ;
+
+<assignment_op> : '=' | '+=' | '-=' | '*=' | '/=' | '%='
+                | '&=' | '|=' | '^=' | '<<=' | '>>=' | '??='
+                ;
+
+# Lambda forms. Three valid heads:
+#   IDENT                                                # bare implicit single
+#   LPAREN_LAMBDA <lambda_params_opt> ')'                # parenthesised
+#
+# `LPAREN_LAMBDA` is filter-supplied — the token filter rewrites
+# `(` to `LPAREN_LAMBDA` when scan-ahead finds a `=>` after the
+# matching `)`. This separates lambda heads from parenthesised
+# expressions and tuple literals at the lexer level.
+<lambda_expr> : IDENT '=>' <lambda_body>
+              | LPAREN_LAMBDA <lambda_params_opt> ')' '=>' <lambda_body>
+              ;
+
+<lambda_params_opt> : <lambda_params>
+                    |
+                    ;
+
+<lambda_params> : <lambda_param>
+                | <lambda_params> ',' <lambda_param>
+                ;
+
+<lambda_param> : IDENT
+               | <attrs_opt> <param_modifiers_opt> <type> IDENT
+               ;
+
+<lambda_body> : <expr>
+              | <block>
+              ;
+
+<conditional_expr> : <null_coalescing_expr>
+                   | <null_coalescing_expr> '?' <expr> ':' <expr>
+                   ;
+
+<null_coalescing_expr> : <logical_or_expr>
+                       | <logical_or_expr> '??' <null_coalescing_expr>
+                       ;
+
+<logical_or_expr> : <logical_and_expr>
+                  | <logical_or_expr> '||' <logical_and_expr>
+                  ;
+
+<logical_and_expr> : <bitwise_or_expr>
+                   | <logical_and_expr> '&&' <bitwise_or_expr>
+                   ;
+
+<bitwise_or_expr> : <bitwise_xor_expr>
+                  | <bitwise_or_expr> '|' <bitwise_xor_expr>
+                  ;
+
+<bitwise_xor_expr> : <bitwise_and_expr>
+                   | <bitwise_xor_expr> '^' <bitwise_and_expr>
+                   ;
+
+<bitwise_and_expr> : <equality_expr>
+                   | <bitwise_and_expr> '&' <equality_expr>
+                   ;
+
+<equality_expr> : <relational_expr>
+                | <equality_expr> '==' <relational_expr>
+                | <equality_expr> '!=' <relational_expr>
+                ;
+
+<relational_expr> : <shift_expr>
+                  | <relational_expr> '<'  <shift_expr>
+                  | <relational_expr> '>'  <shift_expr>
+                  | <relational_expr> '<=' <shift_expr>
+                  | <relational_expr> '>=' <shift_expr>
+                  | <relational_expr> KW_IS <type>
+                  | <relational_expr> KW_IS <type> IDENT
+                  | <relational_expr> KW_AS <type>
+                  ;
+
+<shift_expr> : <additive_expr>
+             | <shift_expr> '<<' <additive_expr>
+             | <shift_expr> '>>' <additive_expr>
+             ;
+
+<additive_expr> : <multiplicative_expr>
+                | <additive_expr> '+' <multiplicative_expr>
+                | <additive_expr> '-' <multiplicative_expr>
+                ;
+
+<multiplicative_expr> : <unary_expr>
+                      | <multiplicative_expr> '*' <unary_expr>
+                      | <multiplicative_expr> '/' <unary_expr>
+                      | <multiplicative_expr> '%' <unary_expr>
+                      ;
+
+# Cast expressions use LPAREN_CAST — filter-supplied when scan-ahead
+# determines the content is a complete type AND the post-`)` token
+# is in the CanFollowCast set (see header).
+<unary_expr> : <primary_expr>
+             | '+' <unary_expr>
+             | '-' <unary_expr>
+             | '!' <unary_expr>
+             | '~' <unary_expr>
+             | '++' <unary_expr>
+             | '--' <unary_expr>
+             | LPAREN_CAST <type> ')' <unary_expr>
+             | KW_AWAIT <unary_expr>
+             ;
+
+# Primary expressions and their suffix chain.
+#
+# Generic method invocations (`obj.Method<int>(args)`) use
+# LT_GENERIC / GT_GENERIC for the type-argument brackets, so the
+# parser doesn't confuse them with relational `<` / `>`. The
+# token filter emits these synthetic brackets when scan-ahead
+# matches the ECMA-334 disambiguating-set rule.
+<primary_expr> : <literal>
+               | IDENT
+               | KW_GLOBAL '::' IDENT
+               | KW_THIS
+               | KW_BASE
+               | <parenthesized_expr>
+               | <tuple_expr>
+               | <object_creation_expr>
+               | <array_creation_expr>
+               | <typeof_expr>
+               | <sizeof_expr>
+               | <nameof_expr>
+               | <default_expr>
+               | <checked_expr>
+               | <unchecked_expr>
+               | <primary_expr> '.' IDENT
+               | <primary_expr> '?.' IDENT
+               | <primary_expr> '.' IDENT LT_GENERIC <type_arg_list> GT_GENERIC
+               | <primary_expr> '[' <arg_list> ']'
+               | <primary_expr> '?[' <arg_list> ']'
+               | <primary_expr> '(' <arg_list_opt> ')'
+               | <primary_expr> '++'
+               | <primary_expr> '--'
+               | <primary_expr> '!'
+               ;
+
+<parenthesized_expr> : '(' <expr> ')' ;
+
+# Tuple expression: parenthesised list with at least one comma at
+# the top level. Single-element parens parse as <parenthesized_expr>.
+<tuple_expr> : '(' <tuple_arg> ',' <tuple_arg_list> ')'
+             ;
+
+<tuple_arg_list> : <tuple_arg>
+                 | <tuple_arg_list> ',' <tuple_arg>
+                 ;
+
+<tuple_arg> : <expr>
+            | IDENT ':' <expr>
+            ;
+
+<literal> : INT_LIT
+          | REAL_LIT
+          | REAL_LIT_DOT
+          | REAL_LIT_EXP
+          | CHAR_LIT
+          | STRING_LIT
+          | VSTRING_LIT
+          | ISTRING_LIT
+          | IVSTRING_LIT
+          | KW_TRUE
+          | KW_FALSE
+          | KW_NULL
+          ;
+
+<object_creation_expr> : KW_NEW <type> '(' <arg_list_opt> ')' <object_initializer_opt>
+                       | KW_NEW <type> <object_initializer>
+                       | KW_NEW <object_initializer>
+                       ;
+
+<object_initializer_opt> : <object_initializer>
+                         |
+                         ;
+
+<object_initializer> : '{' '}'
+                     | '{' <member_initializer_list> '}'
+                     | '{' <member_initializer_list> ',' '}'
+                     ;
+
+<member_initializer_list> : <member_initializer>
+                          | <member_initializer_list> ',' <member_initializer>
+                          ;
+
+# Object / collection initializers. Named forms (`Name = expr`)
+# and indexed forms (`[i] = expr`) commit on the leading IDENT or
+# `[`. The collection-item form is a non-assignment expression
+# — using full `<expr>` would create an LR(1) conflict between
+# `IDENT '=' …` parsed as named-init versus parsed as a positional
+# assignment expression. Real C# treats `IDENT '=' …` here as
+# named-init always; the non-assignment-expr restriction enforces
+# that. To use an assignment as a collection item, parenthesise:
+# `{ (x = 5) }`.
+<member_initializer> : IDENT '=' <var_initializer>
+                     | '[' <arg_list> ']' '=' <var_initializer>
+                     | <non_assignment_expr>
+                     | <array_initializer>
+                     ;
+
+<array_creation_expr> : KW_NEW <non_array_type> '[' <expr_list> ']' <rank_specifiers_opt> <array_initializer_opt>
+                      | KW_NEW <non_array_type> <rank_specifiers> <array_initializer>
+                      | KW_NEW <rank_specifiers> <array_initializer>
+                      ;
+
+<rank_specifiers_opt> : <rank_specifiers>
+                      |
+                      ;
+
+<array_initializer_opt> : <array_initializer>
+                        |
+                        ;
+
+<typeof_expr> : KW_TYPEOF '(' <type> ')' ;
+<sizeof_expr> : KW_SIZEOF '(' <type> ')' ;
+<nameof_expr> : KW_NAMEOF '(' <expr> ')' ;
+# `default(T)` only — the bare `default` literal (C# 7.1+) would
+# conflict with the switch-statement `default:` label and the
+# `default` modifier-keyword positions; LR(1) would need extra
+# lookahead to distinguish. The semantic phase can synthesise the
+# zero-arg form when the target type is inferrable.
+<default_expr> : KW_DEFAULT '(' <type> ')' ;
+<checked_expr> : KW_CHECKED '(' <expr> ')' ;
+<unchecked_expr> : KW_UNCHECKED '(' <expr> ')' ;
+
+<arg_list_opt> : <arg_list>
+               |
+               ;
+
+<arg_list> : <arg>
+           | <arg_list> ',' <arg>
+           ;
+
+<arg> : <expr>
+      | IDENT ':' <expr>
+      | KW_REF <expr>
+      | KW_OUT <expr>
+      | KW_OUT <type> IDENT
+      | KW_IN <expr>
+      ;
+
+<expr_list> : <expr>
+            | <expr_list> ',' <expr>
+            ;
