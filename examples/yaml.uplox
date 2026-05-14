@@ -1,0 +1,333 @@
+# YAML 1.2 grammar — uplox first cut.
+#
+# YAML is uniquely hostile to LR(1) parsing among the languages in
+# this examples set. The block style (which represents the bulk of
+# real YAML use) is indentation-sensitive: the depth of leading
+# whitespace determines nesting structure, with no explicit
+# delimiters. LR(1) can't see whitespace as structure — every
+# attempt to do so directly produces conflicts everywhere.
+#
+# We resolve this the standard way: a host token filter tracks
+# indentation and emits three synthetic terminals — `INDENT`,
+# `DEDENT`, `NEWLINE` — that the grammar consumes like opening
+# braces, closing braces, and statement separators. This is the
+# same pattern Python LR grammars (and tree-sitter-python) use,
+# and the same uplox mechanism `c_subset` uses for typedef-name
+# disambiguation.
+#
+# What the filter does:
+#
+#   * Tracks the current indentation stack. When a non-blank line's
+#     leading column exceeds the top of the stack, emit `INDENT`
+#     and push the new column. When it falls below, emit one
+#     `DEDENT` per popped level until the stack top matches.
+#   * Emits `NEWLINE` at the end of a content-bearing line (the
+#     separator between block items at the same indentation
+#     level). Suppresses `NEWLINE` inside flow context
+#     (`{ … }` / `[ … ]`), where line breaks are not significant.
+#   * Skips blank lines and comment-only lines.
+#   * Tracks the flow / block context — `{` and `[` enter flow
+#     (indentation ignored), `}` and `]` leave it.
+#   * Lexes block scalars (`|` and `>`) as opaque `BLOCK_SCALAR`
+#     tokens whose body extends as long as subsequent lines are
+#     indented past the block's indentation indicator.
+#   * Handles multi-line plain scalars by joining continuation
+#     lines into a single `PLAIN` token under the YAML 1.2 folding
+#     rules (the grammar sees one token regardless).
+#
+# What the grammar does:
+#
+#   * `<yaml_stream>` is one or more documents, separated by
+#     `---` and optionally terminated by `...`.
+#   * `<node>` is the universal value non-terminal: any scalar,
+#     sequence, or mapping, in either flow or block style, with
+#     optional anchor / alias / tag prefix.
+#   * Block sequences are indentation-bounded lists of `- node`
+#     entries; block mappings are indentation-bounded lists of
+#     `key: node` entries. Both nest by `INDENT` / `DEDENT`.
+#   * Flow sequences (`[…]`) and flow mappings (`{…}`) carry
+#     comma-separated nodes, JSON-style.
+#   * Scalars come in five styles: plain (`bare text`),
+#     single-quoted (`'…'`), double-quoted (`"…"`), literal block
+#     (`|`), folded block (`>`).
+#
+# In scope:
+#
+#   * Multi-document streams with `---` separators and optional
+#     `...` end markers.
+#   * `%YAML` and `%TAG` directives at document head.
+#   * Anchors (`&name`), aliases (`*name`), tags (`!type`,
+#     `!!type`, `!<verbatim>`).
+#   * All five scalar styles.
+#   * Flow and block forms of sequences and mappings.
+#   * Complex keys (`? key`).
+#   * Merge keys via `<<:` parsed as ordinary mapping entries
+#     (the host's semantic phase implements the merge).
+#   * Comments (lexer-skipped).
+#
+# Out of scope (filter-side or semantic-side, not grammatical):
+#
+#   * The YAML 1.2 plain-scalar continuation rules in their full
+#     specificity — the filter must implement these.
+#   * Tag URI resolution and the core / fail / json schema
+#     boolean / null / number recognition — semantic phase.
+#   * `\uXXXX` and `\xXX` escape validation in double-quoted
+#     strings — lexer accepts permissively, host validates.
+#
+# Hosts that don't install the filter only get the flow-style
+# subset (which is JSON-compatible). Block style requires the
+# filter to emit INDENT / DEDENT / NEWLINE.
+
+%grammar yaml
+
+
+%define lr.type lalr
+%options
+start = yaml_stream
+
+%tokens
+
+# Inline whitespace (spaces and tabs WITHIN a line) is skipped by
+# the raw lexer. The filter tracks leading-line whitespace
+# separately to compute indentation. Newlines are passed through
+# (the filter consumes them to emit NEWLINE / INDENT / DEDENT).
+INLINE_WS = /[ \t]+/                                          %skip
+RAW_NL    = /\r?\n/                                           %skip
+COMMENT   = /#[^\n]*/                                         %skip
+
+# Document markers — must appear at column zero in real YAML, but
+# we match anywhere and let the filter / host enforce column.
+DOC_START = '---'
+DOC_END   = '...'
+
+# Directives — `%YAML 1.2` and `%TAG !foo! tag:example.org,2025:`.
+# The body extends to end of line; we keep it as a single token.
+DIRECTIVE = /%[^\n]*/
+
+# Quoted scalars. Single-quoted uses doubled `''` as the escape
+# for a single quote. Double-quoted accepts backslash escapes;
+# the host validates the four-hex-digit `\uXXXX` and two-hex-digit
+# `\xHH` forms during semantic analysis.
+STRING_SQ = /'([^']|'')*'/
+STRING_DQ = /"([^"\\]|\\.)*"/
+
+# Anchor, alias, tag tokens. Anchor / alias names allow the YAML
+# 1.2 anchor character set (alphanumerics, hyphen, underscore).
+# Tags come in two shapes — verbatim `!<URI>` and shorthand
+# `!handle!suffix` or just `!suffix`.
+ANCHOR    = /&[A-Za-z0-9_\-]+/
+ALIAS     = /\*[A-Za-z0-9_\-]+/
+TAG_VERB  = /!<[^>\n]*>/
+TAG_SHORT = /!![A-Za-z0-9_\-]+/
+TAG_PLAIN = /![A-Za-z0-9_\-]*/
+
+# Block scalar header + body. The lexer can't fully tokenise the
+# body because indentation context determines termination — the
+# filter slurps the body and emits BLOCK_SCALAR with the joined
+# content. The header (`|` / `>` plus chomping / indent
+# indicators) is consumed by the filter at the start.
+BLOCK_SCALAR = /\|/
+
+# Plain scalars. The regex matches the "safe" subset — runs of
+# non-special characters that start with an indicator-free
+# character. Multi-word plain scalars and continuation across
+# lines are joined by the filter into one PLAIN token, so the
+# grammar only ever sees a single PLAIN per scalar value.
+#
+# Starting characters: anything except the YAML indicator set
+# (- ? : , [ ] { } # & * ! | > ' " % @ `).
+# Following characters: anything except newline and the
+# flow-context terminators ( : , [ ] { } ).
+PLAIN = /[A-Za-z0-9_\.\/\-+][^:,\[\]\{\}\n]*/
+
+# Punctuation. `:` is the mapping indicator (key-value separator).
+# `-` is the block sequence indicator. `?` is the complex key
+# indicator. The rest are flow-style delimiters.
+COLON    = ':'
+DASH     = '-'
+QUESTION = '?'
+COMMA    = ','
+LBRACE   = '{'
+RBRACE   = '}'
+LBRACK   = '['
+RBRACK   = ']'
+
+# --- synthetic terminals (filter-produced) --------------------------------
+#
+# The raw lexer never emits these. Declared with placeholder
+# regexes that never match (the actual content tokens win
+# longest-match) — the filter inserts them based on the
+# indentation tracking and flow / block context detection
+# described in the header.
+INDENT  = /\x01/                # filter-emitted indent open
+DEDENT  = /\x02/                # filter-emitted indent close
+NEWLINE = /\x03/                # filter-emitted significant line break
+
+%rules
+
+# --- stream / documents ---------------------------------------------------
+
+<yaml_stream> : <documents>
+              ;
+
+<documents> : <document>
+            | <documents> <document>
+            ;
+
+<document> : <directives_opt> <document_body>
+           ;
+
+<directives_opt> : <directives>
+                 |
+                 ;
+
+<directives> : <directive_line>
+             | <directives> <directive_line>
+             ;
+
+<directive_line> : DIRECTIVE NEWLINE
+                 ;
+
+# Every document carries a node. `---` and `...` markers are
+# optional bookends but never stand alone — a "bare `---`"
+# document would be syntactically ambiguous with the start of
+# the next document's node. Empty documents are written
+# explicitly: `--- null`, `--- ~`, or `--- {}`.
+<document_body> : <node>
+                | <node> '...'
+                | '---' <node>
+                | '---' <node> '...'
+                ;
+
+# --- nodes ----------------------------------------------------------------
+
+# Every node carries an optional anchor and / or tag prefix.
+# Aliases are themselves leaves and don't take prefixes.
+<node> : <node_properties_opt> <node_content>
+       | ALIAS
+       ;
+
+<node_properties_opt> : <anchor_decl> <tag_decl>
+                      | <tag_decl> <anchor_decl>
+                      | <anchor_decl>
+                      | <tag_decl>
+                      |
+                      ;
+
+<anchor_decl> : ANCHOR
+              ;
+
+<tag_decl> : TAG_VERB
+           | TAG_SHORT
+           | TAG_PLAIN
+           ;
+
+# Node content: scalar / sequence / mapping, in either flow or
+# block style.
+<node_content> : <scalar>
+               | <flow_sequence>
+               | <flow_mapping>
+               | <block_sequence>
+               | <block_mapping>
+               ;
+
+# --- scalars --------------------------------------------------------------
+
+<scalar> : PLAIN
+         | STRING_SQ
+         | STRING_DQ
+         | BLOCK_SCALAR
+         ;
+
+# --- flow style -----------------------------------------------------------
+
+<flow_sequence> : '[' ']'
+                | '[' <flow_seq_items> ']'
+                | '[' <flow_seq_items> ',' ']'
+                ;
+
+<flow_seq_items> : <flow_node>
+                 | <flow_seq_items> ',' <flow_node>
+                 ;
+
+<flow_mapping> : '{' '}'
+               | '{' <flow_map_entries> '}'
+               | '{' <flow_map_entries> ',' '}'
+               ;
+
+<flow_map_entries> : <flow_map_entry>
+                   | <flow_map_entries> ',' <flow_map_entry>
+                   ;
+
+# Flow mapping entries: explicit `key: value` and implicit
+# value-only (the bare-scalar JSON-like form).
+<flow_map_entry> : <flow_node> ':' <flow_node>
+                 | <flow_node>
+                 | '?' <flow_node> ':' <flow_node>
+                 ;
+
+# A flow node is a node restricted to flow content (no block
+# sequence / mapping inside flow brackets).
+<flow_node> : <flow_node_properties_opt> <flow_content>
+            | ALIAS
+            ;
+
+<flow_node_properties_opt> : <anchor_decl> <tag_decl>
+                           | <tag_decl> <anchor_decl>
+                           | <anchor_decl>
+                           | <tag_decl>
+                           |
+                           ;
+
+<flow_content> : <scalar>
+               | <flow_sequence>
+               | <flow_mapping>
+               ;
+
+# --- block style ----------------------------------------------------------
+#
+# INDENT and DEDENT bracket the body of a block collection. The
+# filter emits them based on indentation depth — INDENT when a
+# nested block opens, DEDENT when it closes. NEWLINE separates
+# sibling entries within the same INDENT level. Treating them as
+# brace-like delimiters is what lets the LR grammar parse
+# indentation-sensitive YAML.
+
+<block_sequence> : INDENT <block_seq_entries> DEDENT
+                 ;
+
+<block_seq_entries> : <block_seq_entry>
+                    | <block_seq_entries> NEWLINE <block_seq_entry>
+                    ;
+
+# `- node` — the value follows the dash. Nested block
+# collections are handled by `<node>`'s `<block_sequence>` /
+# `<block_mapping>` alternatives, which themselves start with
+# INDENT — no separate multi-line form needed here.
+<block_seq_entry> : '-' <node>
+                  ;
+
+<block_mapping> : INDENT <block_map_entries> DEDENT
+                ;
+
+<block_map_entries> : <block_map_entry>
+                    | <block_map_entries> NEWLINE <block_map_entry>
+                    ;
+
+# `key: value` — two shapes by lookahead after the `:`:
+#   * node-starter (which includes INDENT for nested block
+#     collections via `<block_sequence>` / `<block_mapping>`'s
+#     leading INDENT) → value follows the colon.
+#   * NEWLINE → implicit null value, entry terminates here.
+# Complex keys use the `?` prefix form and may span lines.
+<block_map_entry> : <block_map_key> ':' <node>
+                  | <block_map_key> ':'
+                  | '?' <node> ':' <node>
+                  | '?' <node> ':'
+                  ;
+
+<block_map_key> : <scalar>
+                | ALIAS
+                | <flow_sequence>
+                | <flow_mapping>
+                ;

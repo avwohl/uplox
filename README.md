@@ -127,6 +127,7 @@ implements the full classical hack on top of these primitives.
 
 - `calc` — arithmetic expressions, the smoke test.
 - `json` — strict ECMA-404 / RFC 8259 JSON. The data-language sized counterpart to `calc`'s expression-language smoke test: one value-recursive non-terminal, two compound shapes (object / array), three keyword literals (`true` / `false` / `null`), plus a spec-exact number regex and a backslash-escape-permissive string regex. LALR(1) at 27 states, conflict-free. No relaxed forms (trailing commas, comments, unquoted keys) — those belong in a JSONC / JSON5 variant.
+- `yaml` — YAML 1.2 in both flow and block styles. Flow style (`{key: val}` / `[a, b]`) is LR(1)-clean directly; block style is indentation-sensitive and the standard Python-grammar trick applies — hosts install a token filter that emits synthetic `INDENT` / `DEDENT` / `NEWLINE` terminals based on column tracking, plus `BLOCK_SCALAR` for `|` and `>` bodies and joined-line `PLAIN` tokens for multi-line plain scalars. With the filter, the grammar handles multi-document streams (`---` / `...`), `%YAML` / `%TAG` directives, anchors / aliases / tags, complex keys (`? key`), and all five scalar styles (plain, single-quoted, double-quoted, literal block `|`, folded block `>`). Without the filter, the flow-only subset is JSON-compatible. LALR(1) at 94 states, conflict-free.
 - `calc_ast` — same language as `calc`, annotated with the v3 auto-AST
   surface (`%ast=`, `?`, `@field`, `%ast_drop`). Emitted Python module
   produces typed `BinOp` / `NumLit` dataclasses instead of a generic
