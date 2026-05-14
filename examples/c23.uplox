@@ -28,6 +28,9 @@
 #     rewrites IDENT to TYPEDEF_NAME based on a name table the parser
 #     maintains via a ``%hook`` on the declaration rule. See
 #     ``uplox.hooks.TypedefTracker`` for the runtime piece.
+#   * GCC extensions used by the c-family backends: nested function
+#     definitions and ``__label__ name [, name]* ;`` declarations (for
+#     nonlocal-goto across nested fn boundaries).
 #
 # Deliberately delegated to the per-compiler preprocessor pass:
 #
