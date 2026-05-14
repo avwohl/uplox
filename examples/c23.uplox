@@ -276,10 +276,77 @@ KW_GENERIC KW_VA_ARG KW_OFFSETOF
       %ast=StaticAssertWithMessage
     ;
 
-# GCC-style file-scope ``asm("...")``, used by uc80/uc386 corpus
-# headers to hint the assembler. Treated as opaque.
+# GCC-style ``asm("...")`` and extended ``__asm volatile ("..." : ...)``,
+# used by uc80/uc386 corpus headers and per-port hot loops. The
+# template + operand/clobber/label lists are parsed but kept as
+# opaque text — backends that don't understand inline asm ignore the
+# AstNode.
 <asm_declaration>
-    : KW_ASM LPAREN STRING_LIT@template RPAREN SEMI   %ast=AsmDeclaration ;
+    : KW_ASM <asm_qualifiers>@quals LPAREN <asm_template>@template
+      <asm_clauses>@clauses RPAREN SEMI                   %ast=AsmDeclaration
+    ;
+
+# Zero or more of volatile / inline / goto. Bare KW_* are tokens —
+# producing an "ignored-qualifier" placeholder keeps the list non-
+# empty in shape but carries no AST data.
+<asm_qualifiers> %ast=list element=<asm_qualifier>
+    :
+    | <asm_qualifiers> <asm_qualifier>
+    ;
+
+<asm_qualifier>?
+    : KW_VOLATILE    %ast=AsmQualVolatile
+    | KW_INLINE      %ast=AsmQualInline
+    | KW_GOTO        %ast=AsmQualGoto
+    ;
+
+# One or more adjacent string literals make up the template.
+<asm_template> %ast=list element=<asm_template_piece>
+    : <asm_template_piece>
+    | <asm_template> <asm_template_piece>
+    ;
+
+<asm_template_piece>?
+    : STRING_LIT@value   %ast=StringLiteral
+    ;
+
+# Optional ``: outputs : inputs : clobbers : labels`` operand chain.
+# Each clause is a (colon, optional-operand-list) pair; we accept
+# any number of trailing colon-clauses up to four (GCC's maximum).
+<asm_clauses> %ast=list element=<asm_clause>
+    :
+    | <asm_clauses> <asm_clause>
+    ;
+
+<asm_clause>?
+    : COLON <asm_operand_list_opt>@operands  %ast=AsmClause
+    ;
+
+<asm_operand_list_opt>
+    : <asm_operand_list>@operands   %ast=_unwrap
+    |
+    ;
+
+<asm_operand_list> %ast=list element=<asm_operand>
+    : <asm_operand>
+    | <asm_operand_list> COMMA <asm_operand>
+    ;
+
+# An operand is either an output/input constraint `"=r" (expr)` (with
+# an optional `[symbolic]` label) or a clobber/label string. The
+# bracketed name form is allowed even on clobbers, hence the
+# permissive shape.
+<asm_operand>?
+    : <asm_operand_name_opt>@name STRING_LIT@constraint
+      LPAREN <expr>@expr RPAREN                          %ast=AsmOperand
+    | <asm_operand_name_opt>@name STRING_LIT@constraint  %ast=AsmClobber
+    | IDENT@label                                        %ast=AsmGotoLabel
+    ;
+
+<asm_operand_name_opt>
+    : LBRACKET IDENT@name RBRACKET   %ast=_unwrap
+    |
+    ;
 
 # --- function definitions --------------------------------------------------
 
