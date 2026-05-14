@@ -150,6 +150,7 @@ KW_IMAG    = /__imag__|__imag/
 KW_VA_ARG  = /__builtin_va_arg|va_arg/
 KW_OFFSETOF = '__builtin_offsetof'
 KW_INT128  = /__int128_t|__int128|__uint128_t/
+KW_LABEL   = '__label__'    # GCC extension: locally-scoped labels usable in nested fns
 
 IDENT      = /[A-Za-z_][A-Za-z0-9_]*/
 
@@ -641,6 +642,26 @@ KW_GENERIC KW_VA_ARG KW_OFFSETOF
     | <stmt>
     | <static_assert_declaration>
     | <asm_declaration>
+    | <function_definition>       # GCC extension: nested function definition
+    | <label_decl>                # GCC extension: __label__ name [, name]* ;
+    ;
+
+# GCC extension: ``__label__ name [, name]* ;`` declares one or more
+# locally-scoped labels at the head of a compound block. The labels can
+# be referenced by a nested function definition's ``goto`` (the so-called
+# "nonlocal goto"); see uc386's nested-fn lowering for the trampoline /
+# setjmp / longjmp expansion.
+<label_decl>?
+    : KW_LABEL <label_decl_names>@names SEMI   %ast=LabelDecl
+    ;
+
+<label_decl_names> %ast=list element=<label_decl_name>
+    : <label_decl_name>
+    | <label_decl_names> COMMA <label_decl_name>
+    ;
+
+<label_decl_name>?
+    : IDENT@text   %ast=LabelDeclName
     ;
 
 <expression_stmt>?
