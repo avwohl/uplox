@@ -8,11 +8,16 @@
 # What's covered:
 #
 #   * %grammar / %options / %keyword_prefix / %keywords / %tokens / %hooks
-#     / %rules sections
+#     / %rules / %shift / %reduce / %ast_drop sections
+#   * %define KEY VALUE one-shot directive
+#   * %layout / %columns / %continuation lexer-feedback directives
 #   * tokens with regex /.../ or literal '...' patterns and the optional
 #     %skip flag and %balanced='close' attribute
 #   * BNF rules with `|` alternatives, `;` terminator, and the optional
 #     `%hook=<name>` annotation per alternative
+#   * v3 AST surface: `?` after LHS for ast_lift, `%ast=Name` per
+#     production, `%ast=list element=<X>` per rule, `@field` on RHS
+#     positions for named children
 #   * Single-quote string literals in token decls and rule RHS
 #   * Bracketed non-terminals `<name>` on rule LHS and RHS
 #
@@ -25,6 +30,17 @@
 
 %options
 start = file
+
+%reduce
+# Inside %layout / %continuation / %columns blocks, kv-value lists
+# (`flow_open = '(' '['`) can extend across multiple tokens. Without
+# a NEWLINE token in this lexer, the parser can't tell where one
+# kv_line ends and the next begins on shift; reduce closes the
+# current line, treating the next IDENT / DEFINE_NAME as the start
+# of the next key. Real configs use quoted-literal lists (STRINGs)
+# for multi-value entries, which don't trigger this reduction.
+IDENT
+DEFINE_NAME
 
 %tokens
 WS         = /[ \t\r\n]+/                  %skip
@@ -46,11 +62,26 @@ PCT_SKIP           = '%skip'
 PCT_HOOK           = '%hook'
 PCT_PREC           = '%prec'
 PCT_BALANCED       = '%balanced'
+PCT_AST_DROP       = '%ast_drop'
+PCT_AST            = '%ast'
+PCT_LAYOUT         = '%layout'
+PCT_COLUMNS        = '%columns'
+PCT_CONTINUATION   = '%continuation'
 
 EQ         = '='
 COLON      = ':'
 SEMI       = ';'
 PIPE       = '|'
+QMARK      = '?'
+COMMA      = ','
+LPAREN     = '('
+RPAREN     = ')'
+MINUS      = '-'
+
+# `@field` annotation — used in the v3 AST surface to name an
+# RHS position's contribution to the produced node. The whole
+# thing (including the @) is one token.
+AT_FIELD   = /@[A-Za-z_][A-Za-z0-9_]*/
 
 # Regex literals: /.../ with escapes.
 REGEX      = /\/([^\/\\]|\\.)*\//
@@ -71,6 +102,12 @@ IDENT      = /[A-Za-z_][A-Za-z0-9_]*/
 # prefer IDENT (longest-match ties broken by declaration order); only
 # kicks in when a token actually contains a `.` or `-`.
 DEFINE_NAME = /[A-Za-z_][A-Za-z0-9_.\-]*/
+
+# Integer literal — used inside %columns blocks for column numbers
+# and the `width` setting, and in %continuation's `at_column N`.
+# Declared after the identifier-shaped tokens so plain integer
+# matches don't get pre-empted.
+INTEGER = /[0-9]+/
 
 # Action body: opaque target-language source. The DFA only recognises the
 # opening `{`; the runtime's %balanced extension extends the match by
@@ -98,6 +135,10 @@ ACTION_BODY = '{' %balanced='}'
        | <define_directive>
        | <shift_section>
        | <reduce_section>
+       | <ast_drop_section>
+       | <layout_section>
+       | <columns_section>
+       | <continuation_section>
        | <rules_section>
        ;
 
@@ -116,6 +157,62 @@ ACTION_BODY = '{' %balanced='}'
 
 <shift_section>  : PCT_SHIFT  <ident_seq> ;
 <reduce_section> : PCT_REDUCE <ident_seq> ;
+
+# --- %ast_drop section (v3 AST surface) -----------------------------------
+
+<ast_drop_section> : PCT_AST_DROP <ident_seq> ;
+
+# --- %layout / %continuation sections — `key = value` lines --------------
+
+<layout_section>       : PCT_LAYOUT       <kv_line_list> ;
+<continuation_section> : PCT_CONTINUATION <kv_line_list> ;
+
+<kv_line_list> : <kv_line_list> <kv_line>
+               | <kv_line>
+               ;
+
+# A key=value line. The value can be a bare identifier, a quoted
+# literal, an integer, or a space-separated list of those (the
+# `flow_open = '(' '['` shape).
+<kv_line> : <kv_name> EQ <kv_value_list> ;
+
+<kv_name> : IDENT | DEFINE_NAME ;
+
+<kv_value_list> : <kv_value_list> <kv_value>
+                | <kv_value>
+                ;
+
+<kv_value> : IDENT
+           | DEFINE_NAME
+           | STRING
+           | NONTERM
+           | INTEGER
+           ;
+
+# --- %columns section ------------------------------------------------------
+#
+# Lines are either `width = N` (a kv_line) or
+# `cols N[-M] key=value key=value ...`. The keyword `cols` is a
+# plain IDENT — we don't reserve it; the parser distinguishes
+# `cols`-led lines from `width = ...` lines by lookahead.
+
+<columns_section> : PCT_COLUMNS <columns_line_list> ;
+
+<columns_line_list> : <columns_line_list> <columns_line>
+                    | <columns_line>
+                    ;
+
+<columns_line> : <kv_line>
+               | IDENT <col_range> <columns_kv_list>
+               ;
+
+<col_range> : <kv_value>
+            | <kv_value> MINUS <kv_value>
+            ;
+
+<columns_kv_list> : <columns_kv_list> <kv_line>
+                  | <kv_line>
+                  ;
 
 # --- options ---------------------------------------------------------------
 
@@ -188,30 +285,58 @@ ACTION_BODY = '{' %balanced='}'
             | <rule>
             ;
 
-<rule> : NONTERM COLON <alts> SEMI ;
+<rule> : <rule_lhs> COLON <alts> SEMI ;
+
+# Rule LHS — bare non-terminal, optionally with v3 AST annotations:
+# `?` for ast_lift, `%ast=Name` for explicit kind, or
+# `%ast=list element=<X>` for list-shaped rules.
+<rule_lhs> : NONTERM
+           | NONTERM QMARK
+           | NONTERM PCT_AST EQ IDENT
+           | NONTERM PCT_AST EQ IDENT IDENT EQ NONTERM
+           | NONTERM QMARK PCT_AST EQ IDENT
+           ;
 
 <alts> : <alts> PIPE <alt>
        | <alt>
        ;
 
-<alt> : <symbols> <opt_hook> <opt_action> ;
+# Per-production annotations: `%hook=<name>` and `%ast=<Name>` may
+# appear in any order, either or both, after the symbols list.
+<alt> : <symbols> <alt_annotations> <opt_action> ;
+
+<alt_annotations> : <alt_annotations> <alt_annotation>
+                  |
+                  ;
+
+<alt_annotation> : <opt_hook>
+                 | <opt_ast>
+                 ;
 
 <opt_action> : ACTION_BODY
              |
              ;
+
+# `%ast=Name` annotation per production. Distinct from the rule-LHS
+# `%ast=list element=<X>` form which lives on <rule_lhs>.
+<opt_ast> : PCT_AST EQ IDENT ;
 
 <symbols> : <symbols> <symbol>
           |
           ;
 
 # A symbol on the RHS is a terminal name (IDENT), a non-terminal
-# reference (NONTERM = <ident>), or an inline string literal.
+# reference (NONTERM = <ident>), or an inline string literal. Each
+# may carry an optional `@field` annotation (v3 AST surface) that
+# names its contribution to the produced node.
 <symbol> : IDENT
          | NONTERM
          | STRING
+         | IDENT   AT_FIELD
+         | NONTERM AT_FIELD
+         | STRING  AT_FIELD
          ;
 
-# `%hook=<name>` annotation, optional per alternative.
-<opt_hook> : PCT_HOOK EQ IDENT
-           |
-           ;
+# `%hook=<name>` annotation. Mandatory inside <opt_hook> — the
+# "optional" part is now handled at the <alt_annotation> level.
+<opt_hook> : PCT_HOOK EQ IDENT ;
