@@ -126,6 +126,7 @@ implements the full classical hack on top of these primitives.
 ## Bundled example grammars
 
 - `calc` — arithmetic expressions, the smoke test.
+- `json` — strict ECMA-404 / RFC 8259 JSON. The data-language sized counterpart to `calc`'s expression-language smoke test: one value-recursive non-terminal, two compound shapes (object / array), three keyword literals (`true` / `false` / `null`), plus a spec-exact number regex and a backslash-escape-permissive string regex. LALR(1) at 27 states, conflict-free. No relaxed forms (trailing commas, comments, unquoted keys) — those belong in a JSONC / JSON5 variant.
 - `calc_ast` — same language as `calc`, annotated with the v3 auto-AST
   surface (`%ast=`, `?`, `@field`, `%ast_drop`). Emitted Python module
   produces typed `BinOp` / `NumLit` dataclasses instead of a generic

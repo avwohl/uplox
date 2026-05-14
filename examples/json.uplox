@@ -1,0 +1,99 @@
+# JSON grammar — strict ECMA-404 / RFC 8259.
+#
+# JSON is the small one in this examples set: no operators, no
+# statements, no precedence, no LR(1) ambiguities. The whole
+# document is a single value — an object, array, string, number,
+# `true`, `false`, or `null`. Recursion through object and array
+# carries the structure.
+#
+# This grammar is the strict spec form. Out of scope (by design):
+#
+#   * Trailing commas in objects and arrays. RFC 8259 disallows
+#     them; relaxed JSON parsers / JSON5 / JSONC accept them. A
+#     trailing-comma variant of this grammar would change two
+#     productions; we keep the strict form for spec parity.
+#   * Comments. Neither `//` nor `/* … */` are valid in strict
+#     JSON. Use JSONC for those.
+#   * Unquoted keys or single-quoted strings (JSON5).
+#   * `NaN` / `Infinity` as numeric literals — strict JSON
+#     numbers must be finite.
+#
+# The number regex matches RFC 8259 §6 exactly: optional leading
+# `-`, an integer part with no leading zero (or just `0`), an
+# optional fractional part, and an optional exponent. The string
+# regex matches §7's `string = quotation-mark *char quotation-mark`
+# shape — we keep the escape language permissive at the lexer
+# level (`\\.`) and let the host validate the four-hex-digit
+# `\uXXXX` form during semantic analysis.
+
+%grammar json
+
+
+%define lr.type lalr
+%options
+start = json_text
+
+%tokens
+
+WS     = /[ \t\r\n]+/                                              %skip
+
+# RFC 8259 §6 number grammar:
+#   number = [ minus ] int [ frac ] [ exp ]
+#   int    = zero | digit1-9 *DIGIT
+#   frac   = "." 1*DIGIT
+#   exp    = ("e" | "E") [ ("-" | "+") ] 1*DIGIT
+NUMBER = /-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?/
+
+# RFC 8259 §7 string grammar. The lexer accepts any
+# backslash-escape; semantic phase validates `\b \f \n \r \t \\
+# \/ \" \uXXXX`.
+STRING = /"([^"\\\n]|\\.)*"/
+
+KW_TRUE  = 'true'
+KW_FALSE = 'false'
+KW_NULL  = 'null'
+
+LBRACE   = '{'
+RBRACE   = '}'
+LBRACK   = '['
+RBRACK   = ']'
+COLON    = ':'
+COMMA    = ','
+
+%rules
+
+# A JSON text is a single value. RFC 8259 §2.
+<json_text> : <value>
+            ;
+
+<value> : <object>
+        | <array>
+        | STRING
+        | NUMBER
+        | KW_TRUE
+        | KW_FALSE
+        | KW_NULL
+        ;
+
+# Objects. Empty `{}` plus the comma-separated member list.
+# RFC 8259 §4.
+<object> : '{' '}'
+         | '{' <member_list> '}'
+         ;
+
+<member_list> : <member>
+              | <member_list> ',' <member>
+              ;
+
+<member> : STRING ':' <value>
+         ;
+
+# Arrays. Empty `[]` plus the comma-separated element list.
+# RFC 8259 §5.
+<array> : '[' ']'
+        | '[' <element_list> ']'
+        ;
+
+<element_list> : <value>
+               | <element_list> ',' <value>
+               ;
