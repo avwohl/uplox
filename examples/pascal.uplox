@@ -1,0 +1,550 @@
+# Standard Pascal grammar — uplox first cut.
+#
+# Targets the syntactic core of classic Pascal, sized to match Wirth's
+# original "Pascal User Manual and Report" / ISO 7185, with a few
+# pragmatic accommodations real compilers shipped (typed constants,
+# `//` line comments, `$hex` literals, `external` directive). The
+# repertoire:
+#
+#   * `program` header with an optional parameter list.
+#   * Declaration parts in the canonical order — `label`, `const`,
+#     `type`, `var`, `procedure` / `function` — each optional and
+#     each repeatable as separate sections.
+#   * Type denoters: named types, subranges (`1..10`), enumerations
+#     (`(red, green, blue)`), `array [..] of T` with multiple
+#     index types, `record ... end` including the variant `case` part,
+#     `set of T`, `file of T`, pointer types (`^T`), the `packed`
+#     prefix.
+#   * Statements: compound, assignment, procedure call, `if/then/else`,
+#     `while/do`, `repeat/until`, `for/to/downto/do`, `case/of/else`,
+#     `with/do`, `goto`, empty.
+#   * Expressions with the classic four-precedence ladder
+#     (relational / additive / multiplicative / unary), the `in` set
+#     membership operator, set constructors `[a, b, x..y]`, and the
+#     pointer-address `@var` form.
+#   * Procedure and function declarations with `var` / `const` /
+#     value parameters, procedural parameters, the `forward` and
+#     `external` directives, arbitrarily nested.
+#
+# Out of scope (deliberate — keeps the grammar Wirth-clean):
+#
+#   * Object Pascal: classes, interfaces, properties, `uses` clauses,
+#     unit / interface / implementation sections.
+#   * Generics, anonymous methods, exception handling.
+#   * Inline assembler blocks, conditional compilation directives.
+#   * Variable parameters beyond `var T` (no `out`, no open arrays).
+#
+# Pascal source is conventionally case-insensitive; this grammar
+# accepts the lowercase keyword spelling only. Hosts that need
+# case-insensitivity should downcase identifiers before the lexer
+# sees them, or install a token filter that maps mixed-case keywords
+# to the canonical lowercase tokens.
+#
+# Conflict-resolution decisions:
+#
+#   * The dangling-else uses the standard greedy-shift resolution
+#     (%shift KW_ELSE) — `if A then if B then S1 else S2` binds the
+#     ELSE to the inner IF, which is what every Pascal compiler does.
+#   * Assignment and procedure-call statements share a common prefix
+#     (a designator). The split happens at the LR(1) lookahead after
+#     the designator — `:=` opens an assignment, anything else (the
+#     statement-terminating set) closes a bare call.
+#   * Subrange types (`lo..hi`) and named types (`MyType`) both start
+#     with IDENT in a type-denoter position. LR(1) disambiguates on
+#     the `..` lookahead — present means subrange, absent means a
+#     plain type identifier. LALR(1) merging preserves the split
+#     because the FOLLOW sets stay disjoint.
+#   * Pascal labels and case-statement constants are both unsigned
+#     integers; they appear in disjoint grammar positions, so no
+#     special handling is needed.
+
+%grammar pascal
+
+
+%define lr.type lalr
+%options
+start = program
+
+%shift
+KW_ELSE
+
+%tokens
+WS            = /[ \t\r\n]+/                                  %skip
+# Block comments come in two flavours: `{ ... }` (preferred) and
+# `(* ... *)` (legacy). Both are skipped.
+BRACE_COMMENT = /\{[^}]*\}/                                   %skip
+PAREN_COMMENT = /\(\*([^*]|\*+[^*\)])*\*+\)/                  %skip
+# Line comments are a Borland/Delphi extension widely adopted by
+# modern Pascal implementations.
+LINE_COMMENT  = /\/\/[^\n]*/                                  %skip
+
+# Numeric literals. Integer literals can be decimal or hexadecimal
+# (`$1A2F`); reals require either a decimal point with a fractional
+# part, or an exponent, so `1` lexes as INT_LIT and `1.0` / `1e2`
+# lex as REAL_LIT.
+INT_LIT       = /([0-9]+|\$[0-9A-Fa-f]+)/
+REAL_LIT      = /[0-9]+(\.[0-9]+([eE][+-]?[0-9]+)?|[eE][+-]?[0-9]+)/
+
+# String literals are single-quoted; embedded `''` is the escape for
+# a single quote. Newlines are not allowed inside the literal — long
+# strings concatenate at the source level (`'foo' 'bar'`), which the
+# host handles after lexing.
+STRING_LIT    = /'([^'\n]|'')*'/
+
+# Keywords (declared before IDENT so longest-match ties favour the
+# keyword over an identifier with the same spelling).
+KW_PROGRAM    = 'program'
+KW_LABEL      = 'label'
+KW_CONST      = 'const'
+KW_TYPE       = 'type'
+KW_VAR        = 'var'
+KW_PROCEDURE  = 'procedure'
+KW_FUNCTION   = 'function'
+KW_BEGIN      = 'begin'
+KW_END        = 'end'
+KW_IF         = 'if'
+KW_THEN       = 'then'
+KW_ELSE       = 'else'
+KW_WHILE      = 'while'
+KW_DO         = 'do'
+KW_REPEAT     = 'repeat'
+KW_UNTIL      = 'until'
+KW_FOR        = 'for'
+KW_TO         = 'to'
+KW_DOWNTO     = 'downto'
+KW_CASE       = 'case'
+KW_OF         = 'of'
+KW_WITH       = 'with'
+KW_GOTO       = 'goto'
+KW_ARRAY      = 'array'
+KW_RECORD     = 'record'
+KW_SET        = 'set'
+KW_FILE       = 'file'
+KW_PACKED     = 'packed'
+KW_DIV        = 'div'
+KW_MOD        = 'mod'
+KW_AND        = 'and'
+KW_OR         = 'or'
+KW_XOR        = 'xor'
+KW_NOT        = 'not'
+KW_IN         = 'in'
+KW_NIL        = 'nil'
+KW_FORWARD    = 'forward'
+KW_EXTERNAL   = 'external'
+
+IDENT         = /[A-Za-z_][A-Za-z0-9_]*/
+
+# Multi-char operators before single-char so longest-match wins.
+ASSIGN        = ':='
+LE            = '<='
+GE            = '>='
+NE            = '<>'
+DOTDOT        = '..'
+
+EQ            = '='
+LT            = '<'
+GT            = '>'
+PLUS          = '+'
+MINUS         = '-'
+STAR          = '*'
+SLASH         = '/'
+CARET         = '^'
+AT            = '@'
+LPAREN        = '('
+RPAREN        = ')'
+LBRACK        = '['
+RBRACK        = ']'
+COMMA         = ','
+SEMI          = ';'
+COLON         = ':'
+DOT           = '.'
+
+%rules
+
+# --- program -------------------------------------------------------------
+
+<program>      : <program_header> <block> '.'
+               ;
+
+<program_header> : KW_PROGRAM IDENT <program_params_opt> ';'
+                 |
+                 ;
+
+<program_params_opt> : '(' <ident_list> ')'
+                     |
+                     ;
+
+# --- block ---------------------------------------------------------------
+
+<block>        : <decl_parts> <compound_stmt>
+               ;
+
+<decl_parts>   : <decl_parts> <decl_part>
+               |
+               ;
+
+<decl_part>    : <label_decl_part>
+               | <const_decl_part>
+               | <type_decl_part>
+               | <var_decl_part>
+               | <routine_decl>
+               ;
+
+# Pascal allows multiple sections of each kind in any order.
+<label_decl_part> : KW_LABEL <label_list> ';' ;
+<label_list>      : INT_LIT
+                  | <label_list> ',' INT_LIT
+                  ;
+
+<const_decl_part> : KW_CONST <const_decl_seq> ;
+<const_decl_seq>  : <const_decl>
+                  | <const_decl_seq> <const_decl>
+                  ;
+# Two forms: untyped (`PI = 3.14;`) and typed (`Buf : array[1..10] of
+# integer = (...);`). Typed constants are a near-universal extension
+# of ISO 7185.
+<const_decl>      : IDENT '=' <expr> ';'
+                  | IDENT ':' <type_denoter> '=' <typed_const> ';'
+                  ;
+
+<type_decl_part>  : KW_TYPE <type_decl_seq> ;
+<type_decl_seq>   : <type_decl>
+                  | <type_decl_seq> <type_decl>
+                  ;
+<type_decl>       : IDENT '=' <type_denoter> ';' ;
+
+<var_decl_part>   : KW_VAR <var_decl_seq> ;
+<var_decl_seq>    : <var_decl>
+                  | <var_decl_seq> <var_decl>
+                  ;
+<var_decl>        : <ident_list> ':' <type_denoter> ';'
+                  | <ident_list> ':' <type_denoter> '=' <typed_const> ';'
+                  ;
+
+# --- routines ------------------------------------------------------------
+
+<routine_decl> : <proc_heading> ';' <routine_tail>
+               | <func_heading> ';' <routine_tail>
+               ;
+
+<proc_heading> : KW_PROCEDURE IDENT <formal_params_opt>
+               ;
+<func_heading> : KW_FUNCTION IDENT <formal_params_opt> ':' <type_ident>
+               ;
+
+# A routine's tail is either a directive (forward / external) or a
+# body block; both forms end in `;`.
+<routine_tail> : <directive> ';'
+               | <block> ';'
+               ;
+
+<directive>    : KW_FORWARD
+               | KW_EXTERNAL
+               | KW_EXTERNAL STRING_LIT
+               ;
+
+<formal_params_opt> : '(' <formal_param_list> ')'
+                    | '(' ')'
+                    |
+                    ;
+
+<formal_param_list> : <formal_param>
+                    | <formal_param_list> ';' <formal_param>
+                    ;
+
+# Pascal procedural / functional parameters: `procedure foo(procedure
+# cb(x: integer))`. Lifting the heading non-terminals here is the
+# idiomatic spelling.
+<formal_param>   : <ident_list> ':' <type_ident>
+                 | KW_VAR <ident_list> ':' <type_ident>
+                 | KW_CONST <ident_list> ':' <type_ident>
+                 | <proc_heading>
+                 | <func_heading>
+                 ;
+
+# --- type denoters -------------------------------------------------------
+
+<type_denoter> : <simple_type>
+               | <structured_type>
+               | <pointer_type>
+               ;
+
+<simple_type>  : <subrange_type>
+               | <enum_type>
+               | <type_ident>
+               ;
+
+# Subrange bounds are constants; accept full constant expressions so
+# `low..high` works for any compile-time-evaluable pair. The host's
+# semantic phase enforces the actual constant-ness.
+<subrange_type> : <const_factor> '..' <const_factor>
+                ;
+
+# A constant-position factor: literals, optional sign, and named
+# constants. No parenthesised form — `(expr)` as a subrange bound
+# would collide with the `(ident_list)` enum_type spelling at array
+# index position, since the LR(1) lookahead can't distinguish the
+# two at the inner IDENT's RPAREN. Restricting subrange bounds to
+# bare names / literals matches what Pascal sources actually use.
+<const_factor>  : INT_LIT
+                | REAL_LIT
+                | STRING_LIT
+                | KW_NIL
+                | '+' <const_factor>
+                | '-' <const_factor>
+                | IDENT
+                ;
+
+<enum_type>     : '(' <ident_list> ')' ;
+
+<type_ident>    : IDENT ;
+
+<structured_type> : <unpacked_structured>
+                  | KW_PACKED <unpacked_structured>
+                  ;
+
+<unpacked_structured> : <array_type>
+                      | <record_type>
+                      | <set_type>
+                      | <file_type>
+                      ;
+
+<array_type>   : KW_ARRAY '[' <index_type_list> ']' KW_OF <type_denoter>
+               ;
+
+<index_type_list> : <simple_type>
+                  | <index_type_list> ',' <simple_type>
+                  ;
+
+<record_type>  : KW_RECORD <field_list> KW_END
+               ;
+
+# Field lists allow any mix of fixed fields followed by an optional
+# variant `case` part. Trailing semicolons inside the record are
+# tolerated through the empty-field-list alternative.
+<field_list>   : <fixed_part>
+               | <fixed_part> ';' <variant_part>
+               | <variant_part>
+               |
+               ;
+
+<fixed_part>   : <field_decl>
+               | <fixed_part> ';' <field_decl>
+               ;
+
+<field_decl>   : <ident_list> ':' <type_denoter>
+               ;
+
+<variant_part> : KW_CASE <variant_selector> KW_OF <variant_list>
+               ;
+
+# `case Tag: TagType of` (with a discriminator field) or `case
+# TagType of` (no explicit field — purely an overlap declaration).
+<variant_selector> : IDENT ':' <type_ident>
+                   | <type_ident>
+                   ;
+
+<variant_list> : <variant>
+               | <variant_list> ';' <variant>
+               ;
+
+<variant>      : <const_list> ':' '(' <field_list> ')'
+               ;
+
+<const_list>   : <expr>
+               | <const_list> ',' <expr>
+               ;
+
+<set_type>     : KW_SET KW_OF <simple_type> ;
+
+<file_type>    : KW_FILE KW_OF <type_denoter>
+               | KW_FILE
+               ;
+
+<pointer_type> : '^' <type_ident> ;
+
+# --- typed constants -----------------------------------------------------
+#
+# A typed constant is either a single expression (scalar / pointer /
+# enum) or a parenthesised aggregate. Aggregates come in two flavours:
+# positional `(1, 2, 3)` for arrays / sets / records-without-names, and
+# named `(x: 1; y: 2)` for records by field name. Positional aggregates
+# require at least one comma; otherwise `(expr)` would be ambiguous
+# between a singleton aggregate and a parenthesised expression.
+# Named aggregates are disambiguated by the `IDENT ':'` head of the
+# first field init.
+
+<typed_const>  : <expr>
+               | '(' <typed_const> ',' <typed_const_list_tail> ')'
+               | '(' <field_init_list> ')'
+               | '(' ')'
+               ;
+
+<typed_const_list_tail> : <typed_const>
+                        | <typed_const_list_tail> ',' <typed_const>
+                        ;
+
+<field_init_list>  : <field_init>
+                   | <field_init_list> ';' <field_init>
+                   ;
+
+<field_init>   : IDENT ':' <typed_const> ;
+
+# --- statements ----------------------------------------------------------
+
+<compound_stmt> : KW_BEGIN <stmt_list> KW_END
+                ;
+
+<stmt_list>    : <stmt>
+               | <stmt_list> ';' <stmt>
+               ;
+
+<stmt>         : <unlabelled_stmt>
+               | INT_LIT ':' <unlabelled_stmt>
+               ;
+
+# The empty alternative captures Pascal's empty statement, which lets
+# trailing semicolons before `end`, `until`, and friends parse
+# without a special-case rule.
+<unlabelled_stmt> : <simple_stmt>
+                  | <structured_stmt>
+                  |
+                  ;
+
+<simple_stmt>  : <assignment_stmt>
+               | <proc_call_stmt>
+               | <goto_stmt>
+               ;
+
+# Both assignment and procedure call begin with a designator. The
+# LR(1) lookahead after the designator (`:=` versus the
+# statement-terminator set) picks the production.
+<assignment_stmt> : <designator> ':=' <expr> ;
+<proc_call_stmt>  : <designator> ;
+<goto_stmt>       : KW_GOTO INT_LIT ;
+
+<structured_stmt> : <compound_stmt>
+                  | <if_stmt>
+                  | <while_stmt>
+                  | <repeat_stmt>
+                  | <for_stmt>
+                  | <case_stmt>
+                  | <with_stmt>
+                  ;
+
+<if_stmt>      : KW_IF <expr> KW_THEN <stmt>
+               | KW_IF <expr> KW_THEN <stmt> KW_ELSE <stmt>
+               ;
+
+<while_stmt>   : KW_WHILE <expr> KW_DO <stmt> ;
+
+<repeat_stmt>  : KW_REPEAT <stmt_list> KW_UNTIL <expr> ;
+
+<for_stmt>     : KW_FOR IDENT ':=' <expr> KW_TO     <expr> KW_DO <stmt>
+               | KW_FOR IDENT ':=' <expr> KW_DOWNTO <expr> KW_DO <stmt>
+               ;
+
+# Case statements optionally carry an `else` clause for the default
+# arm; without it, an unmatched selector raises a runtime error.
+# A trailing semicolon before the `else` (or before `end`) is
+# accepted — Borland / Free Pascal sources rely on this and ISO
+# strict-mode is needlessly fussy about it.
+<case_stmt>    : KW_CASE <expr> KW_OF <case_list> <case_tail> KW_END
+               ;
+
+<case_tail>    : ';' KW_ELSE <stmt_list>
+               | KW_ELSE <stmt_list>
+               | ';'
+               |
+               ;
+
+<case_list>    : <case_arm>
+               | <case_list> ';' <case_arm>
+               ;
+
+<case_arm>     : <const_list> ':' <stmt>
+               ;
+
+<with_stmt>    : KW_WITH <designator_list> KW_DO <stmt> ;
+
+<designator_list> : <designator>
+                  | <designator_list> ',' <designator>
+                  ;
+
+# --- expressions ---------------------------------------------------------
+#
+# Pascal precedence, highest to lowest:
+#   * unary not / unary sign
+#   * multiplicative: *  /  div  mod  and
+#   * additive:       +  -  or   xor
+#   * relational:     =  <>  <  >  <=  >=  in   (non-associative)
+
+<expr>         : <simple_expr>
+               | <simple_expr> '='  <simple_expr>
+               | <simple_expr> '<>' <simple_expr>
+               | <simple_expr> '<'  <simple_expr>
+               | <simple_expr> '>'  <simple_expr>
+               | <simple_expr> '<=' <simple_expr>
+               | <simple_expr> '>=' <simple_expr>
+               | <simple_expr> KW_IN <simple_expr>
+               ;
+
+<simple_expr>  : <term>
+               | '+' <term>
+               | '-' <term>
+               | <simple_expr> '+'    <term>
+               | <simple_expr> '-'    <term>
+               | <simple_expr> KW_OR  <term>
+               | <simple_expr> KW_XOR <term>
+               ;
+
+<term>         : <factor>
+               | <term> '*'    <factor>
+               | <term> '/'    <factor>
+               | <term> KW_DIV <factor>
+               | <term> KW_MOD <factor>
+               | <term> KW_AND <factor>
+               ;
+
+<factor>       : <designator>
+               | INT_LIT
+               | REAL_LIT
+               | STRING_LIT
+               | KW_NIL
+               | '(' <expr> ')'
+               | KW_NOT <factor>
+               | '@' <designator>
+               | <set_ctor>
+               ;
+
+<set_ctor>     : '[' ']'
+               | '[' <set_member_list> ']'
+               ;
+<set_member_list> : <set_member>
+                  | <set_member_list> ',' <set_member>
+                  ;
+<set_member>   : <expr>
+               | <expr> '..' <expr>
+               ;
+
+# A designator is a chain that starts at an identifier and then
+# applies any sequence of field selectors, array indices, pointer
+# dereferences, and (for function or procedure calls) actual-parameter
+# lists. Pascal doesn't syntactically distinguish array indexing
+# from function calls at the punctuation level — they share `[…]`
+# and `(…)` respectively.
+<designator>   : IDENT
+               | <designator> '.' IDENT
+               | <designator> '[' <expr_list> ']'
+               | <designator> '^'
+               | <designator> '(' <expr_list> ')'
+               | <designator> '(' ')'
+               ;
+
+<expr_list>    : <expr>
+               | <expr_list> ',' <expr>
+               ;
+
+<ident_list>   : IDENT
+               | <ident_list> ',' IDENT
+               ;

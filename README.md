@@ -140,6 +140,7 @@ implements the full classical hack on top of these primitives.
 - `plm_subset` — the first real grammar (Phase 5). Calc-style PL/M with declarations, IF/THEN/ELSE, DO blocks.
 - `plm_full` — extends `plm_subset` to the constructs Digital Research's BDOS uses (LITERALLY, INITIAL, AT, BASED, iterative DO TO/BY, DO CASE, structures). Parses the first 162 lines of the real `bdos.plm` source end-to-end.
 - `c_subset` — a meaningful subset of C: function definitions, full statement repertoire (if/else/while/for/do-while/switch/break/continue/goto/return), expressions with C precedence, struct/union/enum, casts, the typedef-name lexer hack, and a preprocessor skip. Parses 21 of uc80's example C programs (vendored as fixtures).
+- `pascal` — standard Pascal (Wirth / ISO 7185), with the universal extensions real compilers shipped (typed constants, `//` line comments, `$hex` literals, `external` directives). Programs with the full declaration repertoire (label / const / type / var / procedure / function), all six type-denoter shapes (simple / subrange / enum / array / record with variant `case` part / set / file / pointer), the classic statement set including `case/of/else` and `with`, expressions with the four-precedence ladder plus set constructors and `in`. LALR(1) at 350 states, conflict-free.
 - `uplox_self` — the .uplox DSL described in itself. Parses every other example grammar in this list, including its own definition — action bodies and all (the lexer's `%balanced=` extension matches `{ ... }` runs by counting nested braces).
 
 ## Documentation
