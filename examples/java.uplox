@@ -259,6 +259,12 @@ KW_INSTANCEOF = 'instanceof'
 KW_VAR        = 'var'
 KW_YIELD      = 'yield'
 
+# `_` was reserved as a keyword in Java 9 (removed as an
+# identifier) and became the unnamed-pattern / unnamed-
+# variable marker in Java 22 (JEP 456). Pattern positions
+# accept it in place of the binder identifier.
+KW_UNDERSCORE = '_'
+
 # --- statement keywords --------------------------------------------------
 KW_IF         = 'if'
 KW_ELSE       = 'else'
@@ -1281,8 +1287,10 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
                   | <relational_expr> '>=' <shift_expr>
                   | <relational_expr> KW_INSTANCEOF <reference_type>
                   | <relational_expr> KW_INSTANCEOF <reference_type> IDENT_PATTERN
+                  | <relational_expr> KW_INSTANCEOF <reference_type> KW_UNDERSCORE
                   | <relational_expr> KW_INSTANCEOF <reference_type> '(' <record_pattern_list> ')'
                   | <relational_expr> KW_INSTANCEOF <reference_type> '(' <record_pattern_list> ')' IDENT_PATTERN
+                  | <relational_expr> KW_INSTANCEOF <reference_type> '(' <record_pattern_list> ')' KW_UNDERSCORE
                   ;
 
 # Record pattern components — each is a nested pattern,
@@ -1293,9 +1301,12 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
                       ;
 
 <record_pattern_component> : <type> IDENT
+                           | <type> KW_UNDERSCORE
                            | KW_VAR IDENT
+                           | KW_VAR KW_UNDERSCORE
                            | <reference_type> '(' <record_pattern_list> ')'
                            | <reference_type> '(' <record_pattern_list> ')' IDENT
+                           | <reference_type> '(' <record_pattern_list> ')' KW_UNDERSCORE
                            ;
 
 <shift_expr> : <additive_expr>
