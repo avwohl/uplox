@@ -1,11 +1,12 @@
-# C# grammar — uplox first cut.
+# C# grammar — uplox modern-C# cut.
 #
-# Targets the language as it stood in C# 8 — modern enough to cover
-# real-world code (LINQ method-call style, async / await, nullable
-# annotations, expression-bodied members, switch with patterns,
-# property accessors with `init`) without the LR(k>1) features added
-# in C# 9-12 (records, top-level statements, file-scoped namespaces,
-# recursive list patterns, required members).
+# Targets the language through C# 11 — modern enough to cover
+# real-world code (LINQ both method-call and query-syntax, async /
+# await, nullable annotations, expression-bodied members, switch
+# with patterns including recursive / list / property / relational
+# patterns, property accessors with `init` and `field`, records,
+# top-level statements, file-scoped namespaces, required members,
+# native integers).
 #
 # Built around the standard ECMA-334 / Roslyn syntactic layout:
 #
@@ -120,20 +121,17 @@
 # alternative is to never lex `>>` and require shift expressions
 # to read `> >`, which breaks every existing C# parser visualisation.
 #
-# Out of scope (the first cut keeps the grammar in C# 8 territory):
+# Out of scope (the remaining LR-hostile corners):
 #
-#   * Records (C# 9): `record class` / `record struct`, primary
-#     constructors, `with` expressions.
-#   * Top-level statements (C# 9) and file-scoped namespaces (C# 10).
-#   * Recursive pattern matching: positional, property, list,
-#     relational patterns. The simple type/declaration patterns
-#     (`is T`, `is T x`, `is var x`) are supported.
-#   * `nint` / `nuint` native-int types (C# 9).
-#   * Required members, the `field` accessor (C# 11+).
-#   * LINQ query expressions (`from x in xs select x`). LINQ in
-#     method-call style still works.
-#   * Inline assembler / `stackalloc` / pointer dereference syntax
-#     beyond the type-level `T*` form.
+#   * Pattern combinators `and` / `or` / `not` (C# 9). These are
+#     contextual keywords reserved only inside pattern contexts
+#     — without a host-side parser-state-aware tokeniser they
+#     can't be distinguished from identifiers. Switch arms can
+#     usually be split to avoid the combinator forms.
+#   * `with` expressions (C# 9 non-destructive mutation) and
+#     primary-constructor field shorthand inside record bodies.
+#   * `stackalloc` / pointer dereference syntax beyond the
+#     type-level `T*` form.
 #   * `dynamic` as a special type — accepted as a plain identifier.
 
 %grammar csharp
@@ -182,6 +180,14 @@ KW_NAMESPACE
 KW_NEW
 KW_REF
 KW_USING
+
+%shift
+# `into` after a join clause's `equals <expr>` is greedy — it
+# extends the join_clause into a group-join (`join … into x`)
+# rather than reducing the join clause empty-into and starting
+# a fresh <query_continuation>. Same standard LR resolution as
+# the Roslyn / Mono parsers for this position.
+KW_INTO_LINQ
 
 %reduce
 # After a switch section's statement list, `default` / `case`
@@ -244,6 +250,7 @@ KW_UNSAFE     = 'unsafe'
 KW_FIXED      = 'fixed'
 KW_EXPLICIT   = 'explicit'
 KW_IMPLICIT   = 'implicit'
+KW_REQUIRED   = 'required'
 
 # --- member-shape keywords -----------------------------------------------
 KW_GET        = 'get'
@@ -411,6 +418,33 @@ LPAREN_LAMBDA = /\(/
 LPAREN_CAST   = /\(/
 LPAREN_TUPLE  = /\(/
 
+# --- LINQ contextual-keyword synthetic terminals -------------------------
+#
+# C# query expressions use contextual keywords — `from`, `where`,
+# `select`, `group`, `by`, `into`, `let`, `orderby`, `ascending`,
+# `descending`, `join`, `on`, `equals` — that are reserved only
+# inside a query expression. The host filter recognises a query
+# expression by scanning ahead from each IDENT `from` and, when the
+# sequence `from <type>? IDENT in` matches, rewrites the IDENTs
+# inside the query to the synthetic terminals below. Outside query
+# context these names remain plain IDENTs, so user code that uses
+# `select` / `from` / `group` etc as variable or field names keeps
+# working. The existing `<where>` clause on type parameters reuses
+# the real KW_WHERE token — only LINQ-position `where` is rewritten.
+KW_FROM_LINQ     = 'KW_FROM_LINQ_SYNTHETIC_NEVER_EMITTED'
+KW_WHERE_LINQ    = 'KW_WHERE_LINQ_SYNTHETIC_NEVER_EMITTED'
+KW_SELECT_LINQ   = 'KW_SELECT_LINQ_SYNTHETIC_NEVER_EMITTED'
+KW_GROUP_LINQ    = 'KW_GROUP_LINQ_SYNTHETIC_NEVER_EMITTED'
+KW_BY_LINQ       = 'KW_BY_LINQ_SYNTHETIC_NEVER_EMITTED'
+KW_INTO_LINQ     = 'KW_INTO_LINQ_SYNTHETIC_NEVER_EMITTED'
+KW_LET_LINQ      = 'KW_LET_LINQ_SYNTHETIC_NEVER_EMITTED'
+KW_ORDERBY_LINQ  = 'KW_ORDERBY_LINQ_SYNTHETIC_NEVER_EMITTED'
+KW_ASC_LINQ      = 'KW_ASC_LINQ_SYNTHETIC_NEVER_EMITTED'
+KW_DESC_LINQ     = 'KW_DESC_LINQ_SYNTHETIC_NEVER_EMITTED'
+KW_JOIN_LINQ     = 'KW_JOIN_LINQ_SYNTHETIC_NEVER_EMITTED'
+KW_ON_LINQ       = 'KW_ON_LINQ_SYNTHETIC_NEVER_EMITTED'
+KW_EQUALS_LINQ   = 'KW_EQUALS_LINQ_SYNTHETIC_NEVER_EMITTED'
+
 %rules
 
 # --- compilation unit ----------------------------------------------------
@@ -544,7 +578,7 @@ LPAREN_TUPLE  = /\(/
            | KW_STATIC | KW_ABSTRACT | KW_SEALED | KW_VIRTUAL
            | KW_OVERRIDE | KW_NEW | KW_READONLY
            | KW_VOLATILE | KW_PARTIAL | KW_ASYNC | KW_UNSAFE
-           | KW_EXTERN | KW_REF
+           | KW_EXTERN | KW_REF | KW_REQUIRED
            ;
 
 # --- type declarations ---------------------------------------------------
@@ -1085,15 +1119,77 @@ LPAREN_TUPLE  = /\(/
 
 # --- patterns -----------------------------------------------------------
 #
-# Simple patterns only — the C# 7 / 8 set. Constant patterns reuse
-# the expression non-terminal (semantic phase enforces constness);
-# type and declaration patterns share the `<type>` form with an
-# optional IDENT binder.
+# Constant patterns reuse the expression non-terminal (semantic phase
+# enforces constness); type and declaration patterns share the
+# `<type>` form with an optional IDENT binder. C# 9 added relational
+# (`< 0`, `>= 100`) patterns; C# 9 also added property patterns
+# (`{ X: 1, Y: pat }`) which may optionally be prefixed with a type;
+# C# 11 added list patterns (`[1, 2, ..rest]`). Positional patterns
+# (`(p1, p2)`) parse via the existing `<tuple_expr>` form under
+# `<expr>` — the semantic phase enforces the deconstructor shape.
+#
+# Pattern combinators `and` / `or` / `not` (C# 9) are NOT yet covered
+# — they require contextual keyword handling because `and` / `or` /
+# `not` are reserved in C# only inside pattern contexts (the host
+# would need to rewrite IDENT to a synthetic KW_AND_PAT etc. when
+# parsing a pattern). Most real-world pattern uses don't require
+# combinators; users can rewrite `pat1 or pat2` as two switch arms.
 <pattern> : <expr>
           | <type>
           | <type> IDENT
           | KW_VAR IDENT
+          | <property_pattern>
+          | <type> <property_pattern>
+          | <type> <property_pattern> IDENT
+          | <list_pattern>
+          | <type> <list_pattern>
+          | <type> <list_pattern> IDENT
+          | <relational_pattern>
           ;
+
+# Property pattern: `{ X: pattern, Y.Z: pattern }`. Empty `{ }`
+# matches any non-null. C# 11 extended subpatterns allow chained
+# member access on the key.
+<property_pattern> : '{' '}'
+                   | '{' <property_subpattern_list> '}'
+                   | '{' <property_subpattern_list> ',' '}'
+                   ;
+
+<property_subpattern_list> : <property_subpattern>
+                           | <property_subpattern_list> ',' <property_subpattern>
+                           ;
+
+<property_subpattern> : <property_pattern_key> ':' <pattern>
+                      ;
+
+<property_pattern_key> : IDENT
+                      | <property_pattern_key> '.' IDENT
+                      ;
+
+# List pattern: `[1, 2, 3]`, `[first, ..rest, last]`. The slice form
+# `..` may appear at most once; the semantic phase enforces this.
+# A slice with a subpattern (`..rest`) binds the matched tail.
+<list_pattern> : '[' ']'
+               | '[' <list_pattern_elements> ']'
+               | '[' <list_pattern_elements> ',' ']'
+               ;
+
+<list_pattern_elements> : <list_pattern_element>
+                        | <list_pattern_elements> ',' <list_pattern_element>
+                        ;
+
+<list_pattern_element> : <pattern>
+                       | '..'
+                       | '..' <pattern>
+                       ;
+
+# Relational pattern: `< 0`, `>= 100`. Operand is a constant-ish
+# unary expression (the semantic phase enforces constness).
+<relational_pattern> : '<'  <unary_expr>
+                     | '>'  <unary_expr>
+                     | '<=' <unary_expr>
+                     | '>=' <unary_expr>
+                     ;
 
 # --- expressions --------------------------------------------------------
 #
@@ -1109,6 +1205,7 @@ LPAREN_TUPLE  = /\(/
 
 <non_assignment_expr> : <conditional_expr>
                       | <lambda_expr>
+                      | <query_expr>
                       ;
 
 <assignment> : <unary_expr> <assignment_op> <expr>
@@ -1186,6 +1283,10 @@ LPAREN_TUPLE  = /\(/
                   | <relational_expr> '>=' <shift_expr>
                   | <relational_expr> KW_IS <type>
                   | <relational_expr> KW_IS <type> IDENT
+                  | <relational_expr> KW_IS <property_pattern>
+                  | <relational_expr> KW_IS <type> <property_pattern>
+                  | <relational_expr> KW_IS <type> <property_pattern> IDENT
+                  | <relational_expr> KW_IS <list_pattern>
                   | <relational_expr> KW_AS <type>
                   ;
 
@@ -1231,6 +1332,7 @@ LPAREN_TUPLE  = /\(/
                | KW_GLOBAL '::' IDENT
                | KW_THIS
                | KW_BASE
+               | KW_FIELD
                | <parenthesized_expr>
                | <tuple_expr>
                | <object_creation_expr>
@@ -1338,6 +1440,72 @@ LPAREN_TUPLE  = /\(/
 <default_expr> : KW_DEFAULT '(' <type> ')' ;
 <checked_expr> : KW_CHECKED '(' <expr> ')' ;
 <unchecked_expr> : KW_UNCHECKED '(' <expr> ')' ;
+
+# --- LINQ query expressions ---------------------------------------------
+#
+# A query expression begins with `from x in source`, continues with
+# zero or more body clauses (`from` / `let` / `where` / `join` /
+# `orderby`), ends with a `select` or `group … by …` clause, and
+# may optionally continue with `into x` for a chained subquery.
+# All LINQ keywords arrive as filter-produced synthetic terminals
+# so they don't reserve the underlying identifiers globally.
+
+<query_expr> : <from_clause> <query_body>
+             ;
+
+<from_clause> : KW_FROM_LINQ IDENT KW_IN <expr>
+              | KW_FROM_LINQ <type> IDENT KW_IN <expr>
+              ;
+
+<query_body> : <query_body_clauses_opt> <select_or_group_clause> <query_continuation_opt>
+             ;
+
+<query_body_clauses_opt> : <query_body_clauses>
+                         |
+                         ;
+
+<query_body_clauses> : <query_body_clause>
+                     | <query_body_clauses> <query_body_clause>
+                     ;
+
+<query_body_clause> : <from_clause>
+                    | <let_clause>
+                    | <where_linq_clause>
+                    | <join_clause>
+                    | <orderby_clause>
+                    ;
+
+<let_clause> : KW_LET_LINQ IDENT '=' <expr>
+             ;
+
+<where_linq_clause> : KW_WHERE_LINQ <expr>
+                    ;
+
+<join_clause> : KW_JOIN_LINQ IDENT KW_IN <expr> KW_ON_LINQ <expr> KW_EQUALS_LINQ <expr>
+              | KW_JOIN_LINQ IDENT KW_IN <expr> KW_ON_LINQ <expr> KW_EQUALS_LINQ <expr> KW_INTO_LINQ IDENT
+              | KW_JOIN_LINQ <type> IDENT KW_IN <expr> KW_ON_LINQ <expr> KW_EQUALS_LINQ <expr>
+              | KW_JOIN_LINQ <type> IDENT KW_IN <expr> KW_ON_LINQ <expr> KW_EQUALS_LINQ <expr> KW_INTO_LINQ IDENT
+              ;
+
+<orderby_clause> : KW_ORDERBY_LINQ <ordering_list>
+                 ;
+
+<ordering_list> : <ordering>
+                | <ordering_list> ',' <ordering>
+                ;
+
+<ordering> : <expr>
+           | <expr> KW_ASC_LINQ
+           | <expr> KW_DESC_LINQ
+           ;
+
+<select_or_group_clause> : KW_SELECT_LINQ <expr>
+                         | KW_GROUP_LINQ <expr> KW_BY_LINQ <expr>
+                         ;
+
+<query_continuation_opt> : KW_INTO_LINQ IDENT <query_body>
+                         |
+                         ;
 
 <arg_list_opt> : <arg_list>
                |
