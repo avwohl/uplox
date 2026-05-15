@@ -1,10 +1,13 @@
 # Delphi / Object Pascal grammar — uplox first cut.
 #
-# Targets the language as implemented by Turbo Pascal / Borland Pascal /
-# Delphi 1-7 and the Free Pascal `objfpc` / `delphi` modes. Sized to
-# match real-world Object Pascal as written before the modern features
-# (generics, anonymous methods, attributes, class helpers) added
-# disambiguation cost.
+# Targets Object Pascal as implemented by Turbo Pascal / Borland
+# Pascal / Delphi 1-7 plus the modern features added in Delphi
+# 2006 - 2010 (anonymous methods, class helpers, class operator
+# overloading, attribute syntax) and Free Pascal's `objfpc` /
+# `delphi` modes. Generics — the one remaining feature class —
+# stay out of scope because they need lexer feedback to resolve
+# the `<` / `less-than` ambiguity (the same problem the C# and
+# C++ grammars solve via a token filter).
 #
 # Built on top of the standard-Pascal core in `pascal.uplox`; adds the
 # Object Pascal layer:
@@ -44,16 +47,28 @@
 #   * The `inherited` call form (bare, named-method, with-args),
 #     the `is` type-test operator, and the `as` typed-cast operator.
 #   * Bitwise shifts (`shl`, `shr`).
+#   * Anonymous methods: `procedure(args) begin … end` /
+#     `function(args): T begin … end` as expressions
+#     (Delphi 2009+).
+#   * Class / record / type helpers — `class helper [for T] …
+#     end` etc., attaching methods to an existing type.
+#   * Class operator overloading — `class operator Add(L, R:
+#     T): T;` headings inside the class body, for the full
+#     Delphi-reserved overloadable-operator set.
+#   * Attribute syntax: `[FooAttribute(args)]` before type
+#     declarations.
+#   * Inline assembler blocks (`asm … end`) — the body is
+#     slurped as an opaque `ASM_BODY` synthetic terminal that
+#     the host filter emits between the `asm` and `end`
+#     keywords (same pattern as rust.uplox's `MACRO_BODY_TT`).
+#     Capturing the inner mnemonic-level syntax would require a
+#     separate assembler grammar layered on top of uplox.
 #
-# Out of scope (the first cut keeps the grammar tractable):
+# Out of scope (the cut keeps the grammar single-pass-LR-clean):
 #
 #   * Generics: `TList<T>`, generic methods. The `<` versus
-#     less-than overload is hard to resolve without a lexer hack.
-#   * Anonymous methods: `procedure begin ... end` expressions.
-#   * Class / record / type helpers.
-#   * Attribute syntax: `[MyAttribute(...)]` before declarations.
-#   * Inline assembler blocks (`asm ... end`).
-#   * Operator overloading on records / classes.
+#     less-than overload is hard to resolve without a lexer hack
+#     (the same approach the C# and C++ grammars use).
 #   * Compiler directives (`{$IFDEF ...}` etc.) are skipped as plain
 #     brace-comments; hosts that want to evaluate them should
 #     pre-process the source before the lexer sees it.
@@ -198,6 +213,57 @@ KW_PROTECTED  = 'protected'
 KW_PUBLIC     = 'public'
 KW_PUBLISHED  = 'published'
 KW_STRICT     = 'strict'
+
+# --- modern OOP keywords -------------------------------------------------
+KW_HELPER     = 'helper'
+KW_OPERATOR   = 'operator'
+
+# --- overloadable operator names (Delphi class operators) ----------------
+#
+# These are reserved as the right operand of `class operator …`
+# declarations; the names are otherwise plain identifiers but
+# treating them as reserved keeps the operator-name slot
+# unambiguous. Real Delphi accepts them contextually; a host
+# filter could promote IDENT → these keywords only in the
+# `class operator` follow-set if reservation is undesirable.
+KW_IMPLICIT           = 'Implicit'
+KW_EXPLICIT           = 'Explicit'
+KW_NEGATIVE           = 'Negative'
+KW_POSITIVE           = 'Positive'
+KW_INC                = 'Inc'
+KW_DEC                = 'Dec'
+KW_LOGICALNOT         = 'LogicalNot'
+KW_TRUNC              = 'Trunc'
+KW_ROUND              = 'Round'
+KW_EQUAL              = 'Equal'
+KW_NOTEQUAL           = 'NotEqual'
+KW_GREATERTHAN        = 'GreaterThan'
+KW_GREATERTHANOREQUAL = 'GreaterThanOrEqual'
+KW_LESSTHAN           = 'LessThan'
+KW_LESSTHANOREQUAL    = 'LessThanOrEqual'
+KW_ADD                = 'Add'
+KW_SUBTRACT           = 'Subtract'
+KW_MULTIPLY           = 'Multiply'
+KW_DIVIDE             = 'Divide'
+KW_INTDIVIDE          = 'IntDivide'
+KW_MODULUS            = 'Modulus'
+KW_LEFTSHIFT          = 'LeftShift'
+KW_RIGHTSHIFT         = 'RightShift'
+KW_LOGICALAND         = 'LogicalAnd'
+KW_LOGICALOR          = 'LogicalOr'
+KW_LOGICALXOR         = 'LogicalXor'
+KW_BITWISEAND         = 'BitwiseAnd'
+KW_BITWISEOR          = 'BitwiseOr'
+KW_BITWISEXOR         = 'BitwiseXor'
+
+# --- inline assembler ----------------------------------------------------
+KW_ASM        = 'asm'
+
+# Opaque inline-asm body — the host filter slurps the
+# instruction stream between `asm` and the matching `end` and
+# emits this synthetic terminal (the raw lexer never produces
+# it). Same pattern rust.uplox uses for `macro_rules!` bodies.
+ASM_BODY      = 'ASM_BODY_SYNTHETIC_NEVER_EMITTED'
 
 # --- operator words ------------------------------------------------------
 KW_DIV        = 'div'
@@ -416,10 +482,27 @@ DOT           = '.'
 # down would create a reduce/reduce conflict between the
 # bare-keyword form and the empty-heritage prefix of a full
 # declaration.
-<type_decl>       : IDENT '=' <type_denoter> <hint_directives_opt> ';'
-                  | IDENT '=' KW_CLASS ';'
-                  | IDENT '=' KW_INTERFACE ';'
+<type_decl>       : <attribute_list_opt> IDENT '=' <type_denoter> <hint_directives_opt> ';'
+                  | <attribute_list_opt> IDENT '=' KW_CLASS ';'
+                  | <attribute_list_opt> IDENT '=' KW_INTERFACE ';'
                   ;
+
+# Attribute syntax (Delphi 2010+). `[FooAttribute]` or
+# `[FooAttribute(args)]` precedes a declaration. The dotted-
+# qualified attribute name lets `[System.Reflection.Foo]`
+# parse. Multiple attributes stack.
+<attribute_list_opt> : <attribute_list>
+                     |
+                     ;
+
+<attribute_list> : <attribute>
+                 | <attribute_list> <attribute>
+                 ;
+
+<attribute> : '[' <qualified_ident> ']'
+            | '[' <qualified_ident> '(' <expr_list> ')' ']'
+            | '[' <qualified_ident> '(' ')' ']'
+            ;
 
 <var_decl_part>   : KW_VAR <var_decl_seq> ;
 <var_decl_seq>    : <var_decl>
@@ -687,8 +770,15 @@ DOT           = '.'
 # Full class declarations carry an optional ancestor list and a
 # body; both the heritage and the body may be empty (an empty class
 # is `class end`). True forward declarations (`T = class;`) live at
-# the type_decl level above.
+# the type_decl level above. Class helpers (Delphi 2007+) attach
+# methods to an existing class without modifying its declaration —
+# spelled `class helper [(parent)] for SomeClass <members> end`.
+# Record helpers and type helpers share the same shape with
+# `record helper` / `type helper`.
 <class_type> : KW_CLASS <class_heritage_opt> <class_body_opt> KW_END
+             | KW_CLASS KW_HELPER <class_heritage_opt> KW_FOR <type_ident> <class_body_opt> KW_END
+             | KW_RECORD KW_HELPER <class_heritage_opt> KW_FOR <type_ident> <class_body_opt> KW_END
+             | KW_TYPE KW_HELPER <class_heritage_opt> KW_FOR <type_ident> <class_body_opt> KW_END
              ;
 
 <class_heritage_opt> : <class_heritage>
@@ -738,7 +828,49 @@ DOT           = '.'
          | <class_const_member>
          | <class_type_member>
          | <class_var_member>
+         | <class_operator_member>
          ;
+
+# Class / record operator overloading (Delphi 2006+,
+# Free Pascal). Declared inside the class body as
+# `class operator <op>(L, R: T): T;`. The operator name set
+# matches Delphi's reserved overloadable-operator list — the
+# arithmetic / comparison / logical operators plus the
+# Implicit / Explicit conversion shapes.
+<class_operator_member> : KW_CLASS KW_OPERATOR <operator_name> <formal_params_opt> ':' <type_denoter> ';' <iface_directives_opt>
+                        ;
+
+<operator_name> : KW_IMPLICIT
+                | KW_EXPLICIT
+                | KW_NEGATIVE
+                | KW_POSITIVE
+                | KW_INC
+                | KW_DEC
+                | KW_LOGICALNOT
+                | KW_TRUNC
+                | KW_ROUND
+                | KW_EQUAL
+                | KW_NOTEQUAL
+                | KW_GREATERTHAN
+                | KW_GREATERTHANOREQUAL
+                | KW_LESSTHAN
+                | KW_LESSTHANOREQUAL
+                | KW_ADD
+                | KW_SUBTRACT
+                | KW_MULTIPLY
+                | KW_DIVIDE
+                | KW_INTDIVIDE
+                | KW_MODULUS
+                | KW_LEFTSHIFT
+                | KW_RIGHTSHIFT
+                | KW_LOGICALAND
+                | KW_LOGICALOR
+                | KW_LOGICALXOR
+                | KW_BITWISEAND
+                | KW_BITWISEOR
+                | KW_BITWISEXOR
+                | KW_IN
+                ;
 
 <field_member> : <ident_list> ':' <type_denoter> <hint_directives_opt> ';'
                ;
@@ -937,7 +1069,20 @@ DOT           = '.'
                   | <case_stmt>
                   | <with_stmt>
                   | <try_stmt>
+                  | <asm_block>
                   ;
+
+# Inline assembler block. Delphi accepts `asm <instructions> end`
+# with the inner instructions following the target's assembler
+# syntax (x86 / x86-64 / ARM, mnemonic-based). Capturing that at
+# the grammar level would require a separate assembler grammar
+# layered on uplox — instead we declare an opaque `ASM_BODY`
+# synthetic terminal and let a host filter slurp from `asm` to
+# the matching `end` (same pattern rust.uplox uses for
+# `macro_rules!` bodies via `MACRO_BODY_TT`).
+<asm_block> : KW_ASM ASM_BODY KW_END
+            | KW_ASM KW_END
+            ;
 
 <if_stmt>      : KW_IF <expr> KW_THEN <stmt>
                | KW_IF <expr> KW_THEN <stmt> KW_ELSE <stmt>
@@ -1059,7 +1204,19 @@ DOT           = '.'
                | KW_NOT <factor>
                | '@' <designator>
                | <set_ctor>
+               | <anonymous_method>
                ;
+
+# Anonymous method — `procedure(params) begin … end` /
+# `function(params): T begin … end` as an expression
+# (Delphi 2009+). The body lives inline at the expression
+# position; the formal-params list is optional (a `procedure
+# begin ... end` form is valid). Local var / const / type
+# declarations inside the body are NOT yet covered — the
+# anonymous-method body is a bare statement block.
+<anonymous_method> : KW_PROCEDURE <formal_params_opt> <compound_stmt>
+                   | KW_FUNCTION <formal_params_opt> ':' <type_denoter> <compound_stmt>
+                   ;
 
 <set_ctor>     : '[' ']'
                | '[' <set_member_list> ']'
