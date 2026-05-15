@@ -28,20 +28,23 @@
 # `csharp` use for similar context-sensitive lexing. For the
 # first cut, keeping the grammar straightforward wins.
 #
-# In scope (ES2020+):
+# In scope (ES2020+, with selected ES2022 / ES2023 features):
 #
 #   * Modules: `import` (default, named, namespace, side-effect),
 #     `export` (named, default, re-export, namespace).
 #   * Declarations: `var`, `let`, `const` with destructuring
 #     patterns. Function and class declarations.
-#   * Functions: function declarations / expressions (named and
-#     anonymous), generator functions (`function*`), async
+#   * Functions: function declarations and anonymous function
+#     expressions, generator functions (`function*`), async
 #     functions (`async function`), arrow functions (`(x) =>
 #     expr` and `x => expr` and block-bodied), method definitions
 #     in object / class.
 #   * Classes: extends clause, constructor, instance / static
 #     methods, instance / static fields, getters / setters,
-#     async / generator method modifiers.
+#     async / generator method modifiers, private fields and
+#     methods (`#name`, ES2022), `@decorator` annotations on
+#     class declarations and class members (TC39 stage 3,
+#     ES2023+).
 #   * Statements: block, if / else, switch / case / default,
 #     while, do-while, for, for-in, for-of, break / continue
 #     with labels, return, throw, try / catch / finally,
@@ -69,10 +72,16 @@
 #
 # Out of scope:
 #
-#   * ASI and regex literals (see above).
-#   * Private class fields (`#name`) — would compose cleanly but
-#     omitted for this cut.
-#   * Decorators (TC39 stage 3).
+#   * ASI and regex literals (see above) — both need a
+#     parser-state-aware tokeniser.
+#   * Named function expressions (`let f = function foo() {}`).
+#     The `<hoisted_function>` form already accepts the same
+#     shape at statement position; promoting the named form to
+#     expression position too would require a `[NoFunction]`
+#     cover-grammar chain parallel to the existing `[NoBrace]`
+#     chain, doubling the size of the expression-statement
+#     productions. Anonymous function expressions
+#     (`function() {}`) parse via `<function_expr>` as today.
 #   * `with` statement (deprecated; strict mode forbids it).
 #   * TypeScript type annotations.
 #   * JSX.
