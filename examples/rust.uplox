@@ -120,20 +120,25 @@
 #   * Macro invocations in expression, statement, item, and
 #     type positions with paren / bracket / brace delimiters.
 #
-# Out of scope (the first cut keeps things in 2021-edition
+# Also covered: `macro_rules!` definitions (body slurped as an
+# opaque `MACRO_BODY_TT` token tree), trait aliases (`trait Foo
+# <T> = Bar<T> + Baz`), and `let … else { … };` statements.
+#
+# Out of scope (the cut keeps things in stable 2021-edition
 # territory):
 #
-#   * `macro_rules!` definitions (the body is arbitrary token
-#     trees — needs a host-side token filter to slurp).
-#   * `procedural macro` declarations — same reason.
+#   * Procedural macro declarations — the macro shape itself is
+#     a regular `pub fn` item with a `#[proc_macro]` attribute,
+#     which the grammar accepts; only the body's `TokenStream`
+#     manipulation is special, and that's at the AST level.
 #   * Higher-rank trait bounds beyond `for<'a>` in function
 #     pointer types: the lifetime-binder form `for<'a> Fn(&'a T)`
 #     is supported in function-pointer types only.
-#   * Stable-since-2024 `let-else` chains and the `let` ... `else`
-#     in conditional positions beyond a top-level `let_stmt`.
-#   * Trait aliases (`trait Foo = Bar`).
-#   * Specialisation, generic associated types, type alias impl
-#     trait — these are unstable / niche.
+#   * `let` … `else` in conditional / nested positions beyond a
+#     top-level `<let_stmt>` (the statement-level form is
+#     covered).
+#   * Specialisation, type alias impl trait (TAIT), and other
+#     unstable / niche features.
 #
 # Conflict-resolution decisions:
 #
