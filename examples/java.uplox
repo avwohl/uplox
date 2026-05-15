@@ -393,8 +393,8 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
 # `exports`, `opens`, `uses`, and `provides` directives.
 # `open module` means all packages are open for reflective
 # access.
-<module_declaration> : <annotations_opt> KW_MODULE <qualified_name> '{' <module_directives_opt> '}'
-                     | <annotations_opt> KW_OPEN KW_MODULE <qualified_name> '{' <module_directives_opt> '}'
+<module_declaration> : <annotations_opt> 'module' <qualified_name> '{' <module_directives_opt> '}'
+                     | <annotations_opt> 'open' 'module' <qualified_name> '{' <module_directives_opt> '}'
                      ;
 
 <module_directives_opt> : <module_directives>
@@ -407,23 +407,23 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
 
 # Module directives: `requires`, `exports`, `opens`, `uses`,
 # `provides`.
-<module_directive> : KW_REQUIRES <requires_modifiers_opt> <qualified_name> ';'
-                   | KW_EXPORTS <qualified_name> ';'
-                   | KW_EXPORTS <qualified_name> KW_TO <module_name_list> ';'
-                   | KW_OPENS <qualified_name> ';'
-                   | KW_OPENS <qualified_name> KW_TO <module_name_list> ';'
-                   | KW_USES <qualified_name> ';'
-                   | KW_PROVIDES <qualified_name> KW_WITH <module_name_list> ';'
+<module_directive> : 'requires' <requires_modifiers_opt> <qualified_name> ';'
+                   | 'exports' <qualified_name> ';'
+                   | 'exports' <qualified_name> 'to' <module_name_list> ';'
+                   | 'opens' <qualified_name> ';'
+                   | 'opens' <qualified_name> 'to' <module_name_list> ';'
+                   | 'uses' <qualified_name> ';'
+                   | 'provides' <qualified_name> 'with' <module_name_list> ';'
                    ;
 
 <requires_modifiers_opt> : <requires_modifiers>
                          |
                          ;
 
-<requires_modifiers> : KW_TRANSITIVE
-                     | KW_STATIC
-                     | <requires_modifiers> KW_TRANSITIVE
-                     | <requires_modifiers> KW_STATIC
+<requires_modifiers> : 'transitive'
+                     | 'static'
+                     | <requires_modifiers> 'transitive'
+                     | <requires_modifiers> 'static'
                      ;
 
 <module_name_list> : <qualified_name>
@@ -434,7 +434,7 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
                    |
                    ;
 
-<package_decl> : <annotations_opt> KW_PACKAGE <qualified_name> ';'
+<package_decl> : <annotations_opt> 'package' <qualified_name> ';'
                ;
 
 <import_decls_opt> : <import_decls>
@@ -446,10 +446,10 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
                ;
 
 # Import shapes: plain, static, on-demand `*`, static on-demand.
-<import_decl> : KW_IMPORT <qualified_name> ';'
-              | KW_IMPORT <qualified_name> '.' '*' ';'
-              | KW_IMPORT KW_STATIC <qualified_name> ';'
-              | KW_IMPORT KW_STATIC <qualified_name> '.' '*' ';'
+<import_decl> : 'import' <qualified_name> ';'
+              | 'import' <qualified_name> '.' '*' ';'
+              | 'import' 'static' <qualified_name> ';'
+              | 'import' 'static' <qualified_name> '.' '*' ';'
               ;
 
 <qualified_name> : IDENT
@@ -497,26 +497,26 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
             | ';'
             ;
 
-<class_decl> : <modifiers_opt> KW_CLASS IDENT <type_params_opt>
+<class_decl> : <modifiers_opt> 'class' IDENT <type_params_opt>
                <class_extends_opt> <class_implements_opt>
                <class_permits_opt> <class_body>
              ;
 
-<interface_decl> : <modifiers_opt> KW_INTERFACE IDENT <type_params_opt>
+<interface_decl> : <modifiers_opt> 'interface' IDENT <type_params_opt>
                    <interface_extends_opt> <class_permits_opt>
                    <class_body>
                  ;
 
-<enum_decl> : <modifiers_opt> KW_ENUM IDENT
+<enum_decl> : <modifiers_opt> 'enum' IDENT
               <class_implements_opt> <enum_body>
             ;
 
-<record_decl> : <modifiers_opt> KW_RECORD IDENT <type_params_opt>
+<record_decl> : <modifiers_opt> 'record' IDENT <type_params_opt>
                 '(' <record_components_opt> ')'
                 <class_implements_opt> <class_body>
               ;
 
-<annotation_type_decl> : <modifiers_opt> AT KW_INTERFACE IDENT <class_body>
+<annotation_type_decl> : <modifiers_opt> AT 'interface' IDENT <class_body>
                        ;
 
 # Modifiers — Java allows any order and the AST builder rejects
@@ -535,11 +535,11 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
 # modifier non-terminal collides with the switch-label
 # `default` arrow form. The `<method_decl>` rule handles
 # interface default methods through a separate alternative.
-<modifier> : KW_PUBLIC | KW_PRIVATE | KW_PROTECTED
-           | KW_STATIC | KW_ABSTRACT | KW_FINAL
-           | KW_NATIVE | KW_SYNCHRONIZED | KW_TRANSIENT
-           | KW_VOLATILE | KW_STRICTFP
-           | KW_SEALED | KW_NON_SEALED
+<modifier> : 'public' | 'private' | 'protected'
+           | 'static' | 'abstract' | 'final'
+           | 'native' | 'synchronized' | 'transient'
+           | 'volatile' | 'strictfp'
+           | 'sealed' | 'non-sealed'
            | <annotation>
            ;
 
@@ -558,7 +558,7 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
 <type_param> : <annotations_opt> IDENT <type_param_bound_opt>
              ;
 
-<type_param_bound_opt> : KW_EXTENDS <reference_type> <additional_bounds_opt>
+<type_param_bound_opt> : 'extends' <reference_type> <additional_bounds_opt>
                        |
                        ;
 
@@ -567,19 +567,19 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
                         ;
 
 # Inheritance clauses.
-<class_extends_opt> : KW_EXTENDS <reference_type>
+<class_extends_opt> : 'extends' <reference_type>
                     |
                     ;
 
-<class_implements_opt> : KW_IMPLEMENTS <reference_type_list>
+<class_implements_opt> : 'implements' <reference_type_list>
                        |
                        ;
 
-<interface_extends_opt> : KW_EXTENDS <reference_type_list>
+<interface_extends_opt> : 'extends' <reference_type_list>
                         |
                         ;
 
-<class_permits_opt> : KW_PERMITS <reference_type_list>
+<class_permits_opt> : 'permits' <reference_type_list>
                     |
                     ;
 
@@ -622,7 +622,7 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
                | <type_decl>
                ;
 
-<static_initializer> : KW_STATIC <block>
+<static_initializer> : 'static' <block>
                      ;
 
 <instance_initializer> : <block>
@@ -676,7 +676,7 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
 # `void` methods — no field interpretation since `void` can't
 # be a field type. Keeps the leading-`void` parse separate
 # from the field/method shared prefix.
-<void_method_decl> : <modifiers_opt> KW_VOID IDENT '(' <parameter_list_opt> ')'
+<void_method_decl> : <modifiers_opt> 'void' IDENT '(' <parameter_list_opt> ')'
                      <method_dims_opt> <throws_clause_opt> <method_body>
                    ;
 
@@ -691,7 +691,7 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
               ;
 
 <method_result> : <type>
-                | KW_VOID
+                | 'void'
                 ;
 
 # Legacy C-style brackets on the method head: `int foo()[]`
@@ -705,7 +705,7 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
               | <method_dims> '[' ']'
               ;
 
-<throws_clause_opt> : KW_THROWS <reference_type_list>
+<throws_clause_opt> : 'throws' <reference_type_list>
                     |
                     ;
 
@@ -713,7 +713,7 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
 # native), or `default <expression> ;` (annotation type element).
 <method_body> : <block>
               | ';'
-              | KW_DEFAULT <element_value> ';'
+              | 'default' <element_value> ';'
               ;
 
 <constructor_decl> : <modifiers_opt> <type_params_opt> IDENT
@@ -853,8 +853,8 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
        | <reference_type>
        ;
 
-<primitive_type> : KW_BOOLEAN | KW_BYTE | KW_SHORT | KW_INT
-                 | KW_LONG | KW_CHAR | KW_FLOAT | KW_DOUBLE
+<primitive_type> : 'boolean' | 'byte' | 'short' | 'int'
+                 | 'long' | 'char' | 'float' | 'double'
                  ;
 
 # Reference types: class / interface, possibly generic, possibly
@@ -912,8 +912,8 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
            ;
 
 <wildcard> : <annotations_opt> '?'
-           | <annotations_opt> '?' KW_EXTENDS <reference_type>
-           | <annotations_opt> '?' KW_SUPER <reference_type>
+           | <annotations_opt> '?' 'extends' <reference_type>
+           | <annotations_opt> '?' 'super' <reference_type>
            ;
 
 # --- block / statements --------------------------------------------------
@@ -941,7 +941,7 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
                            ;
 
 <local_variable_decl> : <modifiers_opt> <type> IDENT <local_decl_tail>
-                      | <modifiers_opt> KW_VAR IDENT <local_var_tail>
+                      | <modifiers_opt> 'var' IDENT <local_var_tail>
                       ;
 
 # Tail of a local declarator (after the first IDENT): optional
@@ -1005,17 +1005,17 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
 <statement_expression> : <expression>
                        ;
 
-<if_statement> : KW_IF '(' <expression> ')' <statement>
-               | KW_IF '(' <expression> ')' <statement> KW_ELSE <statement>
+<if_statement> : 'if' '(' <expression> ')' <statement>
+               | 'if' '(' <expression> ')' <statement> 'else' <statement>
                ;
 
-<while_statement> : KW_WHILE '(' <expression> ')' <statement>
+<while_statement> : 'while' '(' <expression> ')' <statement>
                   ;
 
-<do_statement> : KW_DO <statement> KW_WHILE '(' <expression> ')' ';'
+<do_statement> : 'do' <statement> 'while' '(' <expression> ')' ';'
                ;
 
-<for_statement> : KW_FOR '(' <for_init_opt> ';' <expression_opt> ';' <for_update_opt> ')' <statement>
+<for_statement> : 'for' '(' <for_init_opt> ';' <expression_opt> ';' <for_update_opt> ')' <statement>
                 ;
 
 <for_init_opt> : <local_variable_decl>
@@ -1037,8 +1037,8 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
 
 # Enhanced for: `for (Type IDENT : iterable) stmt` or
 # `for (var IDENT : iterable) stmt`. Required form per JLS §14.14.2.
-<enhanced_for_statement> : KW_FOR '(' <modifiers_opt> <type> <variable_declarator_id> ':' <expression> ')' <statement>
-                         | KW_FOR '(' <modifiers_opt> KW_VAR IDENT ':' <expression> ')' <statement>
+<enhanced_for_statement> : 'for' '(' <modifiers_opt> <type> <variable_declarator_id> ':' <expression> ')' <statement>
+                         | 'for' '(' <modifiers_opt> 'var' IDENT ':' <expression> ')' <statement>
                          ;
 
 # Switch — Java has two forms: classic case-statement-list and
@@ -1056,7 +1056,7 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
 # wrapper to commit to). The state stack picks the right goto
 # (statement-position vs. expression-position) after the
 # `<switch_construct>` is reduced.
-<switch_construct> : KW_SWITCH '(' <expression> ')' '{' <switch_blocks_opt> '}'
+<switch_construct> : 'switch' '(' <expression> ')' '{' <switch_blocks_opt> '}'
                    ;
 
 <switch_blocks_opt> : <switch_blocks>
@@ -1075,10 +1075,10 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
                 | <switch_labels> <switch_label>
                 ;
 
-<switch_label> : KW_CASE <case_label_value_list> ':'
-               | KW_DEFAULT ':'
-               | KW_CASE <case_label_value_list>
-               | KW_DEFAULT
+<switch_label> : 'case' <case_label_value_list> ':'
+               | 'default' ':'
+               | 'case' <case_label_value_list>
+               | 'default'
                ;
 
 # Java 14+ allows multiple case labels: `case 1, 2, 3 -> …;`.
@@ -1103,27 +1103,27 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
                     | <throw_statement>
                     ;
 
-<break_statement> : KW_BREAK ';'
-                  | KW_BREAK IDENT ';'
+<break_statement> : 'break' ';'
+                  | 'break' IDENT ';'
                   ;
 
-<continue_statement> : KW_CONTINUE ';'
-                     | KW_CONTINUE IDENT ';'
+<continue_statement> : 'continue' ';'
+                     | 'continue' IDENT ';'
                      ;
 
-<return_statement> : KW_RETURN ';'
-                   | KW_RETURN <expression> ';'
+<return_statement> : 'return' ';'
+                   | 'return' <expression> ';'
                    ;
 
-<throw_statement> : KW_THROW <expression> ';'
+<throw_statement> : 'throw' <expression> ';'
                   ;
 
 # Try statement: try-block + (catch+ finally? | finally) OR
 # try-with-resources + catch* + finally?. The resource list
 # uses local-variable-decl shape.
-<try_statement> : KW_TRY <block> <catch_clauses>
-                | KW_TRY <block> <catch_clauses_opt> <finally_clause>
-                | KW_TRY <resource_spec> <block> <catch_clauses_opt> <finally_clause_opt>
+<try_statement> : 'try' <block> <catch_clauses>
+                | 'try' <block> <catch_clauses_opt> <finally_clause>
+                | 'try' <resource_spec> <block> <catch_clauses_opt> <finally_clause_opt>
                 ;
 
 <catch_clauses_opt> : <catch_clauses>
@@ -1135,7 +1135,7 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
                 ;
 
 # Catch clause supports multi-catch types (`catch (A | B e)`).
-<catch_clause> : KW_CATCH '(' <catch_param> ')' <block>
+<catch_clause> : 'catch' '(' <catch_param> ')' <block>
                ;
 
 <catch_param> : <modifiers_opt> <catch_type> IDENT
@@ -1149,7 +1149,7 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
                      |
                      ;
 
-<finally_clause> : KW_FINALLY <block>
+<finally_clause> : 'finally' <block>
                  ;
 
 # Try-with-resources: `try (Type r = expr; …) { … }`. The
@@ -1165,11 +1165,11 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
 # A resource is either a typed local declaration or a bare
 # expression (Java 9+ "effectively final" resource form).
 <resource> : <modifiers_opt> <type> <variable_declarator_id> '=' <expression>
-           | <modifiers_opt> KW_VAR IDENT '=' <expression>
+           | <modifiers_opt> 'var' IDENT '=' <expression>
            | <expression>
            ;
 
-<synchronized_statement> : KW_SYNCHRONIZED '(' <expression> ')' <block>
+<synchronized_statement> : 'synchronized' '(' <expression> ')' <block>
                          ;
 
 <labelled_statement> : IDENT ':' <statement>
@@ -1179,11 +1179,11 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
 # §14.21 makes it contextual (a regular IDENT outside switch
 # expressions). For grammar simplicity we accept it everywhere
 # and rely on the AST builder for scope-sensitive validation.
-<yield_statement> : KW_YIELD <expression> ';'
+<yield_statement> : 'yield' <expression> ';'
                   ;
 
-<assert_statement> : KW_ASSERT <expression> ';'
-                   | KW_ASSERT <expression> ':' <expression> ';'
+<assert_statement> : 'assert' <expression> ';'
+                   | 'assert' <expression> ':' <expression> ';'
                    ;
 
 # --- expressions ---------------------------------------------------------
@@ -1233,7 +1233,7 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
 # A lambda param is either a bare IDENT (inferred type), a
 # `var IDENT`, or a fully-typed parameter shape.
 <lambda_param> : IDENT
-               | KW_VAR IDENT
+               | 'var' IDENT
                | <modifiers_opt> <type> <variable_declarator_id>
                ;
 
@@ -1285,12 +1285,12 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
                   | <relational_expr> '>' <shift_expr>
                   | <relational_expr> '<=' <shift_expr>
                   | <relational_expr> '>=' <shift_expr>
-                  | <relational_expr> KW_INSTANCEOF <reference_type>
-                  | <relational_expr> KW_INSTANCEOF <reference_type> IDENT_PATTERN
-                  | <relational_expr> KW_INSTANCEOF <reference_type> KW_UNDERSCORE
-                  | <relational_expr> KW_INSTANCEOF <reference_type> '(' <record_pattern_list> ')'
-                  | <relational_expr> KW_INSTANCEOF <reference_type> '(' <record_pattern_list> ')' IDENT_PATTERN
-                  | <relational_expr> KW_INSTANCEOF <reference_type> '(' <record_pattern_list> ')' KW_UNDERSCORE
+                  | <relational_expr> 'instanceof' <reference_type>
+                  | <relational_expr> 'instanceof' <reference_type> IDENT_PATTERN
+                  | <relational_expr> 'instanceof' <reference_type> '_'
+                  | <relational_expr> 'instanceof' <reference_type> '(' <record_pattern_list> ')'
+                  | <relational_expr> 'instanceof' <reference_type> '(' <record_pattern_list> ')' IDENT_PATTERN
+                  | <relational_expr> 'instanceof' <reference_type> '(' <record_pattern_list> ')' '_'
                   ;
 
 # Record pattern components — each is a nested pattern,
@@ -1301,12 +1301,12 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
                       ;
 
 <record_pattern_component> : <type> IDENT
-                           | <type> KW_UNDERSCORE
-                           | KW_VAR IDENT
-                           | KW_VAR KW_UNDERSCORE
+                           | <type> '_'
+                           | 'var' IDENT
+                           | 'var' '_'
                            | <reference_type> '(' <record_pattern_list> ')'
                            | <reference_type> '(' <record_pattern_list> ')' IDENT
-                           | <reference_type> '(' <record_pattern_list> ')' KW_UNDERSCORE
+                           | <reference_type> '(' <record_pattern_list> ')' '_'
                            ;
 
 <shift_expr> : <additive_expr>
@@ -1385,25 +1385,25 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
 # builder rejects mis-uses).
 <primary_expr> : <atom>
                | <primary_expr> '.' IDENT
-               | <primary_expr> '.' KW_THIS
-               | <primary_expr> '.' KW_CLASS
-               | <primary_expr> <array_dims> '.' KW_CLASS
-               | <primary_expr> '.' KW_NEW <unqualified_class_instance_creation>
+               | <primary_expr> '.' 'this'
+               | <primary_expr> '.' 'class'
+               | <primary_expr> <array_dims> '.' 'class'
+               | <primary_expr> '.' 'new' <unqualified_class_instance_creation>
                | <primary_expr> '.' LT_GENERIC <type_arg_list> GT_GENERIC IDENT
                | <primary_expr> '[' <expression> ']'
                | <primary_expr> '(' <argument_list_opt> ')'
                | <primary_expr> '.' IDENT '(' <argument_list_opt> ')'
-               | <primary_expr> '.' KW_SUPER '.' IDENT
-               | <primary_expr> '.' KW_SUPER '.' IDENT '(' <argument_list_opt> ')'
+               | <primary_expr> '.' 'super' '.' IDENT
+               | <primary_expr> '.' 'super' '.' IDENT '(' <argument_list_opt> ')'
                | <primary_expr> DCOLON <method_reference_target>
                | <primary_expr> DCOLON LT_GENERIC <type_arg_list> GT_GENERIC <method_reference_target>
                ;
 
 <atom> : <literal>
-       | KW_THIS
-       | KW_SUPER '.' IDENT
-       | KW_SUPER '.' IDENT '(' <argument_list_opt> ')'
-       | KW_SUPER DCOLON <method_reference_target>
+       | 'this'
+       | 'super' '.' IDENT
+       | 'super' '.' IDENT '(' <argument_list_opt> ')'
+       | 'super' DCOLON <method_reference_target>
        | IDENT
        | IDENT '(' <argument_list_opt> ')'
        | '(' <expression> ')'
@@ -1420,9 +1420,9 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
 # without-type-args forms rather than going through a
 # `<type_args_opt>` non-terminal (the ε production of which
 # would clash with other ε reductions at this state).
-<class_instance_creation> : KW_NEW <class_type>
+<class_instance_creation> : 'new' <class_type>
                             '(' <argument_list_opt> ')' <class_body_opt>
-                          | KW_NEW <type_args> <class_type>
+                          | 'new' <type_args> <class_type>
                             '(' <argument_list_opt> ')' <class_body_opt>
                           ;
 
@@ -1444,10 +1444,10 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
 # Array creation: `new T[10]` / `new T[10][20]` / `new T[]{…}` /
 # `new T[][]{{…}}`. Dimensions can mix sized and unsized as
 # long as sized precede unsized (JLS §15.10.1).
-<array_creation> : KW_NEW <primitive_type> <dim_exprs> <array_dims_opt>
-                 | KW_NEW <class_type> <dim_exprs> <array_dims_opt>
-                 | KW_NEW <primitive_type> <array_dims> <array_initializer>
-                 | KW_NEW <class_type> <array_dims> <array_initializer>
+<array_creation> : 'new' <primitive_type> <dim_exprs> <array_dims_opt>
+                 | 'new' <class_type> <dim_exprs> <array_dims_opt>
+                 | 'new' <primitive_type> <array_dims> <array_initializer>
+                 | 'new' <class_type> <array_dims> <array_initializer>
                  ;
 
 <dim_exprs> : <dim_expr>
@@ -1481,12 +1481,12 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
 
 # Method reference target: IDENT or `new` (constructor ref).
 <method_reference_target> : IDENT
-                          | KW_NEW
+                          | 'new'
                           ;
 
 <literal> : INT_LIT | FLOAT_LIT | FLOAT_INT_LIT
           | CHAR_LIT | STRING_LIT | TEXT_BLOCK
-          | KW_TRUE | KW_FALSE | KW_NULL
+          | 'true' | 'false' | 'null'
           ;
 
 <argument_list_opt> : <argument_list>

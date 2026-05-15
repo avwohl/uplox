@@ -271,20 +271,20 @@ DEBUG_LINE    = /\x02/
 
 # --- IDENTIFICATION DIVISION ----------------------------------------------
 
-<identification_division> : KW_IDENTIFICATION KW_DIVISION '.' <id_paragraph_list>
+<identification_division> : 'IDENTIFICATION' 'DIVISION' '.' <id_paragraph_list>
                           ;
 
 <id_paragraph_list> : <id_paragraph>
                     | <id_paragraph_list> <id_paragraph>
                     ;
 
-<id_paragraph> : KW_PROGRAM_ID '.' IDENT '.'
-               | KW_PROGRAM_ID '.' IDENT
-               | KW_AUTHOR '.' <text_to_period>
-               | KW_INSTALLATION '.' <text_to_period>
-               | KW_DATE_WRITTEN '.' <text_to_period>
-               | KW_DATE_COMPILED '.' <text_to_period>
-               | KW_SECURITY '.' <text_to_period>
+<id_paragraph> : 'PROGRAM-ID' '.' IDENT '.'
+               | 'PROGRAM-ID' '.' IDENT
+               | 'AUTHOR' '.' <text_to_period>
+               | 'INSTALLATION' '.' <text_to_period>
+               | 'DATE-WRITTEN' '.' <text_to_period>
+               | 'DATE-COMPILED' '.' <text_to_period>
+               | 'SECURITY' '.' <text_to_period>
                ;
 
 # Free-form text up to a period — captured as a flat sequence of
@@ -307,7 +307,7 @@ DEBUG_LINE    = /\x02/
 
 # --- ENVIRONMENT DIVISION -------------------------------------------------
 
-<environment_division> : KW_ENVIRONMENT KW_DIVISION '.' <env_section_list>
+<environment_division> : 'ENVIRONMENT' 'DIVISION' '.' <env_section_list>
                        ;
 
 <env_section_list> : <env_section>
@@ -318,38 +318,38 @@ DEBUG_LINE    = /\x02/
               | <input_output_section>
               ;
 
-<configuration_section> : KW_CONFIGURATION KW_SECTION '.' <config_paragraph_list>
+<configuration_section> : 'CONFIGURATION' 'SECTION' '.' <config_paragraph_list>
                         ;
 
 <config_paragraph_list> : <config_paragraph>
                         | <config_paragraph_list> <config_paragraph>
                         ;
 
-<config_paragraph> : KW_SOURCE_COMPUTER '.' <text_to_period>
-                   | KW_OBJECT_COMPUTER '.' <text_to_period>
+<config_paragraph> : 'SOURCE-COMPUTER' '.' <text_to_period>
+                   | 'OBJECT-COMPUTER' '.' <text_to_period>
                    ;
 
-<input_output_section> : KW_INPUT_OUTPUT KW_SECTION '.' <io_paragraph_list>
+<input_output_section> : 'INPUT-OUTPUT' 'SECTION' '.' <io_paragraph_list>
                        ;
 
 <io_paragraph_list> : <io_paragraph>
                     | <io_paragraph_list> <io_paragraph>
                     ;
 
-<io_paragraph> : KW_FILE_CONTROL '.' <select_list>
+<io_paragraph> : 'FILE-CONTROL' '.' <select_list>
                ;
 
 <select_list> : <select_stmt>
               | <select_list> <select_stmt>
               ;
 
-<select_stmt> : KW_SELECT IDENT KW_ASSIGN KW_TO IDENT '.'
-              | KW_SELECT IDENT KW_ASSIGN KW_TO STRING_LIT '.'
+<select_stmt> : 'SELECT' IDENT 'ASSIGN' 'TO' IDENT '.'
+              | 'SELECT' IDENT 'ASSIGN' 'TO' STRING_LIT '.'
               ;
 
 # --- DATA DIVISION --------------------------------------------------------
 
-<data_division> : KW_DATA KW_DIVISION '.' <data_section_list>
+<data_division> : 'DATA' 'DIVISION' '.' <data_section_list>
                 ;
 
 <data_section_list> : <data_section>
@@ -361,24 +361,24 @@ DEBUG_LINE    = /\x02/
                | <linkage_section>
                ;
 
-<file_section> : KW_FILE KW_SECTION '.' <fd_list>
-               | KW_FILE KW_SECTION '.'
+<file_section> : 'FILE' 'SECTION' '.' <fd_list>
+               | 'FILE' 'SECTION' '.'
                ;
 
 <fd_list> : <fd_entry>
           | <fd_list> <fd_entry>
           ;
 
-<fd_entry> : KW_FD IDENT '.' <data_item_list>
-           | KW_FD IDENT '.'
+<fd_entry> : 'FD' IDENT '.' <data_item_list>
+           | 'FD' IDENT '.'
            ;
 
-<working_storage_section> : KW_WORKING_STORAGE KW_SECTION '.' <data_item_list>
-                          | KW_WORKING_STORAGE KW_SECTION '.'
+<working_storage_section> : 'WORKING-STORAGE' 'SECTION' '.' <data_item_list>
+                          | 'WORKING-STORAGE' 'SECTION' '.'
                           ;
 
-<linkage_section> : KW_LINKAGE KW_SECTION '.' <data_item_list>
-                  | KW_LINKAGE KW_SECTION '.'
+<linkage_section> : 'LINKAGE' 'SECTION' '.' <data_item_list>
+                  | 'LINKAGE' 'SECTION' '.'
                   ;
 
 <data_item_list> : <data_item>
@@ -397,17 +397,17 @@ DEBUG_LINE    = /\x02/
                    | <data_clause_list> <data_clause>
                    ;
 
-<data_clause> : KW_PIC <pic_spec>
-              | KW_PICTURE <pic_spec>
-              | KW_USAGE <text_token>
-              | KW_USAGE KW_IS <text_token>
-              | KW_VALUE <literal>
-              | KW_VALUE KW_IS <literal>
-              | KW_VALUES <literal_list>
-              | KW_OCCURS NUMBER_LIT KW_TIMES
-              | KW_OCCURS NUMBER_LIT
-              | KW_REDEFINES IDENT
-              | KW_INDEXED KW_BY IDENT
+<data_clause> : 'PIC' <pic_spec>
+              | 'PICTURE' <pic_spec>
+              | 'USAGE' <text_token>
+              | 'USAGE' 'IS' <text_token>
+              | 'VALUE' <literal>
+              | 'VALUE' 'IS' <literal>
+              | 'VALUES' <literal_list>
+              | 'OCCURS' NUMBER_LIT 'TIMES'
+              | 'OCCURS' NUMBER_LIT
+              | 'REDEFINES' IDENT
+              | 'INDEXED' KW_BY IDENT
               ;
 
 # PIC clauses are notoriously messy strings (`9(5)V99`, `X(20)`,
@@ -436,22 +436,22 @@ DEBUG_LINE    = /\x02/
           | <figurative_constant>
           ;
 
-<figurative_constant> : KW_ZERO
-                      | KW_ZEROS
-                      | KW_ZEROES
-                      | KW_SPACE
-                      | KW_SPACES
-                      | KW_QUOTE
-                      | KW_QUOTES
-                      | KW_HIGH_VALUE
-                      | KW_LOW_VALUE
-                      | KW_NULL
+<figurative_constant> : 'ZERO'
+                      | 'ZEROS'
+                      | 'ZEROES'
+                      | 'SPACE'
+                      | 'SPACES'
+                      | 'QUOTE'
+                      | 'QUOTES'
+                      | 'HIGH-VALUE'
+                      | 'LOW-VALUE'
+                      | 'NULL'
                       ;
 
 # --- PROCEDURE DIVISION ---------------------------------------------------
 
-<procedure_division> : KW_PROCEDURE KW_DIVISION '.' <procedure_body>
-                     | KW_PROCEDURE KW_DIVISION KW_USING <ident_list> '.' <procedure_body>
+<procedure_division> : 'PROCEDURE' 'DIVISION' '.' <procedure_body>
+                     | 'PROCEDURE' 'DIVISION' 'USING' <ident_list> '.' <procedure_body>
                      ;
 
 <ident_list> : IDENT
@@ -504,28 +504,28 @@ DEBUG_LINE    = /\x02/
             | <evaluate_stmt>
             ;
 
-<move_stmt> : KW_MOVE <operand> KW_TO <operand_list>
+<move_stmt> : 'MOVE' <operand> 'TO' <operand_list>
             ;
 
-<compute_stmt> : KW_COMPUTE IDENT '=' <arith_expr>
+<compute_stmt> : 'COMPUTE' IDENT '=' <arith_expr>
                ;
 
-<add_stmt> : KW_ADD <operand_list> KW_TO <operand_list>
-           | KW_ADD <operand_list> KW_TO <operand_list> KW_GIVING <operand_list>
-           | KW_ADD <operand_list> KW_GIVING <operand_list>
+<add_stmt> : 'ADD' <operand_list> 'TO' <operand_list>
+           | 'ADD' <operand_list> 'TO' <operand_list> 'GIVING' <operand_list>
+           | 'ADD' <operand_list> 'GIVING' <operand_list>
            ;
 
-<subtract_stmt> : KW_SUBTRACT <operand_list> KW_FROM <operand_list>
-                | KW_SUBTRACT <operand_list> KW_FROM <operand> KW_GIVING <operand_list>
+<subtract_stmt> : 'SUBTRACT' <operand_list> 'FROM' <operand_list>
+                | 'SUBTRACT' <operand_list> 'FROM' <operand> 'GIVING' <operand_list>
                 ;
 
-<multiply_stmt> : KW_MULTIPLY <operand> KW_BY <operand_list>
-                | KW_MULTIPLY <operand> KW_BY <operand> KW_GIVING <operand_list>
+<multiply_stmt> : 'MULTIPLY' <operand> KW_BY <operand_list>
+                | 'MULTIPLY' <operand> KW_BY <operand> 'GIVING' <operand_list>
                 ;
 
-<divide_stmt> : KW_DIVIDE <operand> KW_INTO <operand_list>
-              | KW_DIVIDE <operand> KW_INTO <operand> KW_GIVING <operand_list>
-              | KW_DIVIDE <operand> KW_BY <operand> KW_GIVING <operand_list>
+<divide_stmt> : 'DIVIDE' <operand> 'INTO' <operand_list>
+              | 'DIVIDE' <operand> 'INTO' <operand> 'GIVING' <operand_list>
+              | 'DIVIDE' <operand> KW_BY <operand> 'GIVING' <operand_list>
               ;
 
 <operand>      : IDENT
@@ -537,80 +537,80 @@ DEBUG_LINE    = /\x02/
                | <operand_list> ',' <operand>
                ;
 
-<if_stmt> : KW_IF <condition> <then_clause>
-          | KW_IF <condition> <then_clause> KW_ELSE <statement_list>
-          | KW_IF <condition> <then_clause> KW_ELSE <statement_list> KW_END_IF
-          | KW_IF <condition> <then_clause> KW_END_IF
+<if_stmt> : 'IF' <condition> <then_clause>
+          | 'IF' <condition> <then_clause> 'ELSE' <statement_list>
+          | 'IF' <condition> <then_clause> 'ELSE' <statement_list> 'END-IF'
+          | 'IF' <condition> <then_clause> 'END-IF'
           ;
 
-<then_clause> : KW_THEN <statement_list>
+<then_clause> : 'THEN' <statement_list>
               | <statement_list>
               ;
 
-<perform_stmt> : KW_PERFORM IDENT
-               | KW_PERFORM IDENT KW_THRU IDENT
-               | KW_PERFORM IDENT KW_THROUGH IDENT
-               | KW_PERFORM IDENT NUMBER_LIT KW_TIMES
-               | KW_PERFORM <statement_list> KW_END_PERFORM
-               | KW_PERFORM KW_UNTIL <condition> <statement_list> KW_END_PERFORM
-               | KW_PERFORM KW_VARYING IDENT KW_FROM <operand> KW_BY <operand> KW_UNTIL <condition> <statement_list> KW_END_PERFORM
+<perform_stmt> : 'PERFORM' IDENT
+               | 'PERFORM' IDENT 'THRU' IDENT
+               | 'PERFORM' IDENT 'THROUGH' IDENT
+               | 'PERFORM' IDENT NUMBER_LIT 'TIMES'
+               | 'PERFORM' <statement_list> 'END-PERFORM'
+               | 'PERFORM' 'UNTIL' <condition> <statement_list> 'END-PERFORM'
+               | 'PERFORM' 'VARYING' IDENT 'FROM' <operand> KW_BY <operand> 'UNTIL' <condition> <statement_list> 'END-PERFORM'
                ;
 
-<read_stmt>    : KW_READ IDENT
-               | KW_READ IDENT KW_INTO IDENT
+<read_stmt>    : 'READ' IDENT
+               | 'READ' IDENT 'INTO' IDENT
                ;
 
-<write_stmt>   : KW_WRITE IDENT
-               | KW_WRITE IDENT KW_FROM IDENT
+<write_stmt>   : 'WRITE' IDENT
+               | 'WRITE' IDENT 'FROM' IDENT
                ;
 
-<open_stmt>    : KW_OPEN <text_token_list>
+<open_stmt>    : 'OPEN' <text_token_list>
                ;
 
-<close_stmt>   : KW_CLOSE <ident_list>
+<close_stmt>   : 'CLOSE' <ident_list>
                ;
 
-<display_stmt> : KW_DISPLAY <operand_list>
+<display_stmt> : 'DISPLAY' <operand_list>
                ;
 
-<accept_stmt>  : KW_ACCEPT IDENT
-               | KW_ACCEPT IDENT KW_FROM IDENT
+<accept_stmt>  : 'ACCEPT' IDENT
+               | 'ACCEPT' IDENT 'FROM' IDENT
                ;
 
-<stop_stmt>    : KW_STOP KW_RUN
-               | KW_STOP <literal>
+<stop_stmt>    : 'STOP' 'RUN'
+               | 'STOP' <literal>
                ;
 
-<exit_stmt>    : KW_EXIT
+<exit_stmt>    : 'EXIT'
                ;
 
-<goback_stmt>  : KW_GOBACK
+<goback_stmt>  : 'GOBACK'
                ;
 
-<call_stmt>    : KW_CALL <operand>
-               | KW_CALL <operand> KW_USING <ident_list>
+<call_stmt>    : 'CALL' <operand>
+               | 'CALL' <operand> 'USING' <ident_list>
                ;
 
-<go_stmt>      : KW_GO KW_TO IDENT
+<go_stmt>      : 'GO' 'TO' IDENT
                ;
 
-<evaluate_stmt> : KW_EVALUATE <operand> <when_list> KW_END_EVALUATE
+<evaluate_stmt> : 'EVALUATE' <operand> <when_list> 'END-EVALUATE'
                 ;
 
 <when_list> : <when_clause>
             | <when_list> <when_clause>
             ;
 
-<when_clause> : KW_WHEN <operand> <statement_list>
-              | KW_WHEN KW_OTHER <statement_list>
+<when_clause> : 'WHEN' <operand> <statement_list>
+              | 'WHEN' 'OTHER' <statement_list>
               ;
 
 # --- conditions -----------------------------------------------------------
 
 <condition> : <simple_condition>
-            | <condition> KW_AND <simple_condition>
-            | <condition> KW_OR <simple_condition>
-            | KW_NOT <simple_condition>
+            | <condition> 'AND' <simple_condition>
+            | <condition> 'OR' <simple_condition>
+            | 'NOT' <simple_condition>
             ;
 
 <simple_condition> : <operand> <relop> <operand>
@@ -621,12 +621,12 @@ DEBUG_LINE    = /\x02/
 <relop> : '='
         | '<'
         | '>'
-        | KW_IS KW_EQUAL KW_TO
-        | KW_IS KW_LESS KW_THAN
-        | KW_IS KW_GREATER KW_THAN
-        | KW_EQUAL KW_TO
-        | KW_LESS KW_THAN
-        | KW_GREATER KW_THAN
+        | 'IS' 'EQUAL' 'TO'
+        | 'IS' 'LESS' 'THAN'
+        | 'IS' 'GREATER' 'THAN'
+        | 'EQUAL' 'TO'
+        | 'LESS' 'THAN'
+        | 'GREATER' 'THAN'
         ;
 
 # --- arithmetic expressions (for COMPUTE) ---------------------------------

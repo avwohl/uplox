@@ -166,7 +166,7 @@ DOT           = '.'
 <program>      : <program_header> <block> '.'
                ;
 
-<program_header> : KW_PROGRAM IDENT <program_params_opt> ';'
+<program_header> : 'program' IDENT <program_params_opt> ';'
                  |
                  ;
 
@@ -191,12 +191,12 @@ DOT           = '.'
                ;
 
 # Pascal allows multiple sections of each kind in any order.
-<label_decl_part> : KW_LABEL <label_list> ';' ;
+<label_decl_part> : 'label' <label_list> ';' ;
 <label_list>      : INT_LIT
                   | <label_list> ',' INT_LIT
                   ;
 
-<const_decl_part> : KW_CONST <const_decl_seq> ;
+<const_decl_part> : 'const' <const_decl_seq> ;
 <const_decl_seq>  : <const_decl>
                   | <const_decl_seq> <const_decl>
                   ;
@@ -207,13 +207,13 @@ DOT           = '.'
                   | IDENT ':' <type_denoter> '=' <typed_const> ';'
                   ;
 
-<type_decl_part>  : KW_TYPE <type_decl_seq> ;
+<type_decl_part>  : 'type' <type_decl_seq> ;
 <type_decl_seq>   : <type_decl>
                   | <type_decl_seq> <type_decl>
                   ;
 <type_decl>       : IDENT '=' <type_denoter> ';' ;
 
-<var_decl_part>   : KW_VAR <var_decl_seq> ;
+<var_decl_part>   : 'var' <var_decl_seq> ;
 <var_decl_seq>    : <var_decl>
                   | <var_decl_seq> <var_decl>
                   ;
@@ -227,9 +227,9 @@ DOT           = '.'
                | <func_heading> ';' <routine_tail>
                ;
 
-<proc_heading> : KW_PROCEDURE IDENT <formal_params_opt>
+<proc_heading> : 'procedure' IDENT <formal_params_opt>
                ;
-<func_heading> : KW_FUNCTION IDENT <formal_params_opt> ':' <type_ident>
+<func_heading> : 'function' IDENT <formal_params_opt> ':' <type_ident>
                ;
 
 # A routine's tail is either a directive (forward / external) or a
@@ -238,9 +238,9 @@ DOT           = '.'
                | <block> ';'
                ;
 
-<directive>    : KW_FORWARD
-               | KW_EXTERNAL
-               | KW_EXTERNAL STRING_LIT
+<directive>    : 'forward'
+               | 'external'
+               | 'external' STRING_LIT
                ;
 
 <formal_params_opt> : '(' <formal_param_list> ')'
@@ -256,8 +256,8 @@ DOT           = '.'
 # cb(x: integer))`. Lifting the heading non-terminals here is the
 # idiomatic spelling.
 <formal_param>   : <ident_list> ':' <type_ident>
-                 | KW_VAR <ident_list> ':' <type_ident>
-                 | KW_CONST <ident_list> ':' <type_ident>
+                 | 'var' <ident_list> ':' <type_ident>
+                 | 'const' <ident_list> ':' <type_ident>
                  | <proc_heading>
                  | <func_heading>
                  ;
@@ -289,7 +289,7 @@ DOT           = '.'
 <const_factor>  : INT_LIT
                 | REAL_LIT
                 | STRING_LIT
-                | KW_NIL
+                | 'nil'
                 | '+' <const_factor>
                 | '-' <const_factor>
                 | IDENT
@@ -300,7 +300,7 @@ DOT           = '.'
 <type_ident>    : IDENT ;
 
 <structured_type> : <unpacked_structured>
-                  | KW_PACKED <unpacked_structured>
+                  | 'packed' <unpacked_structured>
                   ;
 
 <unpacked_structured> : <array_type>
@@ -309,14 +309,14 @@ DOT           = '.'
                       | <file_type>
                       ;
 
-<array_type>   : KW_ARRAY '[' <index_type_list> ']' KW_OF <type_denoter>
+<array_type>   : 'array' '[' <index_type_list> ']' 'of' <type_denoter>
                ;
 
 <index_type_list> : <simple_type>
                   | <index_type_list> ',' <simple_type>
                   ;
 
-<record_type>  : KW_RECORD <field_list> KW_END
+<record_type>  : 'record' <field_list> 'end'
                ;
 
 # Field lists allow any mix of fixed fields followed by an optional
@@ -335,7 +335,7 @@ DOT           = '.'
 <field_decl>   : <ident_list> ':' <type_denoter>
                ;
 
-<variant_part> : KW_CASE <variant_selector> KW_OF <variant_list>
+<variant_part> : 'case' <variant_selector> 'of' <variant_list>
                ;
 
 # `case Tag: TagType of` (with a discriminator field) or `case
@@ -355,10 +355,10 @@ DOT           = '.'
                | <const_list> ',' <expr>
                ;
 
-<set_type>     : KW_SET KW_OF <simple_type> ;
+<set_type>     : 'set' 'of' <simple_type> ;
 
-<file_type>    : KW_FILE KW_OF <type_denoter>
-               | KW_FILE
+<file_type>    : 'file' 'of' <type_denoter>
+               | 'file'
                ;
 
 <pointer_type> : '^' <type_ident> ;
@@ -392,7 +392,7 @@ DOT           = '.'
 
 # --- statements ----------------------------------------------------------
 
-<compound_stmt> : KW_BEGIN <stmt_list> KW_END
+<compound_stmt> : 'begin' <stmt_list> 'end'
                 ;
 
 <stmt_list>    : <stmt>
@@ -421,7 +421,7 @@ DOT           = '.'
 # statement-terminator set) picks the production.
 <assignment_stmt> : <designator> ':=' <expr> ;
 <proc_call_stmt>  : <designator> ;
-<goto_stmt>       : KW_GOTO INT_LIT ;
+<goto_stmt>       : 'goto' INT_LIT ;
 
 <structured_stmt> : <compound_stmt>
                   | <if_stmt>
@@ -432,16 +432,16 @@ DOT           = '.'
                   | <with_stmt>
                   ;
 
-<if_stmt>      : KW_IF <expr> KW_THEN <stmt>
-               | KW_IF <expr> KW_THEN <stmt> KW_ELSE <stmt>
+<if_stmt>      : 'if' <expr> 'then' <stmt>
+               | 'if' <expr> 'then' <stmt> 'else' <stmt>
                ;
 
-<while_stmt>   : KW_WHILE <expr> KW_DO <stmt> ;
+<while_stmt>   : 'while' <expr> 'do' <stmt> ;
 
-<repeat_stmt>  : KW_REPEAT <stmt_list> KW_UNTIL <expr> ;
+<repeat_stmt>  : 'repeat' <stmt_list> 'until' <expr> ;
 
-<for_stmt>     : KW_FOR IDENT ':=' <expr> KW_TO     <expr> KW_DO <stmt>
-               | KW_FOR IDENT ':=' <expr> KW_DOWNTO <expr> KW_DO <stmt>
+<for_stmt>     : 'for' IDENT ':=' <expr> 'to'     <expr> 'do' <stmt>
+               | 'for' IDENT ':=' <expr> 'downto' <expr> 'do' <stmt>
                ;
 
 # Case statements optionally carry an `else` clause for the default
@@ -449,11 +449,11 @@ DOT           = '.'
 # A trailing semicolon before the `else` (or before `end`) is
 # accepted — Borland / Free Pascal sources rely on this and ISO
 # strict-mode is needlessly fussy about it.
-<case_stmt>    : KW_CASE <expr> KW_OF <case_list> <case_tail> KW_END
+<case_stmt>    : 'case' <expr> 'of' <case_list> <case_tail> 'end'
                ;
 
-<case_tail>    : ';' KW_ELSE <stmt_list>
-               | KW_ELSE <stmt_list>
+<case_tail>    : ';' 'else' <stmt_list>
+               | 'else' <stmt_list>
                | ';'
                |
                ;
@@ -465,7 +465,7 @@ DOT           = '.'
 <case_arm>     : <const_list> ':' <stmt>
                ;
 
-<with_stmt>    : KW_WITH <designator_list> KW_DO <stmt> ;
+<with_stmt>    : 'with' <designator_list> 'do' <stmt> ;
 
 <designator_list> : <designator>
                   | <designator_list> ',' <designator>
@@ -486,7 +486,7 @@ DOT           = '.'
                | <simple_expr> '>'  <simple_expr>
                | <simple_expr> '<=' <simple_expr>
                | <simple_expr> '>=' <simple_expr>
-               | <simple_expr> KW_IN <simple_expr>
+               | <simple_expr> 'in' <simple_expr>
                ;
 
 <simple_expr>  : <term>
@@ -494,25 +494,25 @@ DOT           = '.'
                | '-' <term>
                | <simple_expr> '+'    <term>
                | <simple_expr> '-'    <term>
-               | <simple_expr> KW_OR  <term>
-               | <simple_expr> KW_XOR <term>
+               | <simple_expr> 'or'  <term>
+               | <simple_expr> 'xor' <term>
                ;
 
 <term>         : <factor>
                | <term> '*'    <factor>
                | <term> '/'    <factor>
-               | <term> KW_DIV <factor>
-               | <term> KW_MOD <factor>
-               | <term> KW_AND <factor>
+               | <term> 'div' <factor>
+               | <term> 'mod' <factor>
+               | <term> 'and' <factor>
                ;
 
 <factor>       : <designator>
                | INT_LIT
                | REAL_LIT
                | STRING_LIT
-               | KW_NIL
+               | 'nil'
                | '(' <expr> ')'
-               | KW_NOT <factor>
+               | 'not' <factor>
                | '@' <designator>
                | <set_ctor>
                ;

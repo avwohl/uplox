@@ -352,7 +352,7 @@ IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 # (Kotlin spec §1.4). This grammar requires explicit `;` —
 # newline-aware tokenisation can be added as a host pre-pass
 # (similar to layout / `%layout` for Python).
-<package_header_opt> : KW_PACKAGE <qualified_name> ';'
+<package_header_opt> : 'package' <qualified_name> ';'
                      |
                      ;
 
@@ -368,9 +368,9 @@ IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
           | <imports> <import_decl>
           ;
 
-<import_decl> : KW_IMPORT <qualified_name> ';'
-              | KW_IMPORT <qualified_name> '.' '*' ';'
-              | KW_IMPORT <qualified_name> KW_AS IDENT ';'
+<import_decl> : 'import' <qualified_name> ';'
+              | 'import' <qualified_name> '.' '*' ';'
+              | 'import' <qualified_name> 'as' IDENT ';'
               ;
 
 <top_level_decls_opt> : <top_level_decls>
@@ -399,17 +399,17 @@ IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
             | <modifiers> <modifier>
             ;
 
-<modifier> : KW_PUBLIC | KW_PRIVATE | KW_PROTECTED | KW_INTERNAL
-           | KW_ABSTRACT | KW_FINAL | KW_OPEN | KW_OVERRIDE
-           | KW_SEALED | KW_INNER
-           | KW_INLINE
-           | KW_EXPECT | KW_ACTUAL | KW_EXTERNAL
-           | KW_INFIX | KW_OPERATOR
-           | KW_LATEINIT | KW_CONST
-           | KW_SUSPEND | KW_TAILREC
-           | KW_NOINLINE | KW_CROSSINLINE
-           | KW_VARARG | KW_REIFIED
-           | KW_COMPANION | KW_ENUM | KW_ANNOTATION
+<modifier> : 'public' | 'private' | 'protected' | 'internal'
+           | 'abstract' | 'final' | 'open' | 'override'
+           | 'sealed' | 'inner'
+           | 'inline'
+           | 'expect' | 'actual' | 'external'
+           | 'infix' | 'operator'
+           | 'lateinit' | 'const'
+           | 'suspend' | 'tailrec'
+           | 'noinline' | 'crossinline'
+           | 'vararg' | 'reified'
+           | 'companion' | 'enum' | 'annotation'
            | <annotation>
            ;
 
@@ -421,16 +421,16 @@ IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 
 # --- class / object declarations -----------------------------------------
 
-<class_decl> : <modifiers_opt> KW_CLASS IDENT <type_params_opt>
+<class_decl> : <modifiers_opt> 'class' IDENT <type_params_opt>
                <primary_constructor_opt>
                <delegation_spec_opt>
                <class_body_opt>
-             | <modifiers_opt> KW_INTERFACE IDENT <type_params_opt>
+             | <modifiers_opt> 'interface' IDENT <type_params_opt>
                <delegation_spec_opt>
                <class_body_opt>
              ;
 
-<object_decl> : <modifiers_opt> KW_OBJECT IDENT
+<object_decl> : <modifiers_opt> 'object' IDENT
                 <delegation_spec_opt>
                 <class_body_opt>
               ;
@@ -450,10 +450,10 @@ IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 # A class param promotes to a property when prefixed by val / var.
 <class_param> : IDENT ':' <type>
               | IDENT ':' <type> '=' <expression>
-              | KW_VAL IDENT ':' <type>
-              | KW_VAL IDENT ':' <type> '=' <expression>
-              | KW_VAR IDENT ':' <type>
-              | KW_VAR IDENT ':' <type> '=' <expression>
+              | 'val' IDENT ':' <type>
+              | 'val' IDENT ':' <type> '=' <expression>
+              | 'var' IDENT ':' <type>
+              | 'var' IDENT ':' <type> '=' <expression>
               ;
 
 <delegation_spec_opt> : ':' <delegation_spec_list>
@@ -494,27 +494,27 @@ IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                | ';'
                ;
 
-<init_block> : KW_INIT <block>
+<init_block> : 'init' <block>
              ;
 
 # Secondary constructor — `constructor(params) [: this/super(args)]
 # block`. Uses the `<modifiers_opt>` non-terminal so visibility
 # modifiers work (`private constructor(...)`).
-<secondary_constructor> : <modifiers_opt> KW_CONSTRUCTOR '(' <class_param_list_opt> ')' <constructor_delegation_opt> <block>
-                        | <modifiers_opt> KW_CONSTRUCTOR '(' <class_param_list_opt> ')' <constructor_delegation_opt>
+<secondary_constructor> : <modifiers_opt> 'constructor' '(' <class_param_list_opt> ')' <constructor_delegation_opt> <block>
+                        | <modifiers_opt> 'constructor' '(' <class_param_list_opt> ')' <constructor_delegation_opt>
                         ;
 
-<constructor_delegation_opt> : ':' KW_THIS '(' <argument_list_opt> ')'
-                             | ':' KW_SUPER '(' <argument_list_opt> ')'
+<constructor_delegation_opt> : ':' 'this' '(' <argument_list_opt> ')'
+                             | ':' 'super' '(' <argument_list_opt> ')'
                              |
                              ;
 
 # Companion object — `companion object [Name] [: SuperTypes] [body]`.
 # At most one per class; the AST builder enforces uniqueness.
-<companion_object> : <modifiers_opt> KW_COMPANION KW_OBJECT <class_body_opt>
-                   | <modifiers_opt> KW_COMPANION KW_OBJECT IDENT <class_body_opt>
-                   | <modifiers_opt> KW_COMPANION KW_OBJECT ':' <delegation_spec_list> <class_body_opt>
-                   | <modifiers_opt> KW_COMPANION KW_OBJECT IDENT ':' <delegation_spec_list> <class_body_opt>
+<companion_object> : <modifiers_opt> 'companion' 'object' <class_body_opt>
+                   | <modifiers_opt> 'companion' 'object' IDENT <class_body_opt>
+                   | <modifiers_opt> 'companion' 'object' ':' <delegation_spec_list> <class_body_opt>
+                   | <modifiers_opt> 'companion' 'object' IDENT ':' <delegation_spec_list> <class_body_opt>
                    ;
 
 # --- function declaration ------------------------------------------------
@@ -525,10 +525,10 @@ IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 # shift on IDENT (the receiver type's leading IDENT vs. the
 # function name's IDENT). Inlining ties each form to a fixed
 # right context.
-<fun_decl> : <modifiers_opt> KW_FUN <type_params_opt>
+<fun_decl> : <modifiers_opt> 'fun' <type_params_opt>
              IDENT <fun_value_params> <fun_return_type_opt>
              <fun_body_opt>
-           | <modifiers_opt> KW_FUN <type_params_opt>
+           | <modifiers_opt> 'fun' <type_params_opt>
              <user_type> '.' IDENT <fun_value_params> <fun_return_type_opt>
              <fun_body_opt>
            ;
@@ -596,17 +596,17 @@ IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                      | <property_setter> <property_getter>
                      ;
 
-<property_getter> : <modifiers_opt> KW_GET '(' ')' <fun_return_type_opt> <fun_body_opt>
-                  | <modifiers_opt> KW_GET
+<property_getter> : <modifiers_opt> 'get' '(' ')' <fun_return_type_opt> <fun_body_opt>
+                  | <modifiers_opt> 'get'
                   ;
 
-<property_setter> : <modifiers_opt> KW_SET '(' IDENT ')' <fun_body_opt>
-                  | <modifiers_opt> KW_SET '(' IDENT ':' <type> ')' <fun_body_opt>
-                  | <modifiers_opt> KW_SET
+<property_setter> : <modifiers_opt> 'set' '(' IDENT ')' <fun_body_opt>
+                  | <modifiers_opt> 'set' '(' IDENT ':' <type> ')' <fun_body_opt>
+                  | <modifiers_opt> 'set'
                   ;
 
-<val_or_var> : KW_VAL
-             | KW_VAR
+<val_or_var> : 'val'
+             | 'var'
              ;
 
 <property_type_opt> : ':' <type>
@@ -614,13 +614,13 @@ IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                     ;
 
 <property_initializer_opt> : '=' <expression>
-                           | KW_BY <expression>
+                           | 'by' <expression>
                            |
                            ;
 
 # --- typealias -----------------------------------------------------------
 
-<typealias_decl> : <modifiers_opt> KW_TYPEALIAS IDENT <type_params_opt> '=' <type> ';'
+<typealias_decl> : <modifiers_opt> 'typealias' IDENT <type_params_opt> '=' <type> ';'
                  ;
 
 # --- generics ------------------------------------------------------------
@@ -668,8 +668,8 @@ IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                 ;
 
 <type_arg> : <type>
-           | KW_OUT <type>
-           | KW_IN <type>
+           | 'out' <type>
+           | 'in' <type>
            | '*'
            ;
 
@@ -719,9 +719,9 @@ IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 # optional label prefix (`label@`); the label binds the
 # innermost-matching `break@label` / `continue@label` /
 # `return@label`.
-<for_statement> : <label_prefix_opt> KW_FOR '(' IDENT KW_IN <expression> ')' <control_body>
-                | <label_prefix_opt> KW_FOR '(' IDENT ':' <type> KW_IN <expression> ')' <control_body>
-                | <label_prefix_opt> KW_FOR '(' '(' <destructuring_entries> ')' KW_IN <expression> ')' <control_body>
+<for_statement> : <label_prefix_opt> 'for' '(' IDENT 'in' <expression> ')' <control_body>
+                | <label_prefix_opt> 'for' '(' IDENT ':' <type> 'in' <expression> ')' <control_body>
+                | <label_prefix_opt> 'for' '(' '(' <destructuring_entries> ')' 'in' <expression> ')' <control_body>
                 ;
 
 <label_prefix_opt> : LABEL_DEF
@@ -736,10 +736,10 @@ IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                       | IDENT ':' <type>
                       ;
 
-<while_statement> : <label_prefix_opt> KW_WHILE '(' <expression> ')' <control_body>
+<while_statement> : <label_prefix_opt> 'while' '(' <expression> ')' <control_body>
                   ;
 
-<do_while_statement> : <label_prefix_opt> KW_DO <control_body> KW_WHILE '(' <expression> ')' ';'
+<do_while_statement> : <label_prefix_opt> 'do' <control_body> 'while' '(' <expression> ')' ';'
                      ;
 
 <control_body> : <block>
@@ -747,15 +747,15 @@ IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                | ';'
                ;
 
-<jump_statement> : KW_RETURN ';'
-                 | KW_RETURN <expression> ';'
-                 | KW_RETURN AT IDENT ';'
-                 | KW_RETURN AT IDENT <expression> ';'
-                 | KW_THROW <expression> ';'
-                 | KW_BREAK ';'
-                 | KW_BREAK AT IDENT ';'
-                 | KW_CONTINUE ';'
-                 | KW_CONTINUE AT IDENT ';'
+<jump_statement> : 'return' ';'
+                 | 'return' <expression> ';'
+                 | 'return' AT IDENT ';'
+                 | 'return' AT IDENT <expression> ';'
+                 | 'throw' <expression> ';'
+                 | 'break' ';'
+                 | 'break' AT IDENT ';'
+                 | 'continue' ';'
+                 | 'continue' AT IDENT ';'
                  ;
 
 # --- expressions ---------------------------------------------------------
@@ -795,10 +795,10 @@ IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
              ;
 
 <in_is_expr> : <elvis_expr>
-             | <in_is_expr> KW_IN <elvis_expr>
-             | <in_is_expr> KW_NOT_IN <elvis_expr>
-             | <in_is_expr> KW_IS <type>
-             | <in_is_expr> KW_NOT_IS <type>
+             | <in_is_expr> 'in' <elvis_expr>
+             | <in_is_expr> '!in' <elvis_expr>
+             | <in_is_expr> 'is' <type>
+             | <in_is_expr> '!is' <type>
              ;
 
 <elvis_expr> : <range_expr>
@@ -822,8 +822,8 @@ IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                       ;
 
 <as_expr> : <prefix_expr>
-          | <as_expr> KW_AS <type>
-          | <as_expr> KW_AS_SAFE <type>
+          | <as_expr> 'as' <type>
+          | <as_expr> 'as?' <type>
           ;
 
 <prefix_expr> : <postfix_expression>
@@ -841,7 +841,7 @@ IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                      | <postfix_expression> '.' IDENT
                      | <postfix_expression> '?.' IDENT
                      | <postfix_expression> '::' IDENT
-                     | <postfix_expression> '::' KW_CLASS
+                     | <postfix_expression> '::' 'class'
                      | <postfix_expression> '[' <argument_list> ']'
                      | <postfix_expression> '(' <argument_list_opt> ')'
                      | <postfix_expression> '(' <argument_list_opt> ')' <lambda_literal>
@@ -855,8 +855,8 @@ IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
        | <object_expression>
        | IDENT
        | BACKTICK_IDENT
-       | KW_THIS
-       | KW_SUPER
+       | 'this'
+       | 'super'
        | '(' <expression> ')'
        | <if_expression>
        | <when_expression>
@@ -867,25 +867,25 @@ IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 
 <literal> : INT_LIT | FLOAT_LIT
           | CHAR_LIT | STRING_LIT | RAW_STRING_LIT
-          | KW_TRUE | KW_FALSE | KW_NULL
+          | 'true' | 'false' | 'null'
           ;
 
 <callable_reference> : DCOLON IDENT
-                     | DCOLON KW_CLASS
+                     | DCOLON 'class'
                      ;
 
 # Anonymous function — `fun (params) [: ReturnType] body`.
 # A function expression with no receiver and no name. Body
 # is a block or `= expression`.
-<anonymous_function> : KW_FUN '(' ')' <fun_return_type_opt> <fun_body_opt>
-                     | KW_FUN '(' <fun_param_list> ')' <fun_return_type_opt> <fun_body_opt>
+<anonymous_function> : 'fun' '(' ')' <fun_return_type_opt> <fun_body_opt>
+                     | 'fun' '(' <fun_param_list> ')' <fun_return_type_opt> <fun_body_opt>
                      ;
 
 # Object expression — `object [: SuperType[, …]] { body }`.
 # Used as an expression to create an anonymous singleton.
 # Distinguished from object declaration by the lack of an
 # IDENT name.
-<object_expression> : KW_OBJECT <object_delegation_opt> <class_body>
+<object_expression> : 'object' <object_delegation_opt> <class_body>
                     ;
 
 <object_delegation_opt> : ':' <delegation_spec_list>
@@ -895,13 +895,13 @@ IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 # `if` is an expression with mandatory else for value-returning
 # use; the AST builder enforces the else-required case in
 # expression-required contexts.
-<if_expression> : KW_IF '(' <expression> ')' <control_body>
-                | KW_IF '(' <expression> ')' <control_body> KW_ELSE <control_body>
+<if_expression> : 'if' '(' <expression> ')' <control_body>
+                | 'if' '(' <expression> ')' <control_body> 'else' <control_body>
                 ;
 
 # `when` — Kotlin's pattern-matching expression.
-<when_expression> : KW_WHEN '{' <when_entries_opt> '}'
-                  | KW_WHEN '(' <expression> ')' '{' <when_entries_opt> '}'
+<when_expression> : 'when' '{' <when_entries_opt> '}'
+                  | 'when' '(' <expression> ')' '{' <when_entries_opt> '}'
                   ;
 
 <when_entries_opt> : <when_entries>
@@ -913,7 +913,7 @@ IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                ;
 
 <when_entry> : <when_conditions> ARROW <control_body>
-             | KW_ELSE ARROW <control_body>
+             | 'else' ARROW <control_body>
              ;
 
 <when_conditions> : <when_condition>
@@ -921,27 +921,27 @@ IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                   ;
 
 <when_condition> : <expression>
-                 | KW_IN <expression>
-                 | KW_NOT_IN <expression>
-                 | KW_IS <type>
-                 | KW_NOT_IS <type>
+                 | 'in' <expression>
+                 | '!in' <expression>
+                 | 'is' <type>
+                 | '!is' <type>
                  ;
 
 # Try / catch / finally as an expression. JLS-style: try
 # must have at least one catch OR a finally.
-<try_expression> : KW_TRY <block> <catch_clauses>
-                 | KW_TRY <block> <catch_clauses> <finally_clause>
-                 | KW_TRY <block> <finally_clause>
+<try_expression> : 'try' <block> <catch_clauses>
+                 | 'try' <block> <catch_clauses> <finally_clause>
+                 | 'try' <block> <finally_clause>
                  ;
 
 <catch_clauses> : <catch_clause>
                 | <catch_clauses> <catch_clause>
                 ;
 
-<catch_clause> : KW_CATCH '(' IDENT ':' <type> ')' <block>
+<catch_clause> : 'catch' '(' IDENT ':' <type> ')' <block>
                ;
 
-<finally_clause> : KW_FINALLY <block>
+<finally_clause> : 'finally' <block>
                  ;
 
 # Lambda literal: `{ params -> body }`. The `params ->`

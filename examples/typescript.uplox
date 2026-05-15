@@ -427,7 +427,7 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
 # at the question mark so `A extends B ? C : D extends E ? F :
 # G` parses as `A extends B ? C : (D extends E ? F : G)`.
 <conditional_type> : <union_type>
-                   | <union_type> KW_EXTENDS <union_type> '?' <type> ':' <type>
+                   | <union_type> 'extends' <union_type> '?' <type> ':' <type>
                    ;
 
 <union_type> : <intersection_type>
@@ -442,11 +442,11 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
 
 # Type operators — prefix unary operators on a type.
 <type_operator> : <postfix_type>
-                | KW_KEYOF <type_operator>
-                | KW_TYPEOF <typeof_ref>
-                | KW_READONLY <type_operator>
-                | KW_INFER IDENT
-                | KW_UNIQUE KW_SYMBOL
+                | 'keyof' <type_operator>
+                | 'typeof' <typeof_ref>
+                | 'readonly' <type_operator>
+                | 'infer' IDENT
+                | 'unique' 'symbol'
                 ;
 
 # `typeof` query takes a runtime value reference, not a type.
@@ -477,7 +477,7 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
                | <object_type>
                | <function_type>
                | <constructor_type>
-               | KW_THIS
+               | 'this'
                ;
 
 # Mapped-type body: `[K in U]: V` and `[K in U as M]: V` (TS
@@ -507,25 +507,25 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
                 | <type_arg_list> ',' <type>
                 ;
 
-<predefined_type> : KW_NUMBER
-                  | KW_STRING
-                  | KW_BOOLEAN
-                  | KW_BIGINT
-                  | KW_SYMBOL
-                  | KW_OBJECT_T
-                  | KW_ANY
-                  | KW_UNKNOWN
-                  | KW_NEVER
-                  | KW_VOID
-                  | KW_NULL
-                  | KW_UNDEFINED
+<predefined_type> : 'number'
+                  | 'string'
+                  | 'boolean'
+                  | 'bigint'
+                  | 'symbol'
+                  | 'object'
+                  | 'any'
+                  | 'unknown'
+                  | 'never'
+                  | 'void'
+                  | 'null'
+                  | 'undefined'
                   ;
 
 <literal_type> : STRING_LIT
                | INT_LIT
                | FLOAT_LIT
-               | KW_TRUE
-               | KW_FALSE
+               | 'true'
+               | 'false'
                | <template_literal>
                | '-' INT_LIT
                | '-' FLOAT_LIT
@@ -580,8 +580,8 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
 # already absorbed by `<type_member_modifiers>` on the parent
 # `<type_property>` form; we accept it inline here too so the
 # member can carry its own modifier shape under either rung.
-<mapped_member> : <type_member_modifiers> '[' IDENT KW_IN <type> ']' <mapped_optional_opt> ':' <type>
-                | <type_member_modifiers> '[' IDENT KW_IN <type> KW_AS <type> ']' <mapped_optional_opt> ':' <type>
+<mapped_member> : <type_member_modifiers> '[' IDENT 'in' <type> ']' <mapped_optional_opt> ':' <type>
+                | <type_member_modifiers> '[' IDENT 'in' <type> 'as' <type> ']' <mapped_optional_opt> ':' <type>
                 ;
 
 <type_member_sep> : ';' | ',' |
@@ -594,9 +594,9 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
                         |
                         ;
 
-<type_member_modifier> : KW_READONLY
-                       | '+' KW_READONLY
-                       | '-' KW_READONLY
+<type_member_modifier> : 'readonly'
+                       | '+' 'readonly'
+                       | '-' 'readonly'
                        ;
 
 # `new` is NOT included here — it starts a `<type_construct_
@@ -607,8 +607,8 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
                      | INT_LIT
                      | FLOAT_LIT
                      | '[' <type_computed_key> ']'
-                     | KW_GET
-                     | KW_SET
+                     | 'get'
+                     | 'set'
                      ;
 
 # Computed type-member key — either a dotted ident chain
@@ -636,7 +636,7 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
                       ;
 
 # Construct signature: `new (args): T`.
-<type_construct_signature> : KW_NEW <generic_params_opt> '(' <type_param_list_opt> ')' <type_return_annotation_opt>
+<type_construct_signature> : 'new' <generic_params_opt> '(' <type_param_list_opt> ')' <type_return_annotation_opt>
                            ;
 
 # Type-position parameter — same shape as runtime parameter
@@ -653,7 +653,7 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
 <type_parameter> : IDENT ':' <type>
                  | IDENT '?' ':' <type>
                  | '...' IDENT ':' <type>
-                 | KW_THIS ':' <type>
+                 | 'this' ':' <type>
                  ;
 
 <type_return_annotation_opt> : ':' <type>
@@ -663,19 +663,19 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
 
 # Type predicate: `x is T`, `this is T`, `asserts x`,
 # `asserts x is T`.
-<type_predicate> : IDENT KW_IS_KW <type>
-                 | KW_THIS KW_IS_KW <type>
-                 | KW_ASSERTS IDENT
-                 | KW_ASSERTS IDENT KW_IS_KW <type>
-                 | KW_ASSERTS KW_THIS KW_IS_KW <type>
+<type_predicate> : IDENT 'is' <type>
+                 | 'this' 'is' <type>
+                 | 'asserts' IDENT
+                 | 'asserts' IDENT 'is' <type>
+                 | 'asserts' 'this' 'is' <type>
                  ;
 
 # Function type — `(params) => R`, optionally with generics.
 <function_type> : <generic_params_opt> '(' <type_param_list_opt> ')' '=>' <type>
                 ;
 
-<constructor_type> : KW_NEW <generic_params_opt> '(' <type_param_list_opt> ')' '=>' <type>
-                   | KW_ABSTRACT KW_NEW <generic_params_opt> '(' <type_param_list_opt> ')' '=>' <type>
+<constructor_type> : 'new' <generic_params_opt> '(' <type_param_list_opt> ')' '=>' <type>
+                   | 'abstract' 'new' <generic_params_opt> '(' <type_param_list_opt> ')' '=>' <type>
                    ;
 
 # <paren_type> removed — see <primary_type> comment above.
@@ -694,18 +694,18 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
 # `<const T>` (TS 5.0+ const generics), `<in T>` / `<out T>`
 # (TS 4.7+ variance modifiers).
 <generic_param> : <generic_param_modifiers> IDENT
-                | <generic_param_modifiers> IDENT KW_EXTENDS <type>
+                | <generic_param_modifiers> IDENT 'extends' <type>
                 | <generic_param_modifiers> IDENT '=' <type>
-                | <generic_param_modifiers> IDENT KW_EXTENDS <type> '=' <type>
+                | <generic_param_modifiers> IDENT 'extends' <type> '=' <type>
                 ;
 
 <generic_param_modifiers> : <generic_param_modifiers> <generic_param_modifier>
                           |
                           ;
 
-<generic_param_modifier> : KW_CONST
-                         | KW_IN
-                         | KW_OUT
+<generic_param_modifier> : 'const'
+                         | 'in'
+                         | 'out'
                          ;
 
 # `out` is contextual; reuse a `KW_OUT` token (TS-only).
@@ -755,10 +755,10 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
 # `interface I<T> extends U, V { members }`. The body uses the
 # same `<type_member_list>` as object types — methods,
 # properties, index signatures, call / construct signatures.
-<interface_decl> : KW_INTERFACE IDENT <generic_params_opt> <interface_extends_opt> <object_type>
+<interface_decl> : 'interface' IDENT <generic_params_opt> <interface_extends_opt> <object_type>
                  ;
 
-<interface_extends_opt> : KW_EXTENDS <type_ref_list>
+<interface_extends_opt> : 'extends' <type_ref_list>
                         |
                         ;
 
@@ -767,12 +767,12 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
                 ;
 
 # `type X<T> = T;`.
-<type_alias_decl> : KW_TYPE IDENT <generic_params_opt> '=' <type> ';'
+<type_alias_decl> : 'type' IDENT <generic_params_opt> '=' <type> ';'
                   ;
 
 # `enum E { K, K = V }` and `const enum E { ... }`.
-<enum_decl> : KW_ENUM IDENT '{' <enum_member_list_opt> '}'
-            | KW_CONST KW_ENUM IDENT '{' <enum_member_list_opt> '}'
+<enum_decl> : 'enum' IDENT '{' <enum_member_list_opt> '}'
+            | 'const' 'enum' IDENT '{' <enum_member_list_opt> '}'
             ;
 
 <enum_member_list_opt> : <enum_member_list>
@@ -796,9 +796,9 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
 # `namespace N { ... }` / `module N { ... }` / ambient
 # `module "name" { ... }`. The body is a regular statement
 # list; nested namespaces / declarations are accepted.
-<namespace_decl> : KW_NAMESPACE <namespace_name> <block>
-                 | KW_MODULE <namespace_name> <block>
-                 | KW_MODULE STRING_LIT <block>
+<namespace_decl> : 'namespace' <namespace_name> <block>
+                 | 'module' <namespace_name> <block>
+                 | 'module' STRING_LIT <block>
                  ;
 
 <namespace_name> : IDENT
@@ -808,8 +808,8 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
 # Ambient declarations: `declare <decl>` prefix on any
 # declaration, plus the standalone `declare global { ... }`
 # block.
-<ambient_decl> : KW_DECLARE <ambient_target>
-               | KW_DECLARE KW_GLOBAL <block>
+<ambient_decl> : 'declare' <ambient_target>
+               | 'declare' 'global' <block>
                ;
 
 <ambient_target> : <variable_decl_stmt>
@@ -827,7 +827,7 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
 <empty_stmt> : ';'
              ;
 
-<debugger_stmt> : KW_DEBUGGER ';'
+<debugger_stmt> : 'debugger' ';'
                 ;
 
 # --- variable declarations -----------------------------------------------
@@ -838,9 +838,9 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
 <variable_decl> : <var_kind> <binding_list>
                 ;
 
-<var_kind> : KW_VAR
-           | KW_LET
-           | KW_CONST
+<var_kind> : 'var'
+           | 'let'
+           | 'const'
            ;
 
 <binding_list> : <binding>
@@ -939,11 +939,11 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
                         | INT_LIT '(' <parameter_list_opt> ')' <block>
                         | FLOAT_LIT '(' <parameter_list_opt> ')' <block>
                         | '[' <assignment_expr> ']' '(' <parameter_list_opt> ')' <block>
-                        | KW_GET <method_key> '(' ')' <block>
-                        | KW_SET <method_key> '(' <parameter> ')' <block>
-                        | KW_ASYNC <method_key> '(' <parameter_list_opt> ')' <block>
+                        | 'get' <method_key> '(' ')' <block>
+                        | 'set' <method_key> '(' <parameter> ')' <block>
+                        | 'async' <method_key> '(' <parameter_list_opt> ')' <block>
                         | '*' <method_key> '(' <parameter_list_opt> ')' <block>
-                        | KW_ASYNC '*' <method_key> '(' <parameter_list_opt> ')' <block>
+                        | 'async' '*' <method_key> '(' <parameter_list_opt> ')' <block>
                         | '...' <assignment_expr>
                         ;
 
@@ -1009,11 +1009,11 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
                   | <relational_expr> '>'  <shift_expr>
                   | <relational_expr> '<=' <shift_expr>
                   | <relational_expr> '>=' <shift_expr>
-                  | <relational_expr> KW_IN <shift_expr>
-                  | <relational_expr> KW_INSTANCEOF <shift_expr>
-                  | <relational_expr> KW_AS <type>
-                  | <relational_expr> KW_AS KW_CONST
-                  | <relational_expr> KW_SATISFIES <type>
+                  | <relational_expr> 'in' <shift_expr>
+                  | <relational_expr> 'instanceof' <shift_expr>
+                  | <relational_expr> 'as' <type>
+                  | <relational_expr> 'as' 'const'
+                  | <relational_expr> 'satisfies' <type>
                   ;
 
 <shift_expr> : <additive_expr>
@@ -1039,14 +1039,14 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
                       ;
 
 <unary_expr> : <update_expr>
-             | KW_DELETE <unary_expr>
-             | KW_VOID <unary_expr>
-             | KW_TYPEOF <unary_expr>
+             | 'delete' <unary_expr>
+             | 'void' <unary_expr>
+             | 'typeof' <unary_expr>
              | '+' <unary_expr>
              | '-' <unary_expr>
              | '~' <unary_expr>
              | '!' <unary_expr>
-             | KW_AWAIT <unary_expr>
+             | 'await' <unary_expr>
              ;
 
 <update_expr> : <lhs_expr>
@@ -1063,26 +1063,26 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
            ;
 
 <new_expr> : <member_expr>
-           | KW_NEW <new_expr>
+           | 'new' <new_expr>
            ;
 
 <member_expr> : <primary_expr>
               | <member_expr> '.' IDENT
               | <member_expr> '.' PRIVATE_IDENT
               | <member_expr> '[' <expression> ']'
-              | KW_NEW <member_expr> '(' <arguments_opt> ')'
+              | 'new' <member_expr> '(' <arguments_opt> ')'
               | <super_property>
               ;
 
-<super_property> : KW_SUPER '.' IDENT
-                 | KW_SUPER '[' <expression> ']'
+<super_property> : 'super' '.' IDENT
+                 | 'super' '[' <expression> ']'
                  ;
 
 # Call expressions. Optional-chaining `?.` segments fold into
 # the suffix chain.
 <call_expr> : <member_expr> '(' <arguments_opt> ')'
             | <member_expr> LT_GENERIC <type_arg_list> GT_GENERIC '(' <arguments_opt> ')'
-            | KW_SUPER '(' <arguments_opt> ')'
+            | 'super' '(' <arguments_opt> ')'
             | <call_expr> '(' <arguments_opt> ')'
             | <call_expr> LT_GENERIC <type_arg_list> GT_GENERIC '(' <arguments_opt> ')'
             | <call_expr> '.' IDENT
@@ -1117,7 +1117,7 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
 
 # --- primary expressions / atoms -----------------------------------------
 
-<primary_expr> : KW_THIS
+<primary_expr> : 'this'
                | IDENT
                | <literal>
                | <array_or_pattern>
@@ -1128,10 +1128,10 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
                | <template_literal>
                ;
 
-<literal> : KW_NULL
-          | KW_UNDEFINED
-          | KW_TRUE
-          | KW_FALSE
+<literal> : 'null'
+          | 'undefined'
+          | 'true'
+          | 'false'
           | INT_LIT
           | FLOAT_LIT
           | STRING_LIT
@@ -1159,11 +1159,11 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
 # abstract classes). Method bodies are optional so `abstract`
 # methods and overload signatures can use the `;` form.
 <method_def> : <method_key> <method_optional_opt> <generic_params_opt> '(' <parameter_list_opt> ')' <return_type_annotation_opt> <method_body>
-             | KW_GET <method_key> '(' ')' <return_type_annotation_opt> <method_body>
-             | KW_SET <method_key> '(' <parameter> ')' <method_body>
-             | KW_ASYNC <method_key> <generic_params_opt> '(' <parameter_list_opt> ')' <return_type_annotation_opt> <method_body>
+             | 'get' <method_key> '(' ')' <return_type_annotation_opt> <method_body>
+             | 'set' <method_key> '(' <parameter> ')' <method_body>
+             | 'async' <method_key> <generic_params_opt> '(' <parameter_list_opt> ')' <return_type_annotation_opt> <method_body>
              | '*' <method_key> <generic_params_opt> '(' <parameter_list_opt> ')' <return_type_annotation_opt> <method_body>
-             | KW_ASYNC '*' <method_key> <generic_params_opt> '(' <parameter_list_opt> ')' <return_type_annotation_opt> <method_body>
+             | 'async' '*' <method_key> <generic_params_opt> '(' <parameter_list_opt> ')' <return_type_annotation_opt> <method_body>
              ;
 
 <method_optional_opt> : '?'
@@ -1200,10 +1200,10 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
 # ambient `declare function f(...): T;` and overload
 # declarations (a function declaration with just a signature
 # followed by `;`).
-<hoisted_function> : KW_FUNCTION IDENT <generic_params_opt> '(' <parameter_list_opt> ')' <return_type_annotation_opt> <function_body_opt>
-                   | KW_FUNCTION '*' IDENT <generic_params_opt> '(' <parameter_list_opt> ')' <return_type_annotation_opt> <function_body_opt>
-                   | KW_ASYNC KW_FUNCTION IDENT <generic_params_opt> '(' <parameter_list_opt> ')' <return_type_annotation_opt> <function_body_opt>
-                   | KW_ASYNC KW_FUNCTION '*' IDENT <generic_params_opt> '(' <parameter_list_opt> ')' <return_type_annotation_opt> <function_body_opt>
+<hoisted_function> : 'function' IDENT <generic_params_opt> '(' <parameter_list_opt> ')' <return_type_annotation_opt> <function_body_opt>
+                   | 'function' '*' IDENT <generic_params_opt> '(' <parameter_list_opt> ')' <return_type_annotation_opt> <function_body_opt>
+                   | 'async' 'function' IDENT <generic_params_opt> '(' <parameter_list_opt> ')' <return_type_annotation_opt> <function_body_opt>
+                   | 'async' 'function' '*' IDENT <generic_params_opt> '(' <parameter_list_opt> ')' <return_type_annotation_opt> <function_body_opt>
                    ;
 
 # Return-type annotation also accepts type predicates
@@ -1227,10 +1227,10 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
 # function expressions parse via `<hoisted_function>` in
 # expression positions where the parent context already
 # disambiguates.
-<function_expr> : KW_FUNCTION <generic_params_opt> '(' <parameter_list_opt> ')' <return_type_annotation_opt> <block>
-                | KW_FUNCTION '*' <generic_params_opt> '(' <parameter_list_opt> ')' <return_type_annotation_opt> <block>
-                | KW_ASYNC KW_FUNCTION <generic_params_opt> '(' <parameter_list_opt> ')' <return_type_annotation_opt> <block>
-                | KW_ASYNC KW_FUNCTION '*' <generic_params_opt> '(' <parameter_list_opt> ')' <return_type_annotation_opt> <block>
+<function_expr> : 'function' <generic_params_opt> '(' <parameter_list_opt> ')' <return_type_annotation_opt> <block>
+                | 'function' '*' <generic_params_opt> '(' <parameter_list_opt> ')' <return_type_annotation_opt> <block>
+                | 'async' 'function' <generic_params_opt> '(' <parameter_list_opt> ')' <return_type_annotation_opt> <block>
+                | 'async' 'function' '*' <generic_params_opt> '(' <parameter_list_opt> ')' <return_type_annotation_opt> <block>
                 ;
 
 <parameter_list_opt> : <parameter_list>
@@ -1268,7 +1268,7 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
             | <ts_param_modifiers_opt> <param_head> <type_annotation> '=' <assignment_expr>
             | '...' <param_head>
             | '...' <param_head> <type_annotation>
-            | KW_THIS <type_annotation>
+            | 'this' <type_annotation>
             ;
 
 <param_head> : IDENT
@@ -1287,11 +1287,11 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
                      | <ts_param_modifiers> <ts_param_modifier>
                      ;
 
-<ts_param_modifier> : KW_PUBLIC
-                    | KW_PRIVATE
-                    | KW_PROTECTED
-                    | KW_READONLY
-                    | KW_OVERRIDE
+<ts_param_modifier> : 'public'
+                    | 'private'
+                    | 'protected'
+                    | 'readonly'
+                    | 'override'
                     ;
 
 # Arrow functions and parenthesised primary expressions share
@@ -1314,11 +1314,11 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
 # at LR(1). Move the return type onto the binding instead:
 # `let f: (x) => T = (x) => x`.
 <arrow_function> : IDENT '=>' <arrow_body>
-                 | KW_ASYNC IDENT '=>' <arrow_body>
+                 | 'async' IDENT '=>' <arrow_body>
                  | <paren_or_arrow_head> '=>' <arrow_body>
-                 | KW_ASYNC <paren_or_arrow_head> '=>' <arrow_body>
+                 | 'async' <paren_or_arrow_head> '=>' <arrow_body>
                  | LT_GENERIC <generic_param_list> GT_GENERIC <paren_or_arrow_head> '=>' <arrow_body>
-                 | KW_ASYNC LT_GENERIC <generic_param_list> GT_GENERIC <paren_or_arrow_head> '=>' <arrow_body>
+                 | 'async' LT_GENERIC <generic_param_list> GT_GENERIC <paren_or_arrow_head> '=>' <arrow_body>
                  ;
 
 # Paren-wrapped argument / parameter list. Same shape whether
@@ -1427,11 +1427,11 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
                            | <relational_expr_no_brace> '>'  <shift_expr>
                            | <relational_expr_no_brace> '<=' <shift_expr>
                            | <relational_expr_no_brace> '>=' <shift_expr>
-                           | <relational_expr_no_brace> KW_IN <shift_expr>
-                           | <relational_expr_no_brace> KW_INSTANCEOF <shift_expr>
-                           | <relational_expr_no_brace> KW_AS <type>
-                           | <relational_expr_no_brace> KW_AS KW_CONST
-                           | <relational_expr_no_brace> KW_SATISFIES <type>
+                           | <relational_expr_no_brace> 'in' <shift_expr>
+                           | <relational_expr_no_brace> 'instanceof' <shift_expr>
+                           | <relational_expr_no_brace> 'as' <type>
+                           | <relational_expr_no_brace> 'as' 'const'
+                           | <relational_expr_no_brace> 'satisfies' <type>
                            ;
 
 <shift_expr_no_brace> : <additive_expr_no_brace>
@@ -1461,14 +1461,14 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
 # alternatives reach the full (brace-permitting) `<unary_expr>`
 # subtree because they've already consumed a non-`{` token.
 <unary_expr_no_brace> : <update_expr_no_brace>
-                      | KW_DELETE <unary_expr>
-                      | KW_VOID <unary_expr>
-                      | KW_TYPEOF <unary_expr>
+                      | 'delete' <unary_expr>
+                      | 'void' <unary_expr>
+                      | 'typeof' <unary_expr>
                       | '+' <unary_expr>
                       | '-' <unary_expr>
                       | '~' <unary_expr>
                       | '!' <unary_expr>
-                      | KW_AWAIT <unary_expr>
+                      | 'await' <unary_expr>
                       ;
 
 <update_expr_no_brace> : <lhs_expr_no_brace>
@@ -1483,7 +1483,7 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
                     ;
 
 <new_expr_no_brace> : <member_expr_no_brace>
-                    | KW_NEW <new_expr>
+                    | 'new' <new_expr>
                     ;
 
 # Member-expr suffix chain: the LEAD `<primary_expr>` is
@@ -1494,13 +1494,13 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
                        | <member_expr_no_brace> '.' IDENT
                        | <member_expr_no_brace> '.' PRIVATE_IDENT
                        | <member_expr_no_brace> '[' <expression> ']'
-                       | KW_NEW <member_expr> '(' <arguments_opt> ')'
+                       | 'new' <member_expr> '(' <arguments_opt> ')'
                        | <super_property>
                        ;
 
 <call_expr_no_brace> : <member_expr_no_brace> '(' <arguments_opt> ')'
                      | <member_expr_no_brace> LT_GENERIC <type_arg_list> GT_GENERIC '(' <arguments_opt> ')'
-                     | KW_SUPER '(' <arguments_opt> ')'
+                     | 'super' '(' <arguments_opt> ')'
                      | <call_expr_no_brace> '(' <arguments_opt> ')'
                      | <call_expr_no_brace> LT_GENERIC <type_arg_list> GT_GENERIC '(' <arguments_opt> ')'
                      | <call_expr_no_brace> '.' IDENT
@@ -1525,7 +1525,7 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
 # `<primary_expr>`. Every other primary form starts with a
 # non-`{` token, so all the upstream `_no_brace` rungs can
 # safely terminate here.
-<primary_expr_no_brace> : KW_THIS
+<primary_expr_no_brace> : 'this'
                         | IDENT
                         | <literal>
                         | <array_or_pattern>
@@ -1537,9 +1537,9 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
 
 # --- yield expression ----------------------------------------------------
 
-<yield_expr> : KW_YIELD
-             | KW_YIELD <assignment_expr>
-             | KW_YIELD '*' <assignment_expr>
+<yield_expr> : 'yield'
+             | 'yield' <assignment_expr>
+             | 'yield' '*' <assignment_expr>
              ;
 
 # --- classes -------------------------------------------------------------
@@ -1556,24 +1556,24 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
 # _opt>` non-terminal because the empty alternative would
 # clash reduce/reduce with `<class_expr>` at the expression-
 # statement state on lookahead `KW_CLASS`.
-<hoisted_class> : KW_CLASS IDENT <generic_params_opt> <class_heritage_opt> <class_implements_opt> '{' <class_body> '}'
-                | KW_ABSTRACT KW_CLASS IDENT <generic_params_opt> <class_heritage_opt> <class_implements_opt> '{' <class_body> '}'
-                | <decorator_list> KW_CLASS IDENT <generic_params_opt> <class_heritage_opt> <class_implements_opt> '{' <class_body> '}'
-                | <decorator_list> KW_ABSTRACT KW_CLASS IDENT <generic_params_opt> <class_heritage_opt> <class_implements_opt> '{' <class_body> '}'
+<hoisted_class> : 'class' IDENT <generic_params_opt> <class_heritage_opt> <class_implements_opt> '{' <class_body> '}'
+                | 'abstract' 'class' IDENT <generic_params_opt> <class_heritage_opt> <class_implements_opt> '{' <class_body> '}'
+                | <decorator_list> 'class' IDENT <generic_params_opt> <class_heritage_opt> <class_implements_opt> '{' <class_body> '}'
+                | <decorator_list> 'abstract' 'class' IDENT <generic_params_opt> <class_heritage_opt> <class_implements_opt> '{' <class_body> '}'
                 ;
 
 # Anonymous class expression — same separation rationale as
 # function expressions.
-<class_expr> : KW_CLASS <generic_params_opt> <class_heritage_opt> <class_implements_opt> '{' <class_body> '}'
+<class_expr> : 'class' <generic_params_opt> <class_heritage_opt> <class_implements_opt> '{' <class_body> '}'
              ;
 
-<class_heritage_opt> : KW_EXTENDS <lhs_expr>
-                     | KW_EXTENDS <lhs_expr> LT_GENERIC <type_arg_list> GT_GENERIC
+<class_heritage_opt> : 'extends' <lhs_expr>
+                     | 'extends' <lhs_expr> LT_GENERIC <type_arg_list> GT_GENERIC
                      |
                      ;
 
 # `implements I, J<T>` — only on classes (not interfaces).
-<class_implements_opt> : KW_IMPLEMENTS <type_ref_list>
+<class_implements_opt> : 'implements' <type_ref_list>
                        |
                        ;
 
@@ -1607,13 +1607,13 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
                       | <ts_member_modifiers> <ts_member_modifier>
                       ;
 
-<ts_member_modifier> : KW_PUBLIC
-                     | KW_PRIVATE
-                     | KW_PROTECTED
-                     | KW_STATIC
-                     | KW_READONLY
-                     | KW_ABSTRACT
-                     | KW_OVERRIDE
+<ts_member_modifier> : 'public'
+                     | 'private'
+                     | 'protected'
+                     | 'static'
+                     | 'readonly'
+                     | 'abstract'
+                     | 'override'
                      ;
 
 # Index signature member of a class body —
@@ -1666,8 +1666,8 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
 <expression_stmt> : <expression_no_brace> ';'
                   ;
 
-<if_stmt> : KW_IF '(' <expression> ')' <statement>
-          | KW_IF '(' <expression> ')' <statement> KW_ELSE <statement>
+<if_stmt> : 'if' '(' <expression> ')' <statement>
+          | 'if' '(' <expression> ')' <statement> 'else' <statement>
           ;
 
 <iteration_stmt> : <while_stmt>
@@ -1677,16 +1677,16 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
                  | <for_of_stmt>
                  ;
 
-<while_stmt> : KW_WHILE '(' <expression> ')' <statement>
+<while_stmt> : 'while' '(' <expression> ')' <statement>
              ;
 
-<do_while_stmt> : KW_DO <statement> KW_WHILE '(' <expression> ')' ';'
+<do_while_stmt> : 'do' <statement> 'while' '(' <expression> ')' ';'
                 ;
 
 # Three for-statement shapes — classic C-style, `in`, and `of`.
 # Each splits out as a separate alternative so the LR(1) decision
 # stays local to the `(` head.
-<for_stmt> : KW_FOR '(' <for_init_opt> ';' <expression_opt> ';' <expression_opt> ')' <statement>
+<for_stmt> : 'for' '(' <for_init_opt> ';' <expression_opt> ';' <expression_opt> ')' <statement>
            ;
 
 # Classic for-init is restricted to assignment-like / update
@@ -1730,11 +1730,11 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
                  |
                  ;
 
-<for_in_stmt> : KW_FOR '(' <for_lhs> KW_IN <expression> ')' <statement>
+<for_in_stmt> : 'for' '(' <for_lhs> 'in' <expression> ')' <statement>
               ;
 
-<for_of_stmt> : KW_FOR '(' <for_lhs> KW_OF <assignment_expr> ')' <statement>
-              | KW_FOR KW_AWAIT '(' <for_lhs> KW_OF <assignment_expr> ')' <statement>
+<for_of_stmt> : 'for' '(' <for_lhs> 'of' <assignment_expr> ')' <statement>
+              | 'for' 'await' '(' <for_lhs> 'of' <assignment_expr> ')' <statement>
               ;
 
 # A for-in / for-of LHS is either a binding (with var/let/const)
@@ -1743,7 +1743,7 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
           | <lhs_expr>
           ;
 
-<switch_stmt> : KW_SWITCH '(' <expression> ')' '{' <case_clauses_opt> '}'
+<switch_stmt> : 'switch' '(' <expression> ')' '{' <case_clauses_opt> '}'
               ;
 
 <case_clauses_opt> : <case_clauses>
@@ -1754,35 +1754,35 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
                | <case_clauses> <case_clause>
                ;
 
-<case_clause> : KW_CASE <expression> ':' <statement_list_opt>
-              | KW_DEFAULT ':' <statement_list_opt>
+<case_clause> : 'case' <expression> ':' <statement_list_opt>
+              | 'default' ':' <statement_list_opt>
               ;
 
-<break_stmt> : KW_BREAK ';'
-             | KW_BREAK IDENT ';'
+<break_stmt> : 'break' ';'
+             | 'break' IDENT ';'
              ;
 
-<continue_stmt> : KW_CONTINUE ';'
-                | KW_CONTINUE IDENT ';'
+<continue_stmt> : 'continue' ';'
+                | 'continue' IDENT ';'
                 ;
 
-<return_stmt> : KW_RETURN ';'
-              | KW_RETURN <expression> ';'
+<return_stmt> : 'return' ';'
+              | 'return' <expression> ';'
               ;
 
-<throw_stmt> : KW_THROW <expression> ';'
+<throw_stmt> : 'throw' <expression> ';'
              ;
 
-<try_stmt> : KW_TRY <block> <catch_clause>
-           | KW_TRY <block> <finally_clause>
-           | KW_TRY <block> <catch_clause> <finally_clause>
+<try_stmt> : 'try' <block> <catch_clause>
+           | 'try' <block> <finally_clause>
+           | 'try' <block> <catch_clause> <finally_clause>
            ;
 
-<catch_clause> : KW_CATCH <block>
-               | KW_CATCH '(' <binding_target> ')' <block>
+<catch_clause> : 'catch' <block>
+               | 'catch' '(' <binding_target> ')' <block>
                ;
 
-<finally_clause> : KW_FINALLY <block>
+<finally_clause> : 'finally' <block>
                  ;
 
 <labelled_stmt> : IDENT ':' <statement>
@@ -1790,10 +1790,10 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
 
 # --- modules -------------------------------------------------------------
 
-<import_stmt> : KW_IMPORT STRING_LIT ';'
-              | KW_IMPORT <import_clause> KW_FROM STRING_LIT ';'
-              | KW_IMPORT KW_TYPE <import_clause> KW_FROM STRING_LIT ';'
-              | KW_IMPORT IDENT '=' <qualified_import_target> ';'
+<import_stmt> : 'import' STRING_LIT ';'
+              | 'import' <import_clause> 'from' STRING_LIT ';'
+              | 'import' 'type' <import_clause> 'from' STRING_LIT ';'
+              | 'import' IDENT '=' <qualified_import_target> ';'
               ;
 
 # `import x = require(...)` / `import x = a.b.c` — the
@@ -1809,7 +1809,7 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
                 | <named_import_or_namespace>
                 ;
 
-<named_import_or_namespace> : '*' KW_AS IDENT
+<named_import_or_namespace> : '*' 'as' IDENT
                             | '{' '}'
                             | '{' <named_import_list> '}'
                             | '{' <named_import_list> ',' '}'
@@ -1822,35 +1822,35 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
 # Named import specifier, with optional inline `type` prefix
 # (TS 4.5+ `import { type Foo, bar }`).
 <named_import> : IDENT
-               | IDENT KW_AS IDENT
-               | STRING_LIT KW_AS IDENT
-               | KW_TYPE IDENT
-               | KW_TYPE IDENT KW_AS IDENT
+               | IDENT 'as' IDENT
+               | STRING_LIT 'as' IDENT
+               | 'type' IDENT
+               | 'type' IDENT 'as' IDENT
                ;
 
 # Export forms: named, default, namespace re-export, named
 # re-export, declaration export.
-<export_stmt> : KW_EXPORT '*' KW_FROM STRING_LIT ';'
-              | KW_EXPORT '*' KW_AS IDENT KW_FROM STRING_LIT ';'
-              | KW_EXPORT '{' '}' ';'
-              | KW_EXPORT '{' <export_list> '}' ';'
-              | KW_EXPORT '{' <export_list> ',' '}' ';'
-              | KW_EXPORT '{' <export_list> '}' KW_FROM STRING_LIT ';'
-              | KW_EXPORT '{' <export_list> ',' '}' KW_FROM STRING_LIT ';'
-              | KW_EXPORT KW_TYPE '{' <export_list> '}' ';'
-              | KW_EXPORT KW_TYPE '{' <export_list> '}' KW_FROM STRING_LIT ';'
-              | KW_EXPORT KW_DEFAULT <assignment_expr> ';'
-              | KW_EXPORT KW_DEFAULT <hoisted_function>
-              | KW_EXPORT KW_DEFAULT <hoisted_class>
-              | KW_EXPORT <variable_decl_stmt>
-              | KW_EXPORT <hoisted_function>
-              | KW_EXPORT <hoisted_class>
-              | KW_EXPORT <interface_decl>
-              | KW_EXPORT <type_alias_decl>
-              | KW_EXPORT <enum_decl>
-              | KW_EXPORT <namespace_decl>
-              | KW_EXPORT KW_DECLARE <ambient_target>
-              | KW_EXPORT '=' <assignment_expr> ';'
+<export_stmt> : 'export' '*' 'from' STRING_LIT ';'
+              | 'export' '*' 'as' IDENT 'from' STRING_LIT ';'
+              | 'export' '{' '}' ';'
+              | 'export' '{' <export_list> '}' ';'
+              | 'export' '{' <export_list> ',' '}' ';'
+              | 'export' '{' <export_list> '}' 'from' STRING_LIT ';'
+              | 'export' '{' <export_list> ',' '}' 'from' STRING_LIT ';'
+              | 'export' 'type' '{' <export_list> '}' ';'
+              | 'export' 'type' '{' <export_list> '}' 'from' STRING_LIT ';'
+              | 'export' 'default' <assignment_expr> ';'
+              | 'export' 'default' <hoisted_function>
+              | 'export' 'default' <hoisted_class>
+              | 'export' <variable_decl_stmt>
+              | 'export' <hoisted_function>
+              | 'export' <hoisted_class>
+              | 'export' <interface_decl>
+              | 'export' <type_alias_decl>
+              | 'export' <enum_decl>
+              | 'export' <namespace_decl>
+              | 'export' 'declare' <ambient_target>
+              | 'export' '=' <assignment_expr> ';'
               ;
 
 <export_list> : <export_specifier>
@@ -1858,6 +1858,6 @@ GT_GENERIC  = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
               ;
 
 <export_specifier> : IDENT
-                   | IDENT KW_AS IDENT
-                   | IDENT KW_AS STRING_LIT
+                   | IDENT 'as' IDENT
+                   | IDENT 'as' STRING_LIT
                    ;

@@ -201,11 +201,11 @@ KW_TYPEDEF
       %ast=Declaration
     | <type>@type_spec SEMI
       %ast=TypeDeclaration
-    | KW_TYPEDEF <type>@type_spec <init_declarators>@declarators SEMI
+    | 'typedef' <type>@type_spec <init_declarators>@declarators SEMI
       %ast=TypedefDecl %hook=record_typedef
-    | KW_STATIC_ASSERT LPAREN <conditional_expr>@condition RPAREN SEMI
+    | 'static_assert' LPAREN <conditional_expr>@condition RPAREN SEMI
       %ast=StaticAssert
-    | KW_STATIC_ASSERT LPAREN <conditional_expr>@condition COMMA STRING_LIT@message RPAREN SEMI
+    | 'static_assert' LPAREN <conditional_expr>@condition COMMA STRING_LIT@message RPAREN SEMI
       %ast=StaticAssertWithMessage
     ;
 
@@ -342,22 +342,22 @@ KW_TYPEDEF
     ;
 
 <type_qual>?
-    : KW_CONST     %ast=ConstQual
-    | KW_VOLATILE  %ast=VolatileQual
-    | KW_RESTRICT  %ast=RestrictQual
+    : 'const'     %ast=ConstQual
+    | 'volatile'  %ast=VolatileQual
+    | 'restrict'  %ast=RestrictQual
     ;
 
 <bare_type>?
-    : KW_VOID                       %ast=VoidType
-    | KW_CHAR                       %ast=CharType
-    | KW_SHORT                      %ast=ShortType
-    | KW_INT                        %ast=IntType
-    | KW_LONG                       %ast=LongType
-    | KW_FLOAT                      %ast=FloatType
-    | KW_DOUBLE                     %ast=DoubleType
-    | KW_BOOL                       %ast=BoolType
-    | KW_UNSIGNED                   %ast=UnsignedIntType   # bare ``unsigned`` = unsigned int
-    | KW_SIGNED                     %ast=IntType           # bare ``signed`` = int
+    : 'void'                       %ast=VoidType
+    | 'char'                       %ast=CharType
+    | 'short'                      %ast=ShortType
+    | 'int'                        %ast=IntType
+    | 'long'                       %ast=LongType
+    | 'float'                      %ast=FloatType
+    | 'double'                     %ast=DoubleType
+    | 'bool'                       %ast=BoolType
+    | 'unsigned'                   %ast=UnsignedIntType   # bare ``unsigned`` = unsigned int
+    | 'signed'                     %ast=IntType           # bare ``signed`` = int
     | TYPEDEF_NAME@name             %ast=NamedType         # via the typedef-name lex hook
     | <struct_or_union_spec>
     | <enum_spec>
@@ -396,12 +396,12 @@ KW_TYPEDEF
 #   struct { ... }      -> StructAnon (anonymous, definition only)
 # Same three shapes for union, plus a fourth combining named + body.
 <struct_or_union_spec>?
-    : KW_STRUCT IDENT@name                                     %ast=StructRef
-    | KW_STRUCT IDENT@name LBRACE <struct_members>@members RBRACE   %ast=StructDef
-    | KW_STRUCT LBRACE <struct_members>@members RBRACE         %ast=StructAnon
-    | KW_UNION  IDENT@name                                     %ast=UnionRef
-    | KW_UNION  IDENT@name LBRACE <struct_members>@members RBRACE   %ast=UnionDef
-    | KW_UNION  LBRACE <struct_members>@members RBRACE         %ast=UnionAnon
+    : 'struct' IDENT@name                                     %ast=StructRef
+    | 'struct' IDENT@name LBRACE <struct_members>@members RBRACE   %ast=StructDef
+    | 'struct' LBRACE <struct_members>@members RBRACE         %ast=StructAnon
+    | 'union'  IDENT@name                                     %ast=UnionRef
+    | 'union'  IDENT@name LBRACE <struct_members>@members RBRACE   %ast=UnionDef
+    | 'union'  LBRACE <struct_members>@members RBRACE         %ast=UnionAnon
     ;
 
 <struct_members> %ast=list element=<struct_member>
@@ -430,11 +430,11 @@ KW_TYPEDEF
     ;
 
 <enum_spec>?
-    : KW_ENUM IDENT@name                                     %ast=EnumRef
-    | KW_ENUM IDENT@name LBRACE <enum_values>@values RBRACE  %ast=EnumDef
-    | KW_ENUM LBRACE <enum_values>@values RBRACE             %ast=EnumAnon
-    | KW_ENUM IDENT@name LBRACE <enum_values>@values COMMA RBRACE  %ast=EnumDef
-    | KW_ENUM LBRACE <enum_values>@values COMMA RBRACE       %ast=EnumAnon
+    : 'enum' IDENT@name                                     %ast=EnumRef
+    | 'enum' IDENT@name LBRACE <enum_values>@values RBRACE  %ast=EnumDef
+    | 'enum' LBRACE <enum_values>@values RBRACE             %ast=EnumAnon
+    | 'enum' IDENT@name LBRACE <enum_values>@values COMMA RBRACE  %ast=EnumDef
+    | 'enum' LBRACE <enum_values>@values COMMA RBRACE       %ast=EnumAnon
     ;
 
 <enum_values> %ast=list element=<enum_value>
@@ -529,33 +529,33 @@ KW_TYPEDEF
 # sets per production; the translator folds both back to uc_core's
 # single IfStmt with else_branch=None when absent.
 <matched_if>
-    : KW_IF LPAREN <expr>@condition RPAREN <matched_stmt>@then_branch
-      KW_ELSE <matched_stmt>@else_branch
+    : 'if' LPAREN <expr>@condition RPAREN <matched_stmt>@then_branch
+      'else' <matched_stmt>@else_branch
       %ast=IfStmtElse
     ;
 
 <unmatched_if>?
-    : KW_IF LPAREN <expr>@condition RPAREN <statement>@then_branch
+    : 'if' LPAREN <expr>@condition RPAREN <statement>@then_branch
       %ast=IfStmt
-    | KW_IF LPAREN <expr>@condition RPAREN <matched_stmt>@then_branch
-      KW_ELSE <unmatched_stmt>@else_branch
+    | 'if' LPAREN <expr>@condition RPAREN <matched_stmt>@then_branch
+      'else' <unmatched_stmt>@else_branch
       %ast=IfStmtElse
     ;
 
 <matched_while>
-    : KW_WHILE LPAREN <expr>@condition RPAREN <matched_stmt>@body
+    : 'while' LPAREN <expr>@condition RPAREN <matched_stmt>@body
       %ast=WhileStmt
     ;
 
 <unmatched_while>
-    : KW_WHILE LPAREN <expr>@condition RPAREN <unmatched_stmt>@body
+    : 'while' LPAREN <expr>@condition RPAREN <unmatched_stmt>@body
       %ast=WhileStmt
     ;
 
 # do-while terminates with SEMI so it's always matched — the trailing
 # semicolon prevents the body from absorbing an outer ELSE.
 <do_while_stmt>
-    : KW_DO <statement>@body KW_WHILE LPAREN <expr>@condition RPAREN SEMI
+    : 'do' <statement>@body 'while' LPAREN <expr>@condition RPAREN SEMI
       %ast=DoWhileStmt
     ;
 
@@ -565,12 +565,12 @@ KW_TYPEDEF
 # name so field schemas stay consistent; translator folds them back to
 # uc_core's single ForStmt with Optional fields.
 <matched_for>
-    : KW_FOR LPAREN <for_init>@init <for_cond>@condition <for_update>@update RPAREN <matched_stmt>@body
+    : 'for' LPAREN <for_init>@init <for_cond>@condition <for_update>@update RPAREN <matched_stmt>@body
       %ast=ForStmt
     ;
 
 <unmatched_for>
-    : KW_FOR LPAREN <for_init>@init <for_cond>@condition <for_update>@update RPAREN <unmatched_stmt>@body
+    : 'for' LPAREN <for_init>@init <for_cond>@condition <for_update>@update RPAREN <unmatched_stmt>@body
       %ast=ForStmt
     ;
 
@@ -597,33 +597,33 @@ KW_TYPEDEF
 # switch with matched/unmatched body so dangling-else nested inside
 # a case doesn't bind across the switch boundary.
 <matched_switch>
-    : KW_SWITCH LPAREN <expr>@expr RPAREN <matched_stmt>@body   %ast=SwitchStmt ;
+    : 'switch' LPAREN <expr>@expr RPAREN <matched_stmt>@body   %ast=SwitchStmt ;
 
 <unmatched_switch>
-    : KW_SWITCH LPAREN <expr>@expr RPAREN <unmatched_stmt>@body %ast=SwitchStmt ;
+    : 'switch' LPAREN <expr>@expr RPAREN <unmatched_stmt>@body %ast=SwitchStmt ;
 
 # case / default / labels propagate the matched/unmatched discipline
 # through their inner statement so an unmatched if doesn't sneak past
 # them. Range case (`case A ... B:`) deferred.
 <matched_case>?
-    : KW_CASE <conditional_expr>@value COLON <matched_stmt>@stmt
+    : 'case' <conditional_expr>@value COLON <matched_stmt>@stmt
       %ast=CaseStmt
-    | KW_CASE <conditional_expr>@value ELLIPSIS <conditional_expr>@value_end COLON <matched_stmt>@stmt
+    | 'case' <conditional_expr>@value ELLIPSIS <conditional_expr>@value_end COLON <matched_stmt>@stmt
       %ast=CaseRangeStmt
     ;
 
 <unmatched_case>?
-    : KW_CASE <conditional_expr>@value COLON <unmatched_stmt>@stmt
+    : 'case' <conditional_expr>@value COLON <unmatched_stmt>@stmt
       %ast=CaseStmt
-    | KW_CASE <conditional_expr>@value ELLIPSIS <conditional_expr>@value_end COLON <unmatched_stmt>@stmt
+    | 'case' <conditional_expr>@value ELLIPSIS <conditional_expr>@value_end COLON <unmatched_stmt>@stmt
       %ast=CaseRangeStmt
     ;
 
 <matched_default>
-    : KW_DEFAULT COLON <matched_stmt>@stmt   %ast=DefaultStmt ;
+    : 'default' COLON <matched_stmt>@stmt   %ast=DefaultStmt ;
 
 <unmatched_default>
-    : KW_DEFAULT COLON <unmatched_stmt>@stmt %ast=DefaultStmt ;
+    : 'default' COLON <unmatched_stmt>@stmt %ast=DefaultStmt ;
 
 <matched_label>
     : IDENT@label COLON <matched_stmt>@stmt   %ast=LabelStmt ;
@@ -632,7 +632,7 @@ KW_TYPEDEF
     : IDENT@label COLON <unmatched_stmt>@stmt %ast=LabelStmt ;
 
 <goto_stmt>
-    : KW_GOTO IDENT@label SEMI   %ast=GotoStmt ;
+    : 'goto' IDENT@label SEMI   %ast=GotoStmt ;
 
 # Inline asm. Full form: `asm("template" [: outputs [: inputs [: clobbers]]])`.
 # Each of the three sections is independently optional. We model the
@@ -640,13 +640,13 @@ KW_TYPEDEF
 # them back to uc_core's single AsmStmt with three Optional operand
 # lists.
 <asm_stmt>?
-    : KW_ASM LPAREN STRING_LIT@template RPAREN SEMI
+    : 'asm' LPAREN STRING_LIT@template RPAREN SEMI
       %ast=AsmStmt
-    | KW_ASM LPAREN STRING_LIT@template COLON <asm_op_list_opt>@outputs RPAREN SEMI
+    | 'asm' LPAREN STRING_LIT@template COLON <asm_op_list_opt>@outputs RPAREN SEMI
       %ast=AsmStmtOut
-    | KW_ASM LPAREN STRING_LIT@template COLON <asm_op_list_opt>@outputs COLON <asm_op_list_opt>@inputs RPAREN SEMI
+    | 'asm' LPAREN STRING_LIT@template COLON <asm_op_list_opt>@outputs COLON <asm_op_list_opt>@inputs RPAREN SEMI
       %ast=AsmStmtOutIn
-    | KW_ASM LPAREN STRING_LIT@template COLON <asm_op_list_opt>@outputs COLON <asm_op_list_opt>@inputs COLON <asm_clobber_list_opt>@clobbers RPAREN SEMI
+    | 'asm' LPAREN STRING_LIT@template COLON <asm_op_list_opt>@outputs COLON <asm_op_list_opt>@inputs COLON <asm_clobber_list_opt>@clobbers RPAREN SEMI
       %ast=AsmStmtOutInClobbers
     ;
 
@@ -680,12 +680,12 @@ KW_TYPEDEF
     ;
 
 <return_stmt>?
-    : KW_RETURN SEMI                  %ast=ReturnStmt
-    | KW_RETURN <expr>@value SEMI     %ast=ReturnStmtValue
+    : 'return' SEMI                  %ast=ReturnStmt
+    | 'return' <expr>@value SEMI     %ast=ReturnStmtValue
     ;
 
-<break_stmt>    : KW_BREAK SEMI    %ast=BreakStmt ;
-<continue_stmt> : KW_CONTINUE SEMI %ast=ContinueStmt ;
+<break_stmt>    : 'break' SEMI    %ast=BreakStmt ;
+<continue_stmt> : 'continue' SEMI %ast=ContinueStmt ;
 
 # ===========================================================================
 # Expressions (carried over from c_expr.uplox)
@@ -795,9 +795,9 @@ KW_TYPEDEF
     | MINUS@op  <cast_expr>@operand                %ast=UnaryOp
     | TILDE@op  <cast_expr>@operand                %ast=UnaryOp
     | BANG@op   <cast_expr>@operand                %ast=UnaryOp
-    | KW_SIZEOF <unary_expr>@operand               %ast=SizeofExpr
-    | KW_SIZEOF LPAREN <type_name>@target_type RPAREN  %ast=SizeofType
-    | KW_ALIGNOF LPAREN <type_name>@target_type RPAREN %ast=AlignofType
+    | 'sizeof' <unary_expr>@operand               %ast=SizeofExpr
+    | 'sizeof' LPAREN <type_name>@target_type RPAREN  %ast=SizeofType
+    | 'alignof' LPAREN <type_name>@target_type RPAREN %ast=AlignofType
     ;
 
 <postfix_expr>?
@@ -830,17 +830,17 @@ KW_TYPEDEF
     | FLOAT_LIT@value        %ast=FloatLiteral
     | CHAR_LIT@value         %ast=CharLiteral
     | <string_literal>
-    | KW_NULLPTR             %ast=NullptrLiteral
-    | KW_TRUE@value          %ast=BoolLiteral
-    | KW_FALSE@value         %ast=BoolLiteral
+    | 'nullptr'             %ast=NullptrLiteral
+    | 'true'@value          %ast=BoolLiteral
+    | 'false'@value         %ast=BoolLiteral
     | LPAREN <expr> RPAREN
     | LPAREN <compound_stmt>@stmt RPAREN
       %ast=StmtExpr
-    | KW_GENERIC LPAREN <assignment_expr>@controlling_expr COMMA <generic_assoc_list>@assocs RPAREN
+    | '_Generic' LPAREN <assignment_expr>@controlling_expr COMMA <generic_assoc_list>@assocs RPAREN
       %ast=GenericSelection
-    | KW_VA_ARG LPAREN <assignment_expr>@va_list_expr COMMA <type_name>@type RPAREN
+    | 'va_arg' LPAREN <assignment_expr>@va_list_expr COMMA <type_name>@type RPAREN
       %ast=VaArgExpr
-    | KW_OFFSETOF LPAREN <type_name>@type COMMA <offsetof_designator>@designator RPAREN
+    | 'offsetof' LPAREN <type_name>@type COMMA <offsetof_designator>@designator RPAREN
       %ast=OffsetofExpr
     ;
 
@@ -853,7 +853,7 @@ KW_TYPEDEF
 
 <generic_association>?
     : <type_name>@type COLON <assignment_expr>@expr   %ast=GenericAssoc
-    | KW_DEFAULT COLON <assignment_expr>@expr         %ast=GenericDefault
+    | 'default' COLON <assignment_expr>@expr         %ast=GenericDefault
     ;
 
 # offsetof's second argument is a member designator chain: an IDENT

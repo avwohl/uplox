@@ -70,9 +70,9 @@ COMMA    = ','
         | <array>
         | STRING
         | NUMBER
-        | KW_TRUE
-        | KW_FALSE
-        | KW_NULL
+        | 'true'
+        | 'false'
+        | 'null'
         ;
 
 # Objects. Empty `{}` plus the comma-separated member list.

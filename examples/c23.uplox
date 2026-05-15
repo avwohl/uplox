@@ -297,7 +297,7 @@ KW_GENERIC KW_VA_ARG KW_OFFSETOF
 <asm_qualifier>?
     : KW_VOLATILE    %ast=AsmQualVolatile
     | KW_INLINE      %ast=AsmQualInline
-    | KW_GOTO        %ast=AsmQualGoto
+    | 'goto'        %ast=AsmQualGoto
     ;
 
 # One or more adjacent string literals make up the template.
@@ -376,15 +376,15 @@ KW_GENERIC KW_VA_ARG KW_OFFSETOF
 # ``thread_local`` plus ``_Noreturn`` (C23 deprecated but still
 # grammatical) and the new alignment specifier ``_Alignas(...)``.
 <storage_class>?
-    : KW_STATIC@kw         %ast=StorageClass
-    | KW_EXTERN@kw         %ast=StorageClass
-    | KW_REGISTER@kw       %ast=StorageClass
-    | KW_AUTO@kw           %ast=StorageClass
+    : 'static'@kw         %ast=StorageClass
+    | 'extern'@kw         %ast=StorageClass
+    | 'register'@kw       %ast=StorageClass
+    | 'auto'@kw           %ast=StorageClass
     | KW_INLINE@kw         %ast=StorageClass
-    | KW_TYPEDEF@kw        %ast=StorageClass
-    | KW_CONSTEXPR@kw      %ast=StorageClass
+    | 'typedef'@kw        %ast=StorageClass
+    | 'constexpr'@kw      %ast=StorageClass
     | KW_THREAD_LOCAL@kw   %ast=StorageClass
-    | KW_NORETURN@kw       %ast=StorageClass
+    | '_Noreturn'@kw       %ast=StorageClass
     | <alignment_specifier>
     ;
 
@@ -402,7 +402,7 @@ KW_GENERIC KW_VA_ARG KW_OFFSETOF
     : KW_CONST@kw     %ast=TypeQualifier
     | KW_VOLATILE@kw  %ast=TypeQualifier
     | KW_RESTRICT@kw  %ast=TypeQualifier
-    | KW_ATOMIC@kw    %ast=TypeQualifier
+    | '_Atomic'@kw    %ast=TypeQualifier
     ;
 
 # Type specifiers cover all built-in C23 numeric types plus the
@@ -413,25 +413,25 @@ KW_GENERIC KW_VA_ARG KW_OFFSETOF
 # expression context) and ``_BitInt(N)``. struct / union / enum and
 # typedef-names ride through unchanged.
 <type_spec>?
-    : KW_VOID@kw                                        %ast=BasicTypeSpec
-    | KW_CHAR@kw                                        %ast=BasicTypeSpec
-    | KW_SHORT@kw                                       %ast=BasicTypeSpec
-    | KW_INT@kw                                         %ast=BasicTypeSpec
-    | KW_LONG@kw                                        %ast=BasicTypeSpec
+    : 'void'@kw                                        %ast=BasicTypeSpec
+    | 'char'@kw                                        %ast=BasicTypeSpec
+    | 'short'@kw                                       %ast=BasicTypeSpec
+    | 'int'@kw                                         %ast=BasicTypeSpec
+    | 'long'@kw                                        %ast=BasicTypeSpec
     | KW_SIGNED@kw                                      %ast=BasicTypeSpec
-    | KW_UNSIGNED@kw                                    %ast=BasicTypeSpec
-    | KW_FLOAT@kw                                       %ast=BasicTypeSpec
-    | KW_DOUBLE@kw                                      %ast=BasicTypeSpec
+    | 'unsigned'@kw                                    %ast=BasicTypeSpec
+    | 'float'@kw                                       %ast=BasicTypeSpec
+    | 'double'@kw                                      %ast=BasicTypeSpec
     | KW_BOOL@kw                                        %ast=BasicTypeSpec
     | KW_COMPLEX@kw                                     %ast=BasicTypeSpec
-    | KW_IMAGINARY@kw                                   %ast=BasicTypeSpec
-    | KW_DECIMAL32@kw                                   %ast=BasicTypeSpec
-    | KW_DECIMAL64@kw                                   %ast=BasicTypeSpec
-    | KW_DECIMAL128@kw                                  %ast=BasicTypeSpec
+    | '_Imaginary'@kw                                   %ast=BasicTypeSpec
+    | '_Decimal32'@kw                                   %ast=BasicTypeSpec
+    | '_Decimal64'@kw                                   %ast=BasicTypeSpec
+    | '_Decimal128'@kw                                  %ast=BasicTypeSpec
     | KW_INT128@kw                                      %ast=BasicTypeSpec
-    | KW_BITINT LPAREN <conditional_expr>@width RPAREN  %ast=BitIntSpec
+    | '_BitInt' LPAREN <conditional_expr>@width RPAREN  %ast=BitIntSpec
     | KW_TYPEOF LPAREN <expr>@operand RPAREN            %ast=TypeofExpr
-    | KW_TYPEOF_UNQUAL LPAREN <expr>@operand RPAREN     %ast=TypeofUnqualExpr
+    | 'typeof_unqual' LPAREN <expr>@operand RPAREN     %ast=TypeofUnqualExpr
     | <struct_or_union_specifier>
     | <enum_specifier>
     | TYPEDEF_NAME@name                                 %ast=TypedefNameSpec
@@ -454,8 +454,8 @@ KW_GENERIC KW_VA_ARG KW_OFFSETOF
     ;
 
 <struct_or_union>?
-    : KW_STRUCT@kw   %ast=StructKind
-    | KW_UNION@kw    %ast=StructKind
+    : 'struct'@kw   %ast=StructKind
+    | 'union'@kw    %ast=StructKind
     ;
 
 <struct_decl_list> %ast=list element=<struct_decl>
@@ -488,15 +488,15 @@ KW_GENERIC KW_VA_ARG KW_OFFSETOF
 
 # enum: tag + body (with or without trailing comma), just a body, or just a tag.
 <enum_specifier>?
-    : KW_ENUM IDENT@name LBRACE <enumerator_list>@values RBRACE
+    : 'enum' IDENT@name LBRACE <enumerator_list>@values RBRACE
       %ast=EnumDef
-    | KW_ENUM IDENT@name LBRACE <enumerator_list>@values COMMA RBRACE
+    | 'enum' IDENT@name LBRACE <enumerator_list>@values COMMA RBRACE
       %ast=EnumDef
-    | KW_ENUM LBRACE <enumerator_list>@values RBRACE
+    | 'enum' LBRACE <enumerator_list>@values RBRACE
       %ast=EnumAnon
-    | KW_ENUM LBRACE <enumerator_list>@values COMMA RBRACE
+    | 'enum' LBRACE <enumerator_list>@values COMMA RBRACE
       %ast=EnumAnon
-    | KW_ENUM IDENT@name
+    | 'enum' IDENT@name
       %ast=EnumRef
     ;
 
@@ -564,9 +564,9 @@ KW_GENERIC KW_VA_ARG KW_OFFSETOF
       %ast=ArrayDeclaratorUnsized
     | <direct_declarator>@inner LBRACKET <type_qualifier_list_opt>@quals STAR RBRACKET
       %ast=ArrayDeclaratorStar
-    | <direct_declarator>@inner LBRACKET KW_STATIC <type_qualifier_list_opt>@quals <conditional_expr>@size RBRACKET
+    | <direct_declarator>@inner LBRACKET 'static' <type_qualifier_list_opt>@quals <conditional_expr>@size RBRACKET
       %ast=ArrayDeclaratorStatic
-    | <direct_declarator>@inner LBRACKET <type_qualifier_list>@quals KW_STATIC <conditional_expr>@size RBRACKET
+    | <direct_declarator>@inner LBRACKET <type_qualifier_list>@quals 'static' <conditional_expr>@size RBRACKET
       %ast=ArrayDeclaratorQualStatic
     | <direct_declarator>@inner LPAREN <parameter_type_list>@params RPAREN
       %ast=FnDeclarator
@@ -650,8 +650,8 @@ KW_GENERIC KW_VA_ARG KW_OFFSETOF
     | <matched_switch_stmt>
     | IDENT@label COLON <matched_stmt>@stmt                        %ast=LabelStmt
     | IDENT@label COLON <declaration>@stmt                          %ast=LabelStmt
-    | KW_CASE <conditional_expr>@value COLON <matched_stmt>@stmt    %ast=CaseStmt
-    | KW_DEFAULT COLON <matched_stmt>@stmt                          %ast=DefaultStmt
+    | 'case' <conditional_expr>@value COLON <matched_stmt>@stmt    %ast=CaseStmt
+    | 'default' COLON <matched_stmt>@stmt                          %ast=DefaultStmt
     ;
 
 <unmatched_stmt>?
@@ -659,42 +659,42 @@ KW_GENERIC KW_VA_ARG KW_OFFSETOF
     | <unmatched_iteration_stmt>
     | <unmatched_switch_stmt>
     | IDENT@label COLON <unmatched_stmt>@stmt                       %ast=LabelStmt
-    | KW_CASE <conditional_expr>@value COLON <unmatched_stmt>@stmt  %ast=CaseStmt
-    | KW_DEFAULT COLON <unmatched_stmt>@stmt                        %ast=DefaultStmt
+    | 'case' <conditional_expr>@value COLON <unmatched_stmt>@stmt  %ast=CaseStmt
+    | 'default' COLON <unmatched_stmt>@stmt                        %ast=DefaultStmt
     ;
 
 <matched_if>
-    : KW_IF LPAREN <expr>@condition RPAREN <matched_stmt>@then_branch KW_ELSE <matched_stmt>@else_branch
+    : 'if' LPAREN <expr>@condition RPAREN <matched_stmt>@then_branch 'else' <matched_stmt>@else_branch
       %ast=IfStmtElse ;
 
 <unmatched_if>?
-    : KW_IF LPAREN <expr>@condition RPAREN <stmt>@then_branch
+    : 'if' LPAREN <expr>@condition RPAREN <stmt>@then_branch
       %ast=IfStmt
-    | KW_IF LPAREN <expr>@condition RPAREN <matched_stmt>@then_branch KW_ELSE <unmatched_stmt>@else_branch
+    | 'if' LPAREN <expr>@condition RPAREN <matched_stmt>@then_branch 'else' <unmatched_stmt>@else_branch
       %ast=IfStmtElse
     ;
 
 <matched_iteration_stmt>?
-    : KW_WHILE LPAREN <expr>@condition RPAREN <matched_stmt>@body
+    : 'while' LPAREN <expr>@condition RPAREN <matched_stmt>@body
       %ast=WhileStmt
-    | KW_DO <matched_stmt>@body KW_WHILE LPAREN <expr>@condition RPAREN SEMI
+    | 'do' <matched_stmt>@body 'while' LPAREN <expr>@condition RPAREN SEMI
       %ast=DoWhileStmt
-    | KW_FOR LPAREN <for_init>@init <for_cond_opt>@condition SEMI <for_step_opt>@update RPAREN <matched_stmt>@body
+    | 'for' LPAREN <for_init>@init <for_cond_opt>@condition SEMI <for_step_opt>@update RPAREN <matched_stmt>@body
       %ast=ForStmt
     ;
 
 <unmatched_iteration_stmt>?
-    : KW_WHILE LPAREN <expr>@condition RPAREN <unmatched_stmt>@body
+    : 'while' LPAREN <expr>@condition RPAREN <unmatched_stmt>@body
       %ast=WhileStmt
-    | KW_FOR LPAREN <for_init>@init <for_cond_opt>@condition SEMI <for_step_opt>@update RPAREN <unmatched_stmt>@body
+    | 'for' LPAREN <for_init>@init <for_cond_opt>@condition SEMI <for_step_opt>@update RPAREN <unmatched_stmt>@body
       %ast=ForStmt
     ;
 
 # switch is matched/unmatched on the body it wraps, just like iteration.
 <matched_switch_stmt>
-    : KW_SWITCH LPAREN <expr>@expr RPAREN <matched_stmt>@body   %ast=SwitchStmt ;
+    : 'switch' LPAREN <expr>@expr RPAREN <matched_stmt>@body   %ast=SwitchStmt ;
 <unmatched_switch_stmt>
-    : KW_SWITCH LPAREN <expr>@expr RPAREN <unmatched_stmt>@body %ast=SwitchStmt ;
+    : 'switch' LPAREN <expr>@expr RPAREN <unmatched_stmt>@body %ast=SwitchStmt ;
 
 <compound_stmt>?
     : LBRACE <block_items>@items RBRACE   %ast=CompoundStmt
@@ -721,7 +721,7 @@ KW_GENERIC KW_VA_ARG KW_OFFSETOF
 # "nonlocal goto"); see uc386's nested-fn lowering for the trampoline /
 # setjmp / longjmp expansion.
 <label_decl>?
-    : KW_LABEL <label_decl_names>@names SEMI   %ast=LabelDecl
+    : '__label__' <label_decl_names>@names SEMI   %ast=LabelDecl
     ;
 
 <label_decl_names> %ast=list element=<label_decl_name>
@@ -755,11 +755,11 @@ KW_GENERIC KW_VA_ARG KW_OFFSETOF
     ;
 
 <jump_stmt>?
-    : KW_GOTO IDENT@label SEMI         %ast=GotoStmt
-    | KW_CONTINUE SEMI                 %ast=ContinueStmt
-    | KW_BREAK SEMI                    %ast=BreakStmt
-    | KW_RETURN SEMI                   %ast=ReturnStmt
-    | KW_RETURN <expr>@value SEMI      %ast=ReturnStmtValue
+    : 'goto' IDENT@label SEMI         %ast=GotoStmt
+    | 'continue' SEMI                 %ast=ContinueStmt
+    | 'break' SEMI                    %ast=BreakStmt
+    | 'return' SEMI                   %ast=ReturnStmt
+    | 'return' <expr>@value SEMI      %ast=ReturnStmtValue
     ;
 
 # --- expressions -----------------------------------------------------------
@@ -881,9 +881,9 @@ KW_GENERIC KW_VA_ARG KW_OFFSETOF
       %ast=AbstractArrayUnsized
     | <direct_abstract_declarator>@inner LBRACKET <type_qualifier_list_opt>@quals STAR RBRACKET
       %ast=AbstractArrayStar
-    | <direct_abstract_declarator>@inner LBRACKET KW_STATIC <type_qualifier_list_opt>@quals <conditional_expr>@size RBRACKET
+    | <direct_abstract_declarator>@inner LBRACKET 'static' <type_qualifier_list_opt>@quals <conditional_expr>@size RBRACKET
       %ast=AbstractArrayStatic
-    | <direct_abstract_declarator>@inner LBRACKET <type_qualifier_list>@quals KW_STATIC <conditional_expr>@size RBRACKET
+    | <direct_abstract_declarator>@inner LBRACKET <type_qualifier_list>@quals 'static' <conditional_expr>@size RBRACKET
       %ast=AbstractArrayQualStatic
     | <direct_abstract_declarator>@inner LPAREN <parameter_type_list>@params RPAREN
       %ast=AbstractFn
@@ -895,9 +895,9 @@ KW_GENERIC KW_VA_ARG KW_OFFSETOF
       %ast=AbstractArrayBareUnsized
     | LBRACKET <type_qualifier_list_opt>@quals STAR RBRACKET
       %ast=AbstractArrayBareStar
-    | LBRACKET KW_STATIC <type_qualifier_list_opt>@quals <conditional_expr>@size RBRACKET
+    | LBRACKET 'static' <type_qualifier_list_opt>@quals <conditional_expr>@size RBRACKET
       %ast=AbstractArrayBareStatic
-    | LBRACKET <type_qualifier_list>@quals KW_STATIC <conditional_expr>@size RBRACKET
+    | LBRACKET <type_qualifier_list>@quals 'static' <conditional_expr>@size RBRACKET
       %ast=AbstractArrayBareQualStatic
     | LPAREN <parameter_type_list>@params RPAREN
       %ast=AbstractFnBare
@@ -915,8 +915,8 @@ KW_GENERIC KW_VA_ARG KW_OFFSETOF
     | MINUS@op <cast_expr>@operand                        %ast=UnaryOp
     | TILDE@op <cast_expr>@operand                        %ast=UnaryOp
     | BANG@op  <cast_expr>@operand                        %ast=UnaryOp
-    | KW_SIZEOF <unary_expr>@operand                                %ast=SizeofExpr
-    | KW_SIZEOF LPAREN <type_name>@target_type RPAREN               %ast=SizeofType
+    | 'sizeof' <unary_expr>@operand                                %ast=SizeofExpr
+    | 'sizeof' LPAREN <type_name>@target_type RPAREN               %ast=SizeofType
     | KW_ALIGNOF LPAREN <type_name>@target_type RPAREN              %ast=AlignofType
     | KW_REAL@op <cast_expr>@operand                      %ast=UnaryOp
     | KW_IMAG@op <cast_expr>@operand                      %ast=UnaryOp
@@ -945,14 +945,14 @@ KW_GENERIC KW_VA_ARG KW_OFFSETOF
     | FLOAT_LIT@value        %ast=FloatLiteral
     | CHAR_LIT@value         %ast=CharLiteral
     | <string_literal>
-    | KW_NULLPTR             %ast=NullptrLiteral
+    | 'nullptr'             %ast=NullptrLiteral
     | LPAREN <expr> RPAREN
     | LPAREN <compound_stmt>@stmt RPAREN                             %ast=StmtExpr
-    | KW_GENERIC LPAREN <assignment_expr>@controlling_expr COMMA <generic_assoc_list>@assocs RPAREN
+    | '_Generic' LPAREN <assignment_expr>@controlling_expr COMMA <generic_assoc_list>@assocs RPAREN
       %ast=GenericSelection
     | KW_VA_ARG LPAREN <assignment_expr>@va_list_expr COMMA <type_name>@target_type RPAREN
       %ast=VaArgExpr
-    | KW_OFFSETOF LPAREN <type_name>@target_type COMMA <offsetof_designator>@designator RPAREN
+    | '__builtin_offsetof' LPAREN <type_name>@target_type COMMA <offsetof_designator>@designator RPAREN
       %ast=OffsetofExpr
     ;
 
@@ -986,7 +986,7 @@ KW_GENERIC KW_VA_ARG KW_OFFSETOF
 # list appears.
 <generic_association>?
     : <type_name>@target_type COLON <assignment_expr>@expr   %ast=GenericAssoc
-    | KW_DEFAULT COLON <assignment_expr>@expr                %ast=GenericDefault
+    | 'default' COLON <assignment_expr>@expr                %ast=GenericDefault
     ;
 
 <argument_list> %ast=list element=<assignment_expr>

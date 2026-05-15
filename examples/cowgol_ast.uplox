@@ -121,7 +121,7 @@ AT_DECL AT_IMPL AT_AT AT
            | <stmt>
            ;
 
-<include_decl> : KW_include STRING@path SEMI   %ast=IncludeDecl ;
+<include_decl> : 'include' STRING@path SEMI   %ast=IncludeDecl ;
 
 # =========================================================================
 # Subroutines
@@ -138,20 +138,20 @@ AT_DECL AT_IMPL AT_AT AT
            ;
 
 <sub_decl_or_def>
-           : KW_sub IDENT@name <sub_signature>@sig <sub_attrs>@attrs
+           : 'sub' IDENT@name <sub_signature>@sig <sub_attrs>@attrs
              <implements_opt>@implements <sub_tail>@tail
              %ast=SubDecl
            ;
 
 <sub_decl_only>
-           : KW_sub IDENT@name <sub_signature>@sig <sub_attrs>@attrs
+           : 'sub' IDENT@name <sub_signature>@sig <sub_attrs>@attrs
              <implements_opt>@implements SEMI
              %ast=SubForwardDecl
            ;
 
 <sub_impl>
-           : KW_sub IDENT@name <sub_attrs>@attrs <implements_opt>@implements
-             KW_is <sub_body>@body KW_end KW_sub SEMI
+           : 'sub' IDENT@name <sub_attrs>@attrs <implements_opt>@implements
+             'is' <sub_body>@body 'end' 'sub' SEMI
              %ast=SubImpl
            ;
 
@@ -188,12 +188,12 @@ AT_DECL AT_IMPL AT_AT AT
 <sub_attr> : AT_EXTERN LPAREN STRING@name RPAREN   %ast=ExternAttr ;
 
 <implements_opt>
-           : KW_implements IDENT@name   %ast=_unwrap
+           : 'implements' IDENT@name   %ast=_unwrap
            |
            ;
 
 <sub_tail>?
-           : KW_is <sub_body>@body KW_end KW_sub SEMI   %ast=SubBody
+           : 'is' <sub_body>@body 'end' 'sub' SEMI   %ast=SubBody
            | SEMI                                       %ast=SubExternal
            ;
 
@@ -225,8 +225,8 @@ AT_DECL AT_IMPL AT_AT AT
 # =========================================================================
 
 <record_decl>
-           : KW_record IDENT@name <record_base_opt>@base KW_is
-             <field_list>@fields KW_end KW_record SEMI
+           : 'record' IDENT@name <record_base_opt>@base 'is'
+             <field_list>@fields 'end' 'record' SEMI
              %ast=RecordDecl
            ;
 
@@ -256,10 +256,10 @@ AT_DECL AT_IMPL AT_AT AT
 # =========================================================================
 
 <typedef_decl>
-           : KW_typedef IDENT@name KW_is <type>@type SEMI   %ast=TypedefDecl ;
+           : 'typedef' IDENT@name 'is' <type>@type SEMI   %ast=TypedefDecl ;
 
 <interface_decl>
-           : KW_interface IDENT@name LPAREN <param_list_opt>@params RPAREN
+           : 'interface' IDENT@name LPAREN <param_list_opt>@params RPAREN
              <returns_opt>@returns SEMI
              %ast=InterfaceDecl
            ;
@@ -284,13 +284,13 @@ AT_DECL AT_IMPL AT_AT AT
 # explicitly per keyword so consumers can dispatch via `kind` without
 # inspecting a token's `.text`.
 <scalar_kw>?
-           : KW_int8     %ast=Int8Type
-           | KW_uint8    %ast=UInt8Type
-           | KW_int16    %ast=Int16Type
-           | KW_uint16   %ast=UInt16Type
-           | KW_int32    %ast=Int32Type
-           | KW_uint32   %ast=UInt32Type
-           | KW_intptr   %ast=IntPtrType
+           : 'int8'     %ast=Int8Type
+           | 'uint8'    %ast=UInt8Type
+           | 'int16'    %ast=Int16Type
+           | 'uint16'   %ast=UInt16Type
+           | 'int32'    %ast=Int32Type
+           | 'uint32'   %ast=UInt32Type
+           | 'intptr'   %ast=IntPtrType
            ;
 
 <array_suffixes> %ast=list element=<array_suffix>
@@ -321,7 +321,7 @@ AT_DECL AT_IMPL AT_AT AT
            | <assign_or_call_stmt>
            ;
 
-<var_decl> : KW_var IDENT@name <var_type_opt>@type <var_init_opt>@init SEMI
+<var_decl> : 'var' IDENT@name <var_type_opt>@type <var_init_opt>@init SEMI
              %ast=VarDecl
            ;
 
@@ -336,11 +336,11 @@ AT_DECL AT_IMPL AT_AT AT
            ;
 
 <const_decl>
-           : KW_const IDENT@name ASSIGN <expr>@value SEMI   %ast=ConstDecl ;
+           : 'const' IDENT@name ASSIGN <expr>@value SEMI   %ast=ConstDecl ;
 
-<return_stmt>   : KW_return SEMI               %ast=ReturnStmt ;
-<break_stmt>    : KW_break SEMI                %ast=BreakStmt ;
-<continue_stmt> : KW_continue SEMI             %ast=ContinueStmt ;
+<return_stmt>   : 'return' SEMI               %ast=ReturnStmt ;
+<break_stmt>    : 'break' SEMI                %ast=BreakStmt ;
+<continue_stmt> : 'continue' SEMI             %ast=ContinueStmt ;
 
 <asm_stmt> : AT_ASM STRING@first <asm_more>@more SEMI   %ast=AsmStmt ;
 
@@ -365,9 +365,9 @@ AT_DECL AT_IMPL AT_AT AT
 
 # --- control flow --------------------------------------------------------
 
-<if_stmt>  : KW_if <expr>@cond KW_then <stmt_seq>@then_body
+<if_stmt>  : 'if' <expr>@cond 'then' <stmt_seq>@then_body
              <elseif_parts>@elseifs <else_part>@otherwise
-             KW_end KW_if SEMI
+             'end' 'if' SEMI
              %ast=IfStmt
            ;
 
@@ -377,26 +377,26 @@ AT_DECL AT_IMPL AT_AT AT
            ;
 
 <elseif_clause>
-           : KW_elseif <expr>@cond KW_then <stmt_seq>@body   %ast=ElseIf
+           : 'elseif' <expr>@cond 'then' <stmt_seq>@body   %ast=ElseIf
            ;
 
 <else_part>
-           : KW_else <stmt_seq>@body   %ast=_unwrap
+           : 'else' <stmt_seq>@body   %ast=_unwrap
            |
            ;
 
 <while_stmt>
-           : KW_while <expr>@cond KW_loop <stmt_seq>@body
-             KW_end KW_loop SEMI
+           : 'while' <expr>@cond 'loop' <stmt_seq>@body
+             'end' 'loop' SEMI
              %ast=WhileStmt
            ;
 
 <loop_stmt>
-           : KW_loop <stmt_seq>@body KW_end KW_loop SEMI   %ast=LoopStmt ;
+           : 'loop' <stmt_seq>@body 'end' 'loop' SEMI   %ast=LoopStmt ;
 
 <case_stmt>
-           : KW_case <expr>@subject KW_is <case_arms>@arms
-             KW_end KW_case SEMI
+           : 'case' <expr>@subject 'is' <case_arms>@arms
+             'end' 'case' SEMI
              %ast=CaseStmt
            ;
 
@@ -406,8 +406,8 @@ AT_DECL AT_IMPL AT_AT AT
            ;
 
 <case_arm>?
-           : KW_when <expr_list>@values COLON <stmt_seq>@body   %ast=CaseArm
-           | KW_when KW_else COLON <stmt_seq>@body              %ast=CaseElse
+           : 'when' <expr_list>@values COLON <stmt_seq>@body   %ast=CaseArm
+           | 'when' 'else' COLON <stmt_seq>@body              %ast=CaseElse
            ;
 
 <expr_list> %ast=list element=<expr>
@@ -434,17 +434,17 @@ AT_DECL AT_IMPL AT_AT AT
 <expr>?    : <logical_or> ;
 
 <logical_or>?
-           : <logical_or>@lhs KW_or@op <logical_and>@rhs   %ast=LogicalOp
+           : <logical_or>@lhs 'or'@op <logical_and>@rhs   %ast=LogicalOp
            | <logical_and>
            ;
 
 <logical_and>?
-           : <logical_and>@lhs KW_and@op <logical_not>@rhs   %ast=LogicalOp
+           : <logical_and>@lhs 'and'@op <logical_not>@rhs   %ast=LogicalOp
            | <logical_not>
            ;
 
 <logical_not>?
-           : KW_not <logical_not>@operand   %ast=NotOp
+           : 'not' <logical_not>@operand   %ast=NotOp
            | <comparison>
            ;
 
@@ -492,7 +492,7 @@ AT_DECL AT_IMPL AT_AT AT
            | <cast>
            ;
 
-<cast>?    : <cast>@target KW_as <type>@type   %ast=Cast
+<cast>?    : <cast>@target 'as' <type>@type   %ast=Cast
            | <unary>
            ;
 
@@ -528,7 +528,7 @@ AT_DECL AT_IMPL AT_AT AT
 <primary>?
            : NUMBER@value                                %ast=NumberLiteral
            | STRING@value                                %ast=StringLiteral
-           | KW_nil                                      %ast=NilLiteral
+           | 'nil'                                      %ast=NilLiteral
            | IDENT@name                                  %ast=Identifier
            | LPAREN <expr> RPAREN
            | LBRACE <init_list_opt>@items RBRACE         %ast=ArrayInitializer

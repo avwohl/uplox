@@ -170,7 +170,7 @@ AT         = '@'
                    | <stmt>
                    ;
 
-<include_decl>     : KW_include STRING SEMI
+<include_decl>     : 'include' STRING SEMI
                    ;
 
 # =========================================================================
@@ -190,13 +190,13 @@ AT         = '@'
                    | AT_IMPL <sub_impl>
                    ;
 
-<sub_decl_or_def>  : KW_sub IDENT <sub_signature> <sub_attrs> <implements_opt> <sub_tail>
+<sub_decl_or_def>  : 'sub' IDENT <sub_signature> <sub_attrs> <implements_opt> <sub_tail>
                    ;
 
-<sub_decl_only>    : KW_sub IDENT <sub_signature> <sub_attrs> <implements_opt> SEMI
+<sub_decl_only>    : 'sub' IDENT <sub_signature> <sub_attrs> <implements_opt> SEMI
                    ;
 
-<sub_impl>         : KW_sub IDENT <sub_attrs> <implements_opt> KW_is <sub_body> KW_end KW_sub SEMI
+<sub_impl>         : 'sub' IDENT <sub_attrs> <implements_opt> 'is' <sub_body> 'end' 'sub' SEMI
                    ;
 
 <sub_signature>    : LPAREN <param_list_opt> RPAREN <returns_opt>
@@ -225,11 +225,11 @@ AT         = '@'
 <sub_attr>         : AT_EXTERN LPAREN STRING RPAREN
                    ;
 
-<implements_opt>   : KW_implements IDENT
+<implements_opt>   : 'implements' IDENT
                    |
                    ;
 
-<sub_tail>         : KW_is <sub_body> KW_end KW_sub SEMI
+<sub_tail>         : 'is' <sub_body> 'end' 'sub' SEMI
                    | SEMI
                    ;
 
@@ -252,7 +252,7 @@ AT         = '@'
 # Records
 # =========================================================================
 
-<record_decl>      : KW_record IDENT <record_base_opt> KW_is <field_list> KW_end KW_record SEMI
+<record_decl>      : 'record' IDENT <record_base_opt> 'is' <field_list> 'end' 'record' SEMI
                    ;
 
 <record_base_opt>  : COLON IDENT
@@ -277,10 +277,10 @@ AT         = '@'
 # Typedefs and interfaces
 # =========================================================================
 
-<typedef_decl>     : KW_typedef IDENT KW_is <type> SEMI
+<typedef_decl>     : 'typedef' IDENT 'is' <type> SEMI
                    ;
 
-<interface_decl>   : KW_interface IDENT LPAREN <param_list_opt> RPAREN <returns_opt> SEMI
+<interface_decl>   : 'interface' IDENT LPAREN <param_list_opt> RPAREN <returns_opt> SEMI
                    ;
 
 # =========================================================================
@@ -303,13 +303,13 @@ AT         = '@'
                    | IDENT LPAREN <expr> COMMA <expr> RPAREN               # int(min, max) ranged-int
                    ;
 
-<scalar_kw>        : KW_int8
-                   | KW_uint8
-                   | KW_int16
-                   | KW_uint16
-                   | KW_int32
-                   | KW_uint32
-                   | KW_intptr
+<scalar_kw>        : 'int8'
+                   | 'uint8'
+                   | 'int16'
+                   | 'uint16'
+                   | 'int32'
+                   | 'uint32'
+                   | 'intptr'
                    ;
 
 <array_suffixes>   : <array_suffixes> LBRACKET <expr> RBRACKET             # T[N]
@@ -338,7 +338,7 @@ AT         = '@'
                    | <assign_or_call_stmt>
                    ;
 
-<var_decl>         : KW_var IDENT <var_type_opt> <var_init_opt> SEMI
+<var_decl>         : 'var' IDENT <var_type_opt> <var_init_opt> SEMI
                    ;
 
 <var_type_opt>     : COLON <type>
@@ -349,16 +349,16 @@ AT         = '@'
                    |
                    ;
 
-<const_decl>       : KW_const IDENT ASSIGN <expr> SEMI
+<const_decl>       : 'const' IDENT ASSIGN <expr> SEMI
                    ;
 
-<return_stmt>      : KW_return SEMI
+<return_stmt>      : 'return' SEMI
                    ;
 
-<break_stmt>       : KW_break SEMI
+<break_stmt>       : 'break' SEMI
                    ;
 
-<continue_stmt>    : KW_continue SEMI
+<continue_stmt>    : 'continue' SEMI
                    ;
 
 <asm_stmt>         : AT_ASM STRING <asm_more> SEMI
@@ -396,32 +396,32 @@ AT         = '@'
 
 # --- control flow ---------------------------------------------------------
 
-<if_stmt>          : KW_if <expr> KW_then <stmt_seq> <elseif_parts> <else_part> KW_end KW_if SEMI
+<if_stmt>          : 'if' <expr> 'then' <stmt_seq> <elseif_parts> <else_part> 'end' 'if' SEMI
                    ;
 
-<elseif_parts>     : <elseif_parts> KW_elseif <expr> KW_then <stmt_seq>
+<elseif_parts>     : <elseif_parts> 'elseif' <expr> 'then' <stmt_seq>
                    |
                    ;
 
-<else_part>        : KW_else <stmt_seq>
+<else_part>        : 'else' <stmt_seq>
                    |
                    ;
 
-<while_stmt>       : KW_while <expr> KW_loop <stmt_seq> KW_end KW_loop SEMI
+<while_stmt>       : 'while' <expr> 'loop' <stmt_seq> 'end' 'loop' SEMI
                    ;
 
-<loop_stmt>        : KW_loop <stmt_seq> KW_end KW_loop SEMI
+<loop_stmt>        : 'loop' <stmt_seq> 'end' 'loop' SEMI
                    ;
 
-<case_stmt>        : KW_case <expr> KW_is <case_arms> KW_end KW_case SEMI
+<case_stmt>        : 'case' <expr> 'is' <case_arms> 'end' 'case' SEMI
                    ;
 
 <case_arms>        : <case_arm>
                    | <case_arms> <case_arm>
                    ;
 
-<case_arm>         : KW_when <expr_list> COLON <stmt_seq>
-                   | KW_when KW_else COLON <stmt_seq>
+<case_arm>         : 'when' <expr_list> COLON <stmt_seq>
+                   | 'when' 'else' COLON <stmt_seq>
                    ;
 
 <expr_list>        : <expr>
@@ -459,15 +459,15 @@ AT         = '@'
 <expr>             : <logical_or>
                    ;
 
-<logical_or>       : <logical_or> KW_or <logical_and>
+<logical_or>       : <logical_or> 'or' <logical_and>
                    | <logical_and>
                    ;
 
-<logical_and>      : <logical_and> KW_and <logical_not>
+<logical_and>      : <logical_and> 'and' <logical_not>
                    | <logical_not>
                    ;
 
-<logical_not>      : KW_not <logical_not>
+<logical_not>      : 'not' <logical_not>
                    | <comparison>
                    ;
 
@@ -510,7 +510,7 @@ AT         = '@'
 
 # ``expr as T`` — chains left-to-right: ``x as A as B`` parses as
 # ``((x as A) as B)``.
-<cast>             : <cast> KW_as <type>
+<cast>             : <cast> 'as' <type>
                    | <unary>
                    ;
 
@@ -552,7 +552,7 @@ AT         = '@'
 
 <primary>          : NUMBER
                    | STRING
-                   | KW_nil
+                   | 'nil'
                    | IDENT
                    | LPAREN <expr> RPAREN                                # parenthesised
                    | LBRACE <init_list_opt> RBRACE                       # { ... } init

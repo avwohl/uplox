@@ -369,10 +369,10 @@ DOT           = '.'
                    | <library>
                    ;
 
-<program> : KW_PROGRAM IDENT <program_params_opt> ';' <uses_opt> <block> '.'
+<program> : 'program' IDENT <program_params_opt> ';' <uses_opt> <block> '.'
           ;
 
-<library> : KW_LIBRARY IDENT ';' <uses_opt> <block> '.'
+<library> : 'library' IDENT ';' <uses_opt> <block> '.'
           ;
 
 <program_params_opt> : '(' <ident_list> ')'
@@ -382,18 +382,18 @@ DOT           = '.'
 # Units split into an interface section (declarations only — no
 # routine bodies), an implementation section (declarations with
 # bodies), and optional initialization / finalization parts.
-<unit> : KW_UNIT IDENT <hint_directives_opt> ';'
-         KW_INTERFACE <uses_opt> <interface_decls>
-         KW_IMPLEMENTATION <uses_opt> <decl_parts>
+<unit> : 'unit' IDENT <hint_directives_opt> ';'
+         'interface' <uses_opt> <interface_decls>
+         'implementation' <uses_opt> <decl_parts>
          <unit_tail>
        ;
 
-<unit_tail> : KW_END '.'
-            | KW_INITIALIZATION <stmt_list> KW_END '.'
-            | KW_INITIALIZATION <stmt_list> KW_FINALIZATION <stmt_list> KW_END '.'
+<unit_tail> : 'end' '.'
+            | 'initialization' <stmt_list> 'end' '.'
+            | 'initialization' <stmt_list> 'finalization' <stmt_list> 'end' '.'
             ;
 
-<uses_opt> : KW_USES <unit_ref_list> ';'
+<uses_opt> : 'uses' <unit_ref_list> ';'
            |
            ;
 
@@ -406,7 +406,7 @@ DOT           = '.'
 # specific source file rather than letting the search path resolve
 # it.
 <unit_ref> : <qualified_ident>
-           | <qualified_ident> KW_IN STRING_LIT
+           | <qualified_ident> 'in' STRING_LIT
            ;
 
 # --- interface section ---------------------------------------------------
@@ -460,12 +460,12 @@ DOT           = '.'
                | <impl_routine_decl>
                ;
 
-<label_decl_part> : KW_LABEL <label_list> ';' ;
+<label_decl_part> : 'label' <label_list> ';' ;
 <label_list>      : INT_LIT
                   | <label_list> ',' INT_LIT
                   ;
 
-<const_decl_part> : KW_CONST <const_decl_seq> ;
+<const_decl_part> : 'const' <const_decl_seq> ;
 <const_decl_seq>  : <const_decl>
                   | <const_decl_seq> <const_decl>
                   ;
@@ -473,7 +473,7 @@ DOT           = '.'
                   | IDENT ':' <type_denoter> '=' <typed_const> <hint_directives_opt> ';'
                   ;
 
-<type_decl_part>  : KW_TYPE <type_decl_seq> ;
+<type_decl_part>  : 'type' <type_decl_seq> ;
 <type_decl_seq>   : <type_decl>
                   | <type_decl_seq> <type_decl>
                   ;
@@ -483,8 +483,8 @@ DOT           = '.'
 # bare-keyword form and the empty-heritage prefix of a full
 # declaration.
 <type_decl>       : <attribute_list_opt> IDENT '=' <type_denoter> <hint_directives_opt> ';'
-                  | <attribute_list_opt> IDENT '=' KW_CLASS ';'
-                  | <attribute_list_opt> IDENT '=' KW_INTERFACE ';'
+                  | <attribute_list_opt> IDENT '=' 'class' ';'
+                  | <attribute_list_opt> IDENT '=' 'interface' ';'
                   ;
 
 # Attribute syntax (Delphi 2010+). `[FooAttribute]` or
@@ -504,13 +504,13 @@ DOT           = '.'
             | '[' <qualified_ident> '(' ')' ']'
             ;
 
-<var_decl_part>   : KW_VAR <var_decl_seq> ;
+<var_decl_part>   : 'var' <var_decl_seq> ;
 <var_decl_seq>    : <var_decl>
                   | <var_decl_seq> <var_decl>
                   ;
 <var_decl>        : <ident_list> ':' <type_denoter> <hint_directives_opt> ';'
                   | <ident_list> ':' <type_denoter> '=' <typed_const> <hint_directives_opt> ';'
-                  | <ident_list> ':' <type_denoter> KW_ABSOLUTE <abs_target> ';'
+                  | <ident_list> ':' <type_denoter> 'absolute' <abs_target> ';'
                   ;
 
 # `var X: T absolute Y;` overlays X on Y's memory; the target is an
@@ -518,9 +518,9 @@ DOT           = '.'
 # Delphi sources use it in low-level RTL code. KW_ABSOLUTE is
 # borrowed from the regular IDENT space — see the lexer note below.
 
-<threadvar_decl_part>     : KW_THREADVAR <var_decl_seq> ;
-<resourcestring_decl_part> : KW_RESOURCESTRING <const_decl_seq> ;
-<exports_decl_part>       : KW_EXPORTS <exports_list> ';' ;
+<threadvar_decl_part>     : 'threadvar' <var_decl_seq> ;
+<resourcestring_decl_part> : 'resourcestring' <const_decl_seq> ;
+<exports_decl_part>       : 'exports' <exports_list> ';' ;
 
 <exports_list> : <export_item>
                | <exports_list> ',' <export_item>
@@ -528,8 +528,8 @@ DOT           = '.'
 
 <export_item> : <designator>
               | <designator> IDENT <expr>
-              | <designator> KW_INDEX <expr>
-              | <designator> KW_INDEX <expr> IDENT <expr>
+              | <designator> 'index' <expr>
+              | <designator> 'index' <expr> IDENT <expr>
               ;
 
 # --- routine declarations (implementation side) --------------------------
@@ -568,28 +568,28 @@ DOT           = '.'
                     |
                     ;
 
-<modifier_directive> : KW_VIRTUAL
-                     | KW_OVERRIDE
-                     | KW_DYNAMIC
-                     | KW_ABSTRACT
-                     | KW_REINTRODUCE
-                     | KW_OVERLOAD
-                     | KW_INLINE
-                     | KW_STATIC
-                     | KW_MESSAGE <expr>
-                     | KW_CDECL
-                     | KW_STDCALL
-                     | KW_PASCAL
-                     | KW_REGISTER
-                     | KW_SAFECALL
-                     | KW_FASTCALL
-                     | KW_VARARGS
+<modifier_directive> : 'virtual'
+                     | 'override'
+                     | 'dynamic'
+                     | 'abstract'
+                     | 'reintroduce'
+                     | 'overload'
+                     | 'inline'
+                     | 'static'
+                     | 'message' <expr>
+                     | 'cdecl'
+                     | 'stdcall'
+                     | 'pascal'
+                     | 'register'
+                     | 'safecall'
+                     | 'fastcall'
+                     | 'varargs'
                      | <hint_directive>
                      ;
 
-<terminator_directive> : KW_FORWARD
-                       | KW_EXTERNAL
-                       | KW_EXTERNAL <expr> <ext_name_opt>
+<terminator_directive> : 'forward'
+                       | 'external'
+                       | 'external' <expr> <ext_name_opt>
                        ;
 
 <local_decls> : <decl_parts> ;
@@ -597,17 +597,17 @@ DOT           = '.'
 # Routine headings. Names are qualified identifiers so
 # `procedure TFoo.DoStuff` parses at top level — the dotted form is
 # how Delphi sources name a class method's out-of-line body.
-<proc_heading> : KW_PROCEDURE <qualified_ident> <formal_params_opt>
+<proc_heading> : 'procedure' <qualified_ident> <formal_params_opt>
                ;
-<func_heading> : KW_FUNCTION <qualified_ident> <formal_params_opt> ':' <type_denoter>
+<func_heading> : 'function' <qualified_ident> <formal_params_opt> ':' <type_denoter>
                ;
-<ctor_heading> : KW_CONSTRUCTOR <qualified_ident> <formal_params_opt>
+<ctor_heading> : 'constructor' <qualified_ident> <formal_params_opt>
                ;
-<dtor_heading> : KW_DESTRUCTOR <qualified_ident> <formal_params_opt>
+<dtor_heading> : 'destructor' <qualified_ident> <formal_params_opt>
                ;
-<class_proc_heading> : KW_CLASS KW_PROCEDURE <qualified_ident> <formal_params_opt>
+<class_proc_heading> : 'class' 'procedure' <qualified_ident> <formal_params_opt>
                      ;
-<class_func_heading> : KW_CLASS KW_FUNCTION <qualified_ident> <formal_params_opt> ':' <type_denoter>
+<class_func_heading> : 'class' 'function' <qualified_ident> <formal_params_opt> ':' <type_denoter>
                      ;
 
 <qualified_ident> : IDENT
@@ -630,9 +630,9 @@ DOT           = '.'
                | <param_modifier_opt> <ident_list>
                ;
 
-<param_modifier_opt> : KW_VAR
-                     | KW_CONST
-                     | KW_OUT
+<param_modifier_opt> : 'var'
+                     | 'const'
+                     | 'out'
                      |
                      ;
 
@@ -641,7 +641,7 @@ DOT           = '.'
 # parameter position. The plain `array of T` open-array form is
 # handled via <type_denoter> → <array_type>.
 <param_type> : <type_denoter>
-             | KW_ARRAY KW_OF KW_CONST
+             | 'array' 'of' 'const'
              ;
 
 # --- directives ----------------------------------------------------------
@@ -650,11 +650,11 @@ DOT           = '.'
                |
                ;
 
-<hint_directive> : KW_DEPRECATED
-                 | KW_DEPRECATED <expr>
-                 | KW_PLATFORM
-                 | KW_LIBRARY
-                 | KW_EXPERIMENTAL
+<hint_directive> : 'deprecated'
+                 | 'deprecated' <expr>
+                 | 'platform'
+                 | 'library'
+                 | 'experimental'
                  ;
 
 <hint_directives_opt> : <hint_directives_opt> <hint_directive>
@@ -684,7 +684,7 @@ DOT           = '.'
 <const_factor>  : INT_LIT
                 | REAL_LIT
                 | STRING_LIT
-                | KW_NIL
+                | 'nil'
                 | '+' <const_factor>
                 | '-' <const_factor>
                 | <type_ident>
@@ -697,14 +697,14 @@ DOT           = '.'
                 | <type_ident> '.' IDENT
                 ;
 
-<string_type>   : KW_STRING
-                | KW_STRING '[' <expr> ']'
+<string_type>   : 'string'
+                | 'string' '[' <expr> ']'
                 ;
 
 # --- structured types ----------------------------------------------------
 
 <structured_type> : <unpacked_structured>
-                  | KW_PACKED <unpacked_structured>
+                  | 'packed' <unpacked_structured>
                   ;
 
 <unpacked_structured> : <array_type>
@@ -715,15 +715,15 @@ DOT           = '.'
 
 # `array of const` is parameter-only (the open-variant-array form);
 # it lives on <param_type>, not here.
-<array_type>   : KW_ARRAY '[' <index_type_list> ']' KW_OF <type_denoter>
-               | KW_ARRAY KW_OF <type_denoter>
+<array_type>   : 'array' '[' <index_type_list> ']' 'of' <type_denoter>
+               | 'array' 'of' <type_denoter>
                ;
 
 <index_type_list> : <simple_type>
                   | <index_type_list> ',' <simple_type>
                   ;
 
-<record_type>  : KW_RECORD <field_list> KW_END
+<record_type>  : 'record' <field_list> 'end'
                ;
 
 <field_list>   : <fixed_part>
@@ -739,7 +739,7 @@ DOT           = '.'
 <field_decl>   : <ident_list> ':' <type_denoter>
                ;
 
-<variant_part> : KW_CASE <variant_selector> KW_OF <variant_list>
+<variant_part> : 'case' <variant_selector> 'of' <variant_list>
                ;
 
 <variant_selector> : IDENT ':' <type_ident>
@@ -757,10 +757,10 @@ DOT           = '.'
                | <const_list> ',' <expr>
                ;
 
-<set_type>     : KW_SET KW_OF <simple_type> ;
+<set_type>     : 'set' 'of' <simple_type> ;
 
-<file_type>    : KW_FILE KW_OF <type_denoter>
-               | KW_FILE
+<file_type>    : 'file' 'of' <type_denoter>
+               | 'file'
                ;
 
 <pointer_type> : '^' <type_ident> ;
@@ -775,10 +775,10 @@ DOT           = '.'
 # spelled `class helper [(parent)] for SomeClass <members> end`.
 # Record helpers and type helpers share the same shape with
 # `record helper` / `type helper`.
-<class_type> : KW_CLASS <class_heritage_opt> <class_body_opt> KW_END
-             | KW_CLASS KW_HELPER <class_heritage_opt> KW_FOR <type_ident> <class_body_opt> KW_END
-             | KW_RECORD KW_HELPER <class_heritage_opt> KW_FOR <type_ident> <class_body_opt> KW_END
-             | KW_TYPE KW_HELPER <class_heritage_opt> KW_FOR <type_ident> <class_body_opt> KW_END
+<class_type> : 'class' <class_heritage_opt> <class_body_opt> 'end'
+             | 'class' 'helper' <class_heritage_opt> 'for' <type_ident> <class_body_opt> 'end'
+             | 'record' 'helper' <class_heritage_opt> 'for' <type_ident> <class_body_opt> 'end'
+             | 'type' 'helper' <class_heritage_opt> 'for' <type_ident> <class_body_opt> 'end'
              ;
 
 <class_heritage_opt> : <class_heritage>
@@ -810,12 +810,12 @@ DOT           = '.'
 <visibility_section> : <visibility_marker> <member_list>
                      ;
 
-<visibility_marker> : KW_PRIVATE
-                    | KW_PROTECTED
-                    | KW_PUBLIC
-                    | KW_PUBLISHED
-                    | KW_STRICT KW_PRIVATE
-                    | KW_STRICT KW_PROTECTED
+<visibility_marker> : 'private'
+                    | 'protected'
+                    | 'public'
+                    | 'published'
+                    | 'strict' 'private'
+                    | 'strict' 'protected'
                     ;
 
 <member_list> : <member_list> <member>
@@ -837,46 +837,46 @@ DOT           = '.'
 # matches Delphi's reserved overloadable-operator list — the
 # arithmetic / comparison / logical operators plus the
 # Implicit / Explicit conversion shapes.
-<class_operator_member> : KW_CLASS KW_OPERATOR <operator_name> <formal_params_opt> ':' <type_denoter> ';' <iface_directives_opt>
+<class_operator_member> : 'class' 'operator' <operator_name> <formal_params_opt> ':' <type_denoter> ';' <iface_directives_opt>
                         ;
 
-<operator_name> : KW_IMPLICIT
-                | KW_EXPLICIT
-                | KW_NEGATIVE
-                | KW_POSITIVE
-                | KW_INC
-                | KW_DEC
-                | KW_LOGICALNOT
-                | KW_TRUNC
-                | KW_ROUND
-                | KW_EQUAL
-                | KW_NOTEQUAL
-                | KW_GREATERTHAN
-                | KW_GREATERTHANOREQUAL
-                | KW_LESSTHAN
-                | KW_LESSTHANOREQUAL
-                | KW_ADD
-                | KW_SUBTRACT
-                | KW_MULTIPLY
-                | KW_DIVIDE
-                | KW_INTDIVIDE
-                | KW_MODULUS
-                | KW_LEFTSHIFT
-                | KW_RIGHTSHIFT
-                | KW_LOGICALAND
-                | KW_LOGICALOR
-                | KW_LOGICALXOR
-                | KW_BITWISEAND
-                | KW_BITWISEOR
-                | KW_BITWISEXOR
-                | KW_IN
+<operator_name> : 'Implicit'
+                | 'Explicit'
+                | 'Negative'
+                | 'Positive'
+                | 'Inc'
+                | 'Dec'
+                | 'LogicalNot'
+                | 'Trunc'
+                | 'Round'
+                | 'Equal'
+                | 'NotEqual'
+                | 'GreaterThan'
+                | 'GreaterThanOrEqual'
+                | 'LessThan'
+                | 'LessThanOrEqual'
+                | 'Add'
+                | 'Subtract'
+                | 'Multiply'
+                | 'Divide'
+                | 'IntDivide'
+                | 'Modulus'
+                | 'LeftShift'
+                | 'RightShift'
+                | 'LogicalAnd'
+                | 'LogicalOr'
+                | 'LogicalXor'
+                | 'BitwiseAnd'
+                | 'BitwiseOr'
+                | 'BitwiseXor'
+                | 'in'
                 ;
 
 <field_member> : <ident_list> ':' <type_denoter> <hint_directives_opt> ';'
                ;
 
 # Class-level const / type / var sections inside a class body.
-<class_const_member> : KW_CONST <class_const_seq> ;
+<class_const_member> : 'const' <class_const_seq> ;
 <class_const_seq>    : <class_const_item>
                      | <class_const_seq> <class_const_item>
                      ;
@@ -884,7 +884,7 @@ DOT           = '.'
                      | IDENT ':' <type_denoter> '=' <typed_const> ';'
                      ;
 
-<class_type_member> : KW_TYPE <class_type_seq> ;
+<class_type_member> : 'type' <class_type_seq> ;
 <class_type_seq>    : <class_type_item>
                     | <class_type_seq> <class_type_item>
                     ;
@@ -893,8 +893,8 @@ DOT           = '.'
 # Two forms: `var` introduces an instance-fields section
 # (modern Delphi); `class var` introduces a class-level fields
 # section. Both share the same item shape.
-<class_var_member>  : KW_VAR <class_var_seq>
-                    | KW_CLASS KW_VAR <class_var_seq>
+<class_var_member>  : 'var' <class_var_seq>
+                    | 'class' 'var' <class_var_seq>
                     ;
 <class_var_seq>     : <class_var_item>
                     | <class_var_seq> <class_var_item>
@@ -910,26 +910,26 @@ DOT           = '.'
                 | <class_method_member_head> ';' <iface_directives_opt>
                 ;
 
-<class_proc_member_head> : KW_PROCEDURE IDENT <formal_params_opt>
+<class_proc_member_head> : 'procedure' IDENT <formal_params_opt>
                          ;
-<class_func_member_head> : KW_FUNCTION IDENT <formal_params_opt> ':' <type_denoter>
+<class_func_member_head> : 'function' IDENT <formal_params_opt> ':' <type_denoter>
                          ;
-<ctor_member_head>       : KW_CONSTRUCTOR IDENT <formal_params_opt>
+<ctor_member_head>       : 'constructor' IDENT <formal_params_opt>
                          ;
-<dtor_member_head>       : KW_DESTRUCTOR IDENT <formal_params_opt>
+<dtor_member_head>       : 'destructor' IDENT <formal_params_opt>
                          ;
 
 # `class procedure` / `class function` / `class constructor` / `class
 # destructor` — the four class-bound forms inside a class body.
-<class_method_member_head> : KW_CLASS KW_PROCEDURE IDENT <formal_params_opt>
-                           | KW_CLASS KW_FUNCTION IDENT <formal_params_opt> ':' <type_denoter>
-                           | KW_CLASS KW_CONSTRUCTOR IDENT <formal_params_opt>
-                           | KW_CLASS KW_DESTRUCTOR IDENT <formal_params_opt>
+<class_method_member_head> : 'class' 'procedure' IDENT <formal_params_opt>
+                           | 'class' 'function' IDENT <formal_params_opt> ':' <type_denoter>
+                           | 'class' 'constructor' IDENT <formal_params_opt>
+                           | 'class' 'destructor' IDENT <formal_params_opt>
                            ;
 
 # --- properties ----------------------------------------------------------
 
-<property_member> : KW_PROPERTY IDENT <prop_params_opt> <prop_type_opt> <prop_specifiers> ';' <default_marker_opt>
+<property_member> : 'property' IDENT <prop_params_opt> <prop_type_opt> <prop_specifiers> ';' <default_marker_opt>
                   ;
 
 <prop_params_opt> : '[' <prop_param_list> ']'
@@ -951,20 +951,20 @@ DOT           = '.'
                   |
                   ;
 
-<prop_specifier> : KW_READ <designator>
-                 | KW_WRITE <designator>
-                 | KW_STORED <expr>
-                 | KW_DEFAULT <expr>
-                 | KW_NODEFAULT
-                 | KW_INDEX <expr>
-                 | KW_IMPLEMENTS <type_ident_list>
+<prop_specifier> : 'read' <designator>
+                 | 'write' <designator>
+                 | 'stored' <expr>
+                 | 'default' <expr>
+                 | 'nodefault'
+                 | 'index' <expr>
+                 | 'implements' <type_ident_list>
                  ;
 
 # Bare `default;` after the property's `;` marks the property as
 # the class's default indexed property (the one reachable via
 # `obj[i]`). It's distinct from the `default <expr>` specifier
 # above, which sets a published default value.
-<default_marker_opt> : KW_DEFAULT ';'
+<default_marker_opt> : 'default' ';'
                      |
                      ;
 
@@ -973,7 +973,7 @@ DOT           = '.'
 # True forward interface declarations (`IFoo = interface;`) live at
 # the type_decl level. Here we model the full form only; an empty
 # `interface end` covers the "declared but no members yet" case.
-<interface_type> : KW_INTERFACE <interface_heritage_opt> <interface_guid_opt> <interface_body> KW_END
+<interface_type> : 'interface' <interface_heritage_opt> <interface_guid_opt> <interface_body> 'end'
                  ;
 
 <interface_heritage_opt> : '(' <type_ident> ')'
@@ -997,11 +997,11 @@ DOT           = '.'
 
 # --- procedural types ----------------------------------------------------
 
-<proc_type_denoter> : KW_PROCEDURE <formal_params_opt> <of_object_opt>
-                    | KW_FUNCTION <formal_params_opt> ':' <type_denoter> <of_object_opt>
+<proc_type_denoter> : 'procedure' <formal_params_opt> <of_object_opt>
+                    | 'function' <formal_params_opt> ':' <type_denoter> <of_object_opt>
                     ;
 
-<of_object_opt> : KW_OF KW_OBJECT
+<of_object_opt> : 'of' 'object'
                 |
                 ;
 
@@ -1025,7 +1025,7 @@ DOT           = '.'
 
 # --- statements ----------------------------------------------------------
 
-<compound_stmt> : KW_BEGIN <stmt_list> KW_END
+<compound_stmt> : 'begin' <stmt_list> 'end'
                 ;
 
 <stmt_list>    : <stmt>
@@ -1050,15 +1050,15 @@ DOT           = '.'
 
 <assignment_stmt> : <designator> ':=' <expr> ;
 <proc_call_stmt>  : <designator> ;
-<goto_stmt>       : KW_GOTO INT_LIT ;
+<goto_stmt>       : 'goto' INT_LIT ;
 
 # `raise;` re-raises the current exception (only meaningful inside
 # an `except` block); `raise expr` raises a new exception value.
 # The optional `at expr` clause overrides the reported source
 # location and is most often used in RTL helpers.
-<raise_stmt> : KW_RAISE
-             | KW_RAISE <expr>
-             | KW_RAISE <expr> KW_AT <expr>
+<raise_stmt> : 'raise'
+             | 'raise' <expr>
+             | 'raise' <expr> 'at' <expr>
              ;
 
 <structured_stmt> : <compound_stmt>
@@ -1080,28 +1080,28 @@ DOT           = '.'
 # synthetic terminal and let a host filter slurp from `asm` to
 # the matching `end` (same pattern rust.uplox uses for
 # `macro_rules!` bodies via `MACRO_BODY_TT`).
-<asm_block> : KW_ASM ASM_BODY KW_END
-            | KW_ASM KW_END
+<asm_block> : 'asm' ASM_BODY 'end'
+            | 'asm' 'end'
             ;
 
-<if_stmt>      : KW_IF <expr> KW_THEN <stmt>
-               | KW_IF <expr> KW_THEN <stmt> KW_ELSE <stmt>
+<if_stmt>      : 'if' <expr> 'then' <stmt>
+               | 'if' <expr> 'then' <stmt> 'else' <stmt>
                ;
 
-<while_stmt>   : KW_WHILE <expr> KW_DO <stmt> ;
+<while_stmt>   : 'while' <expr> 'do' <stmt> ;
 
-<repeat_stmt>  : KW_REPEAT <stmt_list> KW_UNTIL <expr> ;
+<repeat_stmt>  : 'repeat' <stmt_list> 'until' <expr> ;
 
-<for_stmt>     : KW_FOR IDENT ':=' <expr> KW_TO     <expr> KW_DO <stmt>
-               | KW_FOR IDENT ':=' <expr> KW_DOWNTO <expr> KW_DO <stmt>
-               | KW_FOR IDENT KW_IN <expr> KW_DO <stmt>
+<for_stmt>     : 'for' IDENT ':=' <expr> 'to'     <expr> 'do' <stmt>
+               | 'for' IDENT ':=' <expr> 'downto' <expr> 'do' <stmt>
+               | 'for' IDENT 'in' <expr> 'do' <stmt>
                ;
 
-<case_stmt>    : KW_CASE <expr> KW_OF <case_list> <case_tail> KW_END
+<case_stmt>    : 'case' <expr> 'of' <case_list> <case_tail> 'end'
                ;
 
-<case_tail>    : ';' KW_ELSE <stmt_list>
-               | KW_ELSE <stmt_list>
+<case_tail>    : ';' 'else' <stmt_list>
+               | 'else' <stmt_list>
                | ';'
                |
                ;
@@ -1113,7 +1113,7 @@ DOT           = '.'
 <case_arm>     : <const_list> ':' <stmt>
                ;
 
-<with_stmt>    : KW_WITH <designator_list> KW_DO <stmt> ;
+<with_stmt>    : 'with' <designator_list> 'do' <stmt> ;
 
 <designator_list> : <designator>
                   | <designator_list> ',' <designator>
@@ -1123,13 +1123,13 @@ DOT           = '.'
 # can't be combined in a single statement (use nesting if you need
 # both). The except form takes either a free-form stmt_list (the
 # legacy "catch everything" form) or a sequence of typed handlers.
-<try_stmt> : KW_TRY <stmt_list> KW_FINALLY <stmt_list> KW_END
-           | KW_TRY <stmt_list> KW_EXCEPT <except_body> KW_END
+<try_stmt> : 'try' <stmt_list> 'finally' <stmt_list> 'end'
+           | 'try' <stmt_list> 'except' <except_body> 'end'
            ;
 
 <except_body> : <stmt_list>
               | <handler_list>
-              | <handler_list> KW_ELSE <stmt_list>
+              | <handler_list> 'else' <stmt_list>
               ;
 
 <handler_list> : <handler>
@@ -1140,12 +1140,12 @@ DOT           = '.'
 # `on Unit.T do S`, named-and-qualified `on E: Unit.T do S`. The
 # LR(1) parser commits at the first IDENT and disambiguates one
 # token later on `.` / `:` / KW_DO.
-<handler> : KW_ON IDENT <handler_rest>
+<handler> : 'on' IDENT <handler_rest>
           ;
 
-<handler_rest> : ':' <type_ident> KW_DO <stmt>
-               | '.' <qualified_tail> KW_DO <stmt>
-               | KW_DO <stmt>
+<handler_rest> : ':' <type_ident> 'do' <stmt>
+               | '.' <qualified_tail> 'do' <stmt>
+               | 'do' <stmt>
                ;
 
 <qualified_tail> : IDENT
@@ -1167,8 +1167,8 @@ DOT           = '.'
                | <simple_expr> '>'  <simple_expr>
                | <simple_expr> '<=' <simple_expr>
                | <simple_expr> '>=' <simple_expr>
-               | <simple_expr> KW_IN <simple_expr>
-               | <simple_expr> KW_IS <type_ident>
+               | <simple_expr> 'in' <simple_expr>
+               | <simple_expr> 'is' <type_ident>
                ;
 
 <simple_expr>  : <term>
@@ -1176,19 +1176,19 @@ DOT           = '.'
                | '-' <term>
                | <simple_expr> '+'    <term>
                | <simple_expr> '-'    <term>
-               | <simple_expr> KW_OR  <term>
-               | <simple_expr> KW_XOR <term>
+               | <simple_expr> 'or'  <term>
+               | <simple_expr> 'xor' <term>
                ;
 
 <term>         : <factor>
                | <term> '*'    <factor>
                | <term> '/'    <factor>
-               | <term> KW_DIV <factor>
-               | <term> KW_MOD <factor>
-               | <term> KW_AND <factor>
-               | <term> KW_SHL <factor>
-               | <term> KW_SHR <factor>
-               | <term> KW_AS  <type_ident>
+               | <term> 'div' <factor>
+               | <term> 'mod' <factor>
+               | <term> 'and' <factor>
+               | <term> 'shl' <factor>
+               | <term> 'shr' <factor>
+               | <term> 'as'  <type_ident>
                ;
 
 # Parenthesised expressions live on <designator_atom> rather than
@@ -1200,8 +1200,8 @@ DOT           = '.'
                | INT_LIT
                | REAL_LIT
                | STRING_LIT
-               | KW_NIL
-               | KW_NOT <factor>
+               | 'nil'
+               | 'not' <factor>
                | '@' <designator>
                | <set_ctor>
                | <anonymous_method>
@@ -1214,8 +1214,8 @@ DOT           = '.'
 # begin ... end` form is valid). Local var / const / type
 # declarations inside the body are NOT yet covered — the
 # anonymous-method body is a bare statement block.
-<anonymous_method> : KW_PROCEDURE <formal_params_opt> <compound_stmt>
-                   | KW_FUNCTION <formal_params_opt> ':' <type_denoter> <compound_stmt>
+<anonymous_method> : 'procedure' <formal_params_opt> <compound_stmt>
+                   | 'function' <formal_params_opt> ':' <type_denoter> <compound_stmt>
                    ;
 
 <set_ctor>     : '[' ']'
@@ -1240,9 +1240,9 @@ DOT           = '.'
                ;
 
 <designator_atom> : IDENT
-                  | KW_SELF
-                  | KW_INHERITED
-                  | KW_INHERITED IDENT
+                  | 'self'
+                  | 'inherited'
+                  | 'inherited' IDENT
                   | '(' <expr> ')'
                   ;
 

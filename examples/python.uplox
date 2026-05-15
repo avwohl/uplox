@@ -293,42 +293,42 @@ NEWLINE = /\x03/
 
 # --- simple statements ---------------------------------------------------
 
-<pass_stmt>     : KW_PASS ;
-<break_stmt>    : KW_BREAK ;
-<continue_stmt> : KW_CONTINUE ;
+<pass_stmt>     : 'pass' ;
+<break_stmt>    : 'break' ;
+<continue_stmt> : 'continue' ;
 
-<return_stmt> : KW_RETURN
-              | KW_RETURN <expression_list>
+<return_stmt> : 'return'
+              | 'return' <expression_list>
               ;
 
-<raise_stmt> : KW_RAISE
-             | KW_RAISE <expression>
-             | KW_RAISE <expression> KW_FROM <expression>
+<raise_stmt> : 'raise'
+             | 'raise' <expression>
+             | 'raise' <expression> 'from' <expression>
              ;
 
-<global_stmt>   : KW_GLOBAL <ident_list> ;
-<nonlocal_stmt> : KW_NONLOCAL <ident_list> ;
+<global_stmt>   : 'global' <ident_list> ;
+<nonlocal_stmt> : 'nonlocal' <ident_list> ;
 
 <ident_list> : IDENT
              | <ident_list> ',' IDENT
              ;
 
-<assert_stmt> : KW_ASSERT <expression>
-              | KW_ASSERT <expression> ',' <expression>
+<assert_stmt> : 'assert' <expression>
+              | 'assert' <expression> ',' <expression>
               ;
 
-<del_stmt> : KW_DEL <expression_list> ;
+<del_stmt> : 'del' <expression_list> ;
 
 <yield_stmt> : <yield_expression> ;
 
 # Yield expression — used as a statement and as a primary.
-<yield_expression> : KW_YIELD
-                   | KW_YIELD <expression_list>
-                   | KW_YIELD KW_FROM <expression>
+<yield_expression> : 'yield'
+                   | 'yield' <expression_list>
+                   | 'yield' 'from' <expression>
                    ;
 
 # import a.b.c, x as y, ...
-<import_stmt> : KW_IMPORT <import_path_list>
+<import_stmt> : 'import' <import_path_list>
               ;
 
 <import_path_list> : <import_path>
@@ -336,7 +336,7 @@ NEWLINE = /\x03/
                    ;
 
 <import_path> : <dotted_name>
-              | <dotted_name> KW_AS IDENT
+              | <dotted_name> 'as' IDENT
               ;
 
 <dotted_name> : IDENT
@@ -344,7 +344,7 @@ NEWLINE = /\x03/
               ;
 
 # from . module import X, Y as Z, *
-<from_import_stmt> : KW_FROM <import_source> KW_IMPORT <import_target>
+<from_import_stmt> : 'from' <import_source> 'import' <import_target>
                    ;
 
 <import_source> : <dotted_name>
@@ -369,12 +369,12 @@ NEWLINE = /\x03/
                    ;
 
 <import_name> : IDENT
-              | IDENT KW_AS IDENT
+              | IDENT 'as' IDENT
               ;
 
 # type X = …, type X[T] = …  (Python 3.12+ soft keyword).
-<type_alias_stmt> : KW_TYPE IDENT '=' <expression>
-                  | KW_TYPE IDENT <type_params> '=' <expression>
+<type_alias_stmt> : 'type' IDENT '=' <expression>
+                  | 'type' IDENT <type_params> '=' <expression>
                   ;
 
 # --- assignments ---------------------------------------------------------
@@ -450,7 +450,7 @@ NEWLINE = /\x03/
                 | <decorated>
                 ;
 
-<if_stmt> : KW_IF <expression> ':' <block> <elif_clauses_opt> <else_clause_opt>
+<if_stmt> : 'if' <expression> ':' <block> <elif_clauses_opt> <else_clause_opt>
           ;
 
 <elif_clauses_opt> : <elif_clauses>
@@ -461,16 +461,16 @@ NEWLINE = /\x03/
                | <elif_clauses> <elif_clause>
                ;
 
-<elif_clause> : KW_ELIF <expression> ':' <block> ;
+<elif_clause> : 'elif' <expression> ':' <block> ;
 
-<else_clause_opt> : KW_ELSE ':' <block>
+<else_clause_opt> : 'else' ':' <block>
                   |
                   ;
 
-<while_stmt> : KW_WHILE <expression> ':' <block> <else_clause_opt>
+<while_stmt> : 'while' <expression> ':' <block> <else_clause_opt>
              ;
 
-<for_stmt> : KW_FOR <target_list_loop> KW_IN <expression_list> ':' <block> <else_clause_opt>
+<for_stmt> : 'for' <target_list_loop> 'in' <expression_list> ':' <block> <else_clause_opt>
            ;
 
 # A for-loop binder accepts a single name, a tuple
@@ -478,7 +478,7 @@ NEWLINE = /\x03/
 <target_list_loop> : <expression_list>
                    ;
 
-<try_stmt> : KW_TRY ':' <block> <try_tail>
+<try_stmt> : 'try' ':' <block> <try_tail>
            ;
 
 <try_tail> : <except_clauses> <else_clause_opt> <finally_clause_opt>
@@ -490,18 +490,18 @@ NEWLINE = /\x03/
                  ;
 
 # except [<expr> [as IDENT]] :
-<except_clause> : KW_EXCEPT ':' <block>
-                | KW_EXCEPT <expression> ':' <block>
-                | KW_EXCEPT <expression> KW_AS IDENT ':' <block>
-                | KW_EXCEPT '*' <expression> ':' <block>
-                | KW_EXCEPT '*' <expression> KW_AS IDENT ':' <block>
+<except_clause> : 'except' ':' <block>
+                | 'except' <expression> ':' <block>
+                | 'except' <expression> 'as' IDENT ':' <block>
+                | 'except' '*' <expression> ':' <block>
+                | 'except' '*' <expression> 'as' IDENT ':' <block>
                 ;
 
 <finally_clause_opt> : <finally_clause>
                      |
                      ;
 
-<finally_clause> : KW_FINALLY ':' <block> ;
+<finally_clause> : 'finally' ':' <block> ;
 
 # `with` accepts a comma-separated item list. Python 3.10+
 # added the parenthesised form (`with (a, b): …`) — supported
@@ -511,9 +511,9 @@ NEWLINE = /\x03/
 # productions; otherwise `with_item -> expression` and
 # `expr_or_starred -> expression` would collide on COMMA
 # inside parens.
-<with_stmt> : KW_WITH <with_item_list> ':' <block>
-            | KW_WITH '(' <with_paren_item_list> ')' ':' <block>
-            | KW_WITH '(' <with_paren_item_list> ',' ')' ':' <block>
+<with_stmt> : 'with' <with_item_list> ':' <block>
+            | 'with' '(' <with_paren_item_list> ')' ':' <block>
+            | 'with' '(' <with_paren_item_list> ',' ')' ':' <block>
             ;
 
 # Parenthesised-with items each require an `as` clause — the
@@ -525,7 +525,7 @@ NEWLINE = /\x03/
                        | <with_paren_item_list> ',' <with_paren_item>
                        ;
 
-<with_paren_item> : <expression> KW_AS <target>
+<with_paren_item> : <expression> 'as' <target>
                   ;
 
 <with_item_list> : <with_item>
@@ -533,7 +533,7 @@ NEWLINE = /\x03/
                  ;
 
 <with_item> : <expression>
-            | <expression> KW_AS <target>
+            | <expression> 'as' <target>
             ;
 
 # --- decorators, function and class definitions --------------------------
@@ -553,7 +553,7 @@ NEWLINE = /\x03/
                    | <async_stmt>
                    ;
 
-<function_def> : KW_DEF IDENT <type_params_opt> '(' <param_list_opt> ')' <return_annotation_opt> ':' <block>
+<function_def> : 'def' IDENT <type_params_opt> '(' <param_list_opt> ')' <return_annotation_opt> ':' <block>
                ;
 
 <type_params_opt> : <type_params>
@@ -600,35 +600,35 @@ NEWLINE = /\x03/
         | '/'
         ;
 
-<class_def> : KW_CLASS IDENT <type_params_opt> ':' <block>
-            | KW_CLASS IDENT <type_params_opt> '(' ')' ':' <block>
-            | KW_CLASS IDENT <type_params_opt> '(' <argument_list> ')' ':' <block>
+<class_def> : 'class' IDENT <type_params_opt> ':' <block>
+            | 'class' IDENT <type_params_opt> '(' ')' ':' <block>
+            | 'class' IDENT <type_params_opt> '(' <argument_list> ')' ':' <block>
             ;
 
 # --- async forms ---------------------------------------------------------
 
-<async_stmt> : KW_ASYNC <function_def>
-             | KW_ASYNC <for_stmt>
-             | KW_ASYNC <with_stmt>
+<async_stmt> : 'async' <function_def>
+             | 'async' <for_stmt>
+             | 'async' <with_stmt>
              ;
 
 # --- match statement -----------------------------------------------------
 
-<match_stmt> : KW_MATCH <expression> ':' NEWLINE INDENT <case_list> DEDENT
+<match_stmt> : 'match' <expression> ':' NEWLINE INDENT <case_list> DEDENT
              ;
 
 <case_list> : <case_block>
             | <case_list> <case_block>
             ;
 
-<case_block> : KW_CASE <pattern> ':' <block>
-             | KW_CASE <pattern> KW_IF <expression> ':' <block>
+<case_block> : 'case' <pattern> ':' <block>
+             | 'case' <pattern> 'if' <expression> ':' <block>
              ;
 
 # Patterns. Subset of PEP 634 — literal, capture, wildcard, value,
 # group, sequence, mapping, class, or-pattern, as-pattern.
 <pattern> : <pattern_alt>
-          | <pattern> KW_AS IDENT
+          | <pattern> 'as' IDENT
           ;
 
 <pattern_alt> : <pattern_atom>
@@ -648,16 +648,16 @@ NEWLINE = /\x03/
                   | FLOAT_LIT
                   | COMPLEX_LIT
                   | STRING_LIT
-                  | KW_TRUE
-                  | KW_FALSE
-                  | KW_NONE
+                  | 'True'
+                  | 'False'
+                  | 'None'
                   | '-' INT_LIT
                   | '-' FLOAT_LIT
                   | '-' COMPLEX_LIT
                   ;
 
 <capture_or_wildcard_pattern> : IDENT
-                              | KW_UNDERSCORE
+                              | '_'
                               ;
 
 <value_pattern> : <dotted_name> '.' IDENT
@@ -676,7 +676,7 @@ NEWLINE = /\x03/
 
 <pattern_or_star> : <pattern>
                   | '*' IDENT
-                  | '*' KW_UNDERSCORE
+                  | '*' '_'
                   ;
 
 <mapping_pattern> : '{' '}'
@@ -746,7 +746,7 @@ NEWLINE = /\x03/
                     ;
 
 <conditional_expr> : <or_expr>
-                   | <or_expr> KW_IF <or_expr> KW_ELSE <expression>
+                   | <or_expr> 'if' <or_expr> 'else' <expression>
                    ;
 
 # Lambda's param list disallows annotations (the `:` after a
@@ -754,8 +754,8 @@ NEWLINE = /\x03/
 # colon). We reuse the regular <param> elements that don't carry
 # `:` annotations — IDENT, IDENT '=' default, `*` / `*args` /
 # `**kwargs` — via a dedicated <lambda_param_list> non-terminal.
-<lambda_expr> : KW_LAMBDA ':' <expression>
-              | KW_LAMBDA <lambda_param_list> ':' <expression>
+<lambda_expr> : 'lambda' ':' <expression>
+              | 'lambda' <lambda_param_list> ':' <expression>
               ;
 
 <lambda_param_list> : <lambda_param>
@@ -771,15 +771,15 @@ NEWLINE = /\x03/
                ;
 
 <or_expr> : <and_expr>
-          | <or_expr> KW_OR <and_expr>
+          | <or_expr> 'or' <and_expr>
           ;
 
 <and_expr> : <not_expr>
-           | <and_expr> KW_AND <not_expr>
+           | <and_expr> 'and' <not_expr>
            ;
 
 <not_expr> : <comparison>
-           | KW_NOT <not_expr>
+           | 'not' <not_expr>
            ;
 
 # Comparison chain: `a < b < c <= d`. Encoded as a left-recursive
@@ -796,10 +796,10 @@ NEWLINE = /\x03/
                 | '>'
                 | '<='
                 | '>='
-                | KW_IN
-                | KW_NOT KW_IN
-                | KW_IS
-                | KW_IS KW_NOT
+                | 'in'
+                | 'not' 'in'
+                | 'is'
+                | 'is' 'not'
                 ;
 
 <bitor_expr> : <bitxor_expr>
@@ -844,7 +844,7 @@ NEWLINE = /\x03/
              ;
 
 <await_expr> : <primary>
-             | KW_AWAIT <primary>
+             | 'await' <primary>
              ;
 
 # Primary: an atom optionally followed by a chain of trailers.
@@ -896,9 +896,9 @@ NEWLINE = /\x03/
                 | <comp_for_list> <comp_for>
                 ;
 
-<comp_for> : KW_FOR <target_list_loop> KW_IN <or_expr>
-           | KW_FOR <target_list_loop> KW_IN <or_expr> KW_IF <or_expr>
-           | KW_ASYNC KW_FOR <target_list_loop> KW_IN <or_expr>
+<comp_for> : 'for' <target_list_loop> 'in' <or_expr>
+           | 'for' <target_list_loop> 'in' <or_expr> 'if' <or_expr>
+           | 'async' 'for' <target_list_loop> 'in' <or_expr>
            ;
 
 # --- atoms ---------------------------------------------------------------
@@ -910,9 +910,9 @@ NEWLINE = /\x03/
 # `<set_or_dict_item>` directly, not on `<atom>`.
 <atom> : IDENT
        | <literal>
-       | KW_TRUE
-       | KW_FALSE
-       | KW_NONE
+       | 'True'
+       | 'False'
+       | 'None'
        | '...'
        | '(' ')'
        | '(' <yield_expression> ')'

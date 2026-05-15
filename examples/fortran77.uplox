@@ -227,17 +227,17 @@ CONTINUE_LINE = /\x01/
 <main_program> : <program_header_opt> <body> <end_stmt>
                ;
 
-<program_header_opt> : KW_PROGRAM IDENT
+<program_header_opt> : 'PROGRAM' IDENT
                      |
                      ;
 
-<subroutine> : KW_SUBROUTINE IDENT <param_list_opt> <body> <end_stmt>
+<subroutine> : 'SUBROUTINE' IDENT <param_list_opt> <body> <end_stmt>
              ;
 
-<function> : <type_spec_opt> KW_FUNCTION IDENT <param_list_opt> <body> <end_stmt>
+<function> : <type_spec_opt> 'FUNCTION' IDENT <param_list_opt> <body> <end_stmt>
            ;
 
-<block_data> : KW_BLOCKDATA <ident_opt> <body> <end_stmt>
+<block_data> : 'BLOCKDATA' <ident_opt> <body> <end_stmt>
              ;
 
 <param_list_opt> : '(' <ident_list> ')'
@@ -253,7 +253,7 @@ CONTINUE_LINE = /\x01/
             |
             ;
 
-<end_stmt> : KW_END
+<end_stmt> : 'END'
            ;
 
 # A program unit's body is a sequence of statements.
@@ -289,14 +289,14 @@ CONTINUE_LINE = /\x01/
 <type_decl_stmt> : <type_spec> <entity_decl_list>
                  ;
 
-<type_spec> : KW_INTEGER
-            | KW_REAL
-            | KW_DOUBLE KW_PRECISION
-            | KW_COMPLEX
-            | KW_LOGICAL
-            | KW_CHARACTER
-            | KW_CHARACTER '*' INTEGER_LIT
-            | KW_CHARACTER '*' '(' '*' ')'
+<type_spec> : 'INTEGER'
+            | 'REAL'
+            | 'DOUBLE' 'PRECISION'
+            | 'COMPLEX'
+            | 'LOGICAL'
+            | 'CHARACTER'
+            | 'CHARACTER' '*' INTEGER_LIT
+            | 'CHARACTER' '*' '(' '*' ')'
             ;
 
 <type_spec_opt> : <type_spec>
@@ -323,7 +323,7 @@ CONTINUE_LINE = /\x01/
             | '*'
             ;
 
-<dimension_stmt> : KW_DIMENSION <array_decl_list>
+<dimension_stmt> : 'DIMENSION' <array_decl_list>
                  ;
 
 <array_decl_list> : <array_decl>
@@ -332,7 +332,7 @@ CONTINUE_LINE = /\x01/
 
 <array_decl> : IDENT '(' <array_spec> ')' ;
 
-<common_stmt> : KW_COMMON <common_block_list>
+<common_stmt> : 'COMMON' <common_block_list>
               ;
 
 <common_block_list> : <common_block>
@@ -350,7 +350,7 @@ CONTINUE_LINE = /\x01/
                   | <common_var_list> ',' IDENT '(' <array_spec> ')'
                   ;
 
-<equivalence_stmt> : KW_EQUIVALENCE <equiv_set_list>
+<equivalence_stmt> : 'EQUIVALENCE' <equiv_set_list>
                    ;
 
 <equiv_set_list> : <equiv_set>
@@ -363,8 +363,8 @@ CONTINUE_LINE = /\x01/
               | <var_ref_list> ',' <var_ref>
               ;
 
-<implicit_stmt> : KW_IMPLICIT KW_NONE
-                | KW_IMPLICIT <implicit_spec_list>
+<implicit_stmt> : 'IMPLICIT' 'NONE'
+                | 'IMPLICIT' <implicit_spec_list>
                 ;
 
 <implicit_spec_list> : <implicit_spec>
@@ -381,9 +381,9 @@ CONTINUE_LINE = /\x01/
                | IDENT '-' IDENT
                ;
 
-<external_stmt>  : KW_EXTERNAL <ident_list> ;
-<intrinsic_stmt> : KW_INTRINSIC <ident_list> ;
-<parameter_stmt> : KW_PARAMETER '(' <param_assign_list> ')' ;
+<external_stmt>  : 'EXTERNAL' <ident_list> ;
+<intrinsic_stmt> : 'INTRINSIC' <ident_list> ;
+<parameter_stmt> : 'PARAMETER' '(' <param_assign_list> ')' ;
 
 <param_assign_list> : <param_assign>
                     | <param_assign_list> ',' <param_assign>
@@ -391,7 +391,7 @@ CONTINUE_LINE = /\x01/
 
 <param_assign> : IDENT '=' <expr> ;
 
-<data_stmt> : KW_DATA <data_set_list>
+<data_stmt> : 'DATA' <data_set_list>
             ;
 
 <data_set_list> : <data_set>
@@ -410,8 +410,8 @@ CONTINUE_LINE = /\x01/
              | INTEGER_LIT '*' <expr>
              ;
 
-<save_stmt> : KW_SAVE
-            | KW_SAVE <save_entity_list>
+<save_stmt> : 'SAVE'
+            | 'SAVE' <save_entity_list>
             ;
 
 <save_entity_list> : <save_entity>
@@ -434,17 +434,17 @@ CONTINUE_LINE = /\x01/
                   | <pause_stmt>
                   | <continue_stmt>
                   | <io_stmt>
-                  | KW_ENDIF
-                  | KW_ENDDO
+                  | 'ENDIF'
+                  | 'ENDDO'
                   ;
 
 <assignment_stmt> : <var_ref> '=' <expr>
                   ;
 
-<goto_stmt> : KW_GOTO INTEGER_LIT
-            | KW_GO KW_TO INTEGER_LIT
-            | KW_GOTO '(' <label_list> ')' <expr>
-            | KW_GOTO '(' <label_list> ')' ',' <expr>
+<goto_stmt> : 'GOTO' INTEGER_LIT
+            | 'GO' 'TO' INTEGER_LIT
+            | 'GOTO' '(' <label_list> ')' <expr>
+            | 'GOTO' '(' <label_list> ')' ',' <expr>
             ;
 
 <label_list> : INTEGER_LIT
@@ -453,26 +453,26 @@ CONTINUE_LINE = /\x01/
 
 # IF has three shapes in F77: arithmetic (`IF (expr) L1, L2, L3`),
 # logical (`IF (expr) stmt`), and block (`IF (expr) THEN ...`).
-<if_stmt> : KW_IF '(' <expr> ')' INTEGER_LIT ',' INTEGER_LIT ',' INTEGER_LIT
-          | KW_IF '(' <expr> ')' <executable_stmt>
-          | KW_IF '(' <expr> ')' KW_THEN
-          | KW_ELSE
-          | KW_ELSEIF '(' <expr> ')' KW_THEN
-          | KW_ELSE KW_IF '(' <expr> ')' KW_THEN
+<if_stmt> : 'IF' '(' <expr> ')' INTEGER_LIT ',' INTEGER_LIT ',' INTEGER_LIT
+          | 'IF' '(' <expr> ')' <executable_stmt>
+          | 'IF' '(' <expr> ')' 'THEN'
+          | 'ELSE'
+          | 'ELSEIF' '(' <expr> ')' 'THEN'
+          | 'ELSE' 'IF' '(' <expr> ')' 'THEN'
           ;
 
 # DO loops: classic `DO N I = a, b[, step]` and DO WHILE.
-<do_stmt> : KW_DO INTEGER_LIT IDENT '=' <expr> ',' <expr>
-          | KW_DO INTEGER_LIT IDENT '=' <expr> ',' <expr> ',' <expr>
-          | KW_DO IDENT '=' <expr> ',' <expr>
-          | KW_DO IDENT '=' <expr> ',' <expr> ',' <expr>
-          | KW_DO KW_WHILE '(' <expr> ')'
-          | KW_DO INTEGER_LIT KW_WHILE '(' <expr> ')'
+<do_stmt> : 'DO' INTEGER_LIT IDENT '=' <expr> ',' <expr>
+          | 'DO' INTEGER_LIT IDENT '=' <expr> ',' <expr> ',' <expr>
+          | 'DO' IDENT '=' <expr> ',' <expr>
+          | 'DO' IDENT '=' <expr> ',' <expr> ',' <expr>
+          | 'DO' 'WHILE' '(' <expr> ')'
+          | 'DO' INTEGER_LIT 'WHILE' '(' <expr> ')'
           ;
 
-<call_stmt> : KW_CALL IDENT
-            | KW_CALL IDENT '(' ')'
-            | KW_CALL IDENT '(' <arg_list> ')'
+<call_stmt> : 'CALL' IDENT
+            | 'CALL' IDENT '(' ')'
+            | 'CALL' IDENT '(' <arg_list> ')'
             ;
 
 <arg_list> : <arg>
@@ -483,36 +483,36 @@ CONTINUE_LINE = /\x01/
       | '*' INTEGER_LIT
       ;
 
-<return_stmt> : KW_RETURN
-              | KW_RETURN <expr>
+<return_stmt> : 'RETURN'
+              | 'RETURN' <expr>
               ;
 
-<stop_stmt> : KW_STOP
-            | KW_STOP INTEGER_LIT
-            | KW_STOP STRING_LIT
+<stop_stmt> : 'STOP'
+            | 'STOP' INTEGER_LIT
+            | 'STOP' STRING_LIT
             ;
 
-<pause_stmt> : KW_PAUSE
-             | KW_PAUSE INTEGER_LIT
-             | KW_PAUSE STRING_LIT
+<pause_stmt> : 'PAUSE'
+             | 'PAUSE' INTEGER_LIT
+             | 'PAUSE' STRING_LIT
              ;
 
-<continue_stmt> : KW_CONTINUE
+<continue_stmt> : 'CONTINUE'
                 ;
 
-<io_stmt> : KW_READ '(' <io_spec_list> ')' <io_list_opt>
-          | KW_WRITE '(' <io_spec_list> ')' <io_list_opt>
-          | KW_PRINT <format_id>
-          | KW_PRINT <format_id> ',' <io_list>
-          | KW_OPEN '(' <io_spec_list> ')'
-          | KW_CLOSE '(' <io_spec_list> ')'
-          | KW_REWIND '(' <io_spec_list> ')'
-          | KW_REWIND INTEGER_LIT
-          | KW_BACKSPACE '(' <io_spec_list> ')'
-          | KW_BACKSPACE INTEGER_LIT
-          | KW_ENDFILE '(' <io_spec_list> ')'
-          | KW_ENDFILE INTEGER_LIT
-          | KW_INQUIRE '(' <io_spec_list> ')'
+<io_stmt> : 'READ' '(' <io_spec_list> ')' <io_list_opt>
+          | 'WRITE' '(' <io_spec_list> ')' <io_list_opt>
+          | 'PRINT' <format_id>
+          | 'PRINT' <format_id> ',' <io_list>
+          | 'OPEN' '(' <io_spec_list> ')'
+          | 'CLOSE' '(' <io_spec_list> ')'
+          | 'REWIND' '(' <io_spec_list> ')'
+          | 'REWIND' INTEGER_LIT
+          | 'BACKSPACE' '(' <io_spec_list> ')'
+          | 'BACKSPACE' INTEGER_LIT
+          | 'ENDFILE' '(' <io_spec_list> ')'
+          | 'ENDFILE' INTEGER_LIT
+          | 'INQUIRE' '(' <io_spec_list> ')'
           ;
 
 <io_spec_list> : <io_spec>
@@ -539,7 +539,7 @@ CONTINUE_LINE = /\x01/
           | <io_list> ',' <expr>
           ;
 
-<format_stmt> : KW_FORMAT '(' <format_body> ')'
+<format_stmt> : 'FORMAT' '(' <format_body> ')'
               ;
 
 # FORMAT bodies are arbitrary characters until the matching `)`;

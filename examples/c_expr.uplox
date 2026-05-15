@@ -241,9 +241,9 @@ LPAREN RPAREN LBRACKET RBRACKET COMMA COLON DOT QUESTION
     | FLOAT_LIT@value        %ast=FloatLiteral
     | CHAR_LIT@value         %ast=CharLiteral
     | <string_literal>
-    | KW_NULLPTR             %ast=NullptrLiteral
-    | KW_TRUE@value          %ast=BoolLiteral
-    | KW_FALSE@value         %ast=BoolLiteral
+    | 'nullptr'             %ast=NullptrLiteral
+    | 'true'@value          %ast=BoolLiteral
+    | 'false'@value         %ast=BoolLiteral
     | LPAREN <expr> RPAREN
     ;
 

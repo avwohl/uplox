@@ -472,7 +472,7 @@ KW_EQUALS_LINQ   = 'KW_EQUALS_LINQ_SYNTHETIC_NEVER_EMITTED'
 # File-scoped namespace (C# 10). `namespace Foo;` followed by
 # the file's declarations. Only one per file, must be the
 # first namespace.
-<file_scoped_namespace> : KW_NAMESPACE <qualified_ident> ';' <header_directives> <namespace_member_decls>
+<file_scoped_namespace> : 'namespace' <qualified_ident> ';' <header_directives> <namespace_member_decls>
                         ;
 
 <header_directives> : <header_directives> <header_directive>
@@ -483,11 +483,11 @@ KW_EQUALS_LINQ   = 'KW_EQUALS_LINQ_SYNTHETIC_NEVER_EMITTED'
                    | <using_dir>
                    ;
 
-<extern_alias_dir> : KW_EXTERN KW_ALIAS IDENT ';' ;
+<extern_alias_dir> : 'extern' 'alias' IDENT ';' ;
 
-<using_dir> : KW_USING <qualified_ident> ';'
-            | KW_USING KW_STATIC <qualified_ident> ';'
-            | KW_USING IDENT '=' <type> ';'
+<using_dir> : 'using' <qualified_ident> ';'
+            | 'using' 'static' <qualified_ident> ';'
+            | 'using' IDENT '=' <type> ';'
             ;
 
 <global_attrs_opt> : <global_attrs_opt> <global_attr>
@@ -511,7 +511,7 @@ KW_EQUALS_LINQ   = 'KW_EQUALS_LINQ_SYNTHETIC_NEVER_EMITTED'
 # rather than as a `<namespace_decl>` alternative, because
 # the open-ended member list would otherwise collide with
 # the surrounding `<namespace_member_decls>` continuation.
-<namespace_decl> : KW_NAMESPACE <qualified_ident> '{' <header_directives> <namespace_member_decls> '}' <semi_opt>
+<namespace_decl> : 'namespace' <qualified_ident> '{' <header_directives> <namespace_member_decls> '}' <semi_opt>
                  ;
 
 <semi_opt> : ';'
@@ -535,9 +535,9 @@ KW_EQUALS_LINQ   = 'KW_EQUALS_LINQ_SYNTHETIC_NEVER_EMITTED'
                | '[' <attr_target> ':' <attr_list> ']'
                ;
 
-<attr_target> : KW_ASSEMBLY | KW_MODULE | KW_FIELD | KW_METHOD
-              | KW_PROPERTY | KW_PARAM | KW_EVENT | KW_TYPE
-              | KW_TYPEVAR | KW_RETURN
+<attr_target> : 'assembly' | 'module' | 'field' | 'method'
+              | 'property' | 'param' | 'event' | 'type'
+              | 'typevar' | 'return'
               ;
 
 <attr_list> : <attr>
@@ -574,11 +574,11 @@ KW_EQUALS_LINQ   = 'KW_EQUALS_LINQ_SYNTHETIC_NEVER_EMITTED'
 # spec-wise, `const` precedes any access modifiers anyway (you
 # write `public const int X = 1`, with `const` as part of the
 # const-decl head rather than the modifier list).
-<modifier> : KW_PUBLIC | KW_PRIVATE | KW_PROTECTED | KW_INTERNAL
-           | KW_STATIC | KW_ABSTRACT | KW_SEALED | KW_VIRTUAL
-           | KW_OVERRIDE | KW_NEW | KW_READONLY
-           | KW_VOLATILE | KW_PARTIAL | KW_ASYNC | KW_UNSAFE
-           | KW_EXTERN | KW_REF | KW_REQUIRED
+<modifier> : 'public' | 'private' | 'protected' | 'internal'
+           | 'static' | 'abstract' | 'sealed' | 'virtual'
+           | 'override' | 'new' | 'readonly'
+           | 'volatile' | 'partial' | 'async' | 'unsafe'
+           | 'extern' | 'ref' | 'required'
            ;
 
 # --- type declarations ---------------------------------------------------
@@ -591,23 +591,23 @@ KW_EQUALS_LINQ   = 'KW_EQUALS_LINQ_SYNTHETIC_NEVER_EMITTED'
             | <attrs_opt> <modifiers_opt> <record_decl>
             ;
 
-<class_decl> : KW_CLASS IDENT <type_params_opt> <base_list_opt> <constraints_opt> '{' <class_member_decls> '}' <semi_opt>
+<class_decl> : 'class' IDENT <type_params_opt> <base_list_opt> <constraints_opt> '{' <class_member_decls> '}' <semi_opt>
              ;
 
-<struct_decl> : KW_STRUCT IDENT <type_params_opt> <base_list_opt> <constraints_opt> '{' <class_member_decls> '}' <semi_opt>
+<struct_decl> : 'struct' IDENT <type_params_opt> <base_list_opt> <constraints_opt> '{' <class_member_decls> '}' <semi_opt>
               ;
 
 # Record declaration (C# 9): `record [class|struct] Name(P p,
 # Q q) [: base][where clauses][{ body }]`. The header
 # parameter list promotes parameters to properties; the body
 # is optional (just `;` for a bare record).
-<record_decl> : KW_RECORD <record_kind_opt> IDENT <type_params_opt>
+<record_decl> : 'record' <record_kind_opt> IDENT <type_params_opt>
                 <record_parameters_opt>
                 <base_list_opt> <constraints_opt>
                 <record_body>
               ;
 
-<record_kind_opt> : KW_CLASS | KW_STRUCT
+<record_kind_opt> : 'class' | 'struct'
                   |
                   ;
 
@@ -619,10 +619,10 @@ KW_EQUALS_LINQ   = 'KW_EQUALS_LINQ_SYNTHETIC_NEVER_EMITTED'
               | ';'
               ;
 
-<interface_decl> : KW_INTERFACE IDENT <type_params_opt> <base_list_opt> <constraints_opt> '{' <class_member_decls> '}' <semi_opt>
+<interface_decl> : 'interface' IDENT <type_params_opt> <base_list_opt> <constraints_opt> '{' <class_member_decls> '}' <semi_opt>
                  ;
 
-<enum_decl> : KW_ENUM IDENT <enum_base_opt> '{' <enum_body> '}' <semi_opt>
+<enum_decl> : 'enum' IDENT <enum_base_opt> '{' <enum_body> '}' <semi_opt>
             ;
 
 <enum_base_opt> : ':' <type>
@@ -642,7 +642,7 @@ KW_EQUALS_LINQ   = 'KW_EQUALS_LINQ_SYNTHETIC_NEVER_EMITTED'
               | <attrs_opt> IDENT '=' <expr>
               ;
 
-<delegate_decl> : KW_DELEGATE <type> IDENT <type_params_opt> '(' <param_list_opt> ')' <constraints_opt> ';'
+<delegate_decl> : 'delegate' <type> IDENT <type_params_opt> '(' <param_list_opt> ')' <constraints_opt> ';'
                 ;
 
 # --- generic type parameters / constraints ------------------------------
@@ -661,24 +661,24 @@ KW_EQUALS_LINQ   = 'KW_EQUALS_LINQ_SYNTHETIC_NEVER_EMITTED'
                   ;
 
 <type_param> : IDENT
-             | KW_IN IDENT
-             | KW_OUT IDENT
+             | 'in' IDENT
+             | 'out' IDENT
              ;
 
 <constraints_opt> : <constraints_opt> <constraint_clause>
                   |
                   ;
 
-<constraint_clause> : KW_WHERE IDENT ':' <constraint_list>
+<constraint_clause> : 'where' IDENT ':' <constraint_list>
                     ;
 
 <constraint_list> : <constraint>
                   | <constraint_list> ',' <constraint>
                   ;
 
-<constraint> : KW_CLASS
-             | KW_STRUCT
-             | KW_NEW '(' ')'
+<constraint> : 'class'
+             | 'struct'
+             | 'new' '(' ')'
              | <type>
              ;
 
@@ -737,7 +737,7 @@ KW_EQUALS_LINQ   = 'KW_EQUALS_LINQ_SYNTHETIC_NEVER_EMITTED'
                        | <var_initializer_list> ',' <var_initializer>
                        ;
 
-<constant_decl> : <attrs_opt> <modifiers_opt> KW_CONST <type> <const_declarators> ';'
+<constant_decl> : <attrs_opt> <modifiers_opt> 'const' <type> <const_declarators> ';'
                 ;
 
 <const_declarators> : <const_declarator>
@@ -765,11 +765,11 @@ KW_EQUALS_LINQ   = 'KW_EQUALS_LINQ_SYNTHETIC_NEVER_EMITTED'
 <param> : <attrs_opt> <param_modifiers_opt> <type> IDENT <param_default_opt>
         ;
 
-<param_modifiers_opt> : KW_REF
-                      | KW_OUT
-                      | KW_IN
-                      | KW_PARAMS
-                      | KW_THIS
+<param_modifiers_opt> : 'ref'
+                      | 'out'
+                      | 'in'
+                      | 'params'
+                      | 'this'
                       |
                       ;
 
@@ -788,11 +788,11 @@ KW_EQUALS_LINQ   = 'KW_EQUALS_LINQ_SYNTHETIC_NEVER_EMITTED'
                  | <accessor_decl>
                  ;
 
-<accessor_decl> : <attrs_opt> <modifiers_opt> KW_GET <accessor_body>
-                | <attrs_opt> <modifiers_opt> KW_SET <accessor_body>
-                | <attrs_opt> <modifiers_opt> KW_INIT <accessor_body>
-                | <attrs_opt> <modifiers_opt> KW_ADD <accessor_body>
-                | <attrs_opt> <modifiers_opt> KW_REMOVE <accessor_body>
+<accessor_decl> : <attrs_opt> <modifiers_opt> 'get' <accessor_body>
+                | <attrs_opt> <modifiers_opt> 'set' <accessor_body>
+                | <attrs_opt> <modifiers_opt> 'init' <accessor_body>
+                | <attrs_opt> <modifiers_opt> 'add' <accessor_body>
+                | <attrs_opt> <modifiers_opt> 'remove' <accessor_body>
                 ;
 
 <accessor_body> : <block>
@@ -804,12 +804,12 @@ KW_EQUALS_LINQ   = 'KW_EQUALS_LINQ_SYNTHETIC_NEVER_EMITTED'
                | <attrs_opt> <modifiers_opt> <type> <indexer_name> '[' <param_list> ']' '=>' <expr> ';'
                ;
 
-<indexer_name> : KW_THIS
-               | <qualified_ident> '.' KW_THIS
+<indexer_name> : 'this'
+               | <qualified_ident> '.' 'this'
                ;
 
-<event_decl> : <attrs_opt> <modifiers_opt> KW_EVENT <type> <var_declarators> ';'
-             | <attrs_opt> <modifiers_opt> KW_EVENT <type> <qualified_ident> '{' <accessor_decls> '}'
+<event_decl> : <attrs_opt> <modifiers_opt> 'event' <type> <var_declarators> ';'
+             | <attrs_opt> <modifiers_opt> 'event' <type> <qualified_ident> '{' <accessor_decls> '}'
              ;
 
 # --- constructors / destructors / operators -----------------------------
@@ -817,27 +817,27 @@ KW_EQUALS_LINQ   = 'KW_EQUALS_LINQ_SYNTHETIC_NEVER_EMITTED'
 <constructor_decl> : <attrs_opt> <modifiers_opt> IDENT '(' <param_list_opt> ')' <ctor_initializer_opt> <method_body>
                    ;
 
-<ctor_initializer_opt> : ':' KW_BASE '(' <arg_list_opt> ')'
-                       | ':' KW_THIS '(' <arg_list_opt> ')'
+<ctor_initializer_opt> : ':' 'base' '(' <arg_list_opt> ')'
+                       | ':' 'this' '(' <arg_list_opt> ')'
                        |
                        ;
 
 <destructor_decl> : <attrs_opt> <modifiers_opt> '~' IDENT '(' ')' <method_body>
                   ;
 
-<operator_decl> : <attrs_opt> <modifiers_opt> <type> KW_OPERATOR <overloadable_op> '(' <param_list> ')' <method_body>
+<operator_decl> : <attrs_opt> <modifiers_opt> <type> 'operator' <overloadable_op> '(' <param_list> ')' <method_body>
                 ;
 
 <overloadable_op> : '+' | '-' | '!' | '~' | '++' | '--'
                   | '*' | '/' | '%' | '&' | '|' | '^'
                   | '<<' | '>>' | '==' | '!=' | '<' | '>'
-                  | '<=' | '>=' | KW_TRUE | KW_FALSE
+                  | '<=' | '>=' | 'true' | 'false'
                   ;
 
-<conversion_op_decl> : <attrs_opt> <modifiers_opt> <conversion_kind> KW_OPERATOR <type> '(' <param> ')' <method_body>
+<conversion_op_decl> : <attrs_opt> <modifiers_opt> <conversion_kind> 'operator' <type> '(' <param> ')' <method_body>
                      ;
 
-<conversion_kind> : KW_IMPLICIT | KW_EXPLICIT ;
+<conversion_kind> : 'implicit' | 'explicit' ;
 
 # --- types --------------------------------------------------------------
 #
@@ -877,11 +877,11 @@ KW_EQUALS_LINQ   = 'KW_EQUALS_LINQ_SYNTHETIC_NEVER_EMITTED'
                 | <type_arg_list> ',' <type>
                 ;
 
-<predefined_type> : KW_VOID | KW_BOOL | KW_BYTE | KW_SBYTE
-                  | KW_SHORT | KW_USHORT | KW_INT | KW_UINT
-                  | KW_LONG | KW_ULONG | KW_CHAR | KW_FLOAT
-                  | KW_DOUBLE | KW_DECIMAL | KW_STRING | KW_OBJECT
-                  | KW_NINT | KW_NUINT
+<predefined_type> : 'void' | 'bool' | 'byte' | 'sbyte'
+                  | 'short' | 'ushort' | 'int' | 'uint'
+                  | 'long' | 'ulong' | 'char' | 'float'
+                  | 'double' | 'decimal' | 'string' | 'object'
+                  | 'nint' | 'nuint'
                   ;
 
 # Tuple types use LPAREN_TUPLE — the filter-emitted marker that
@@ -947,11 +947,11 @@ KW_EQUALS_LINQ   = 'KW_EQUALS_LINQ_SYNTHETIC_NEVER_EMITTED'
                    ;
 
 <local_var_decl> : <type> <var_declarators>
-                 | KW_VAR <var_declarators>
-                 | KW_REF <type> <var_declarators>
+                 | 'var' <var_declarators>
+                 | 'ref' <type> <var_declarators>
                  ;
 
-<local_const_decl> : KW_CONST <type> <const_declarators>
+<local_const_decl> : 'const' <type> <const_declarators>
                    ;
 
 <embedded_stmt> : <block>
@@ -1002,13 +1002,13 @@ KW_EQUALS_LINQ   = 'KW_EQUALS_LINQ_SYNTHETIC_NEVER_EMITTED'
                       | '--' <unary_expr>
                       ;
 
-<await_expr> : KW_AWAIT <unary_expr> ;
+<await_expr> : 'await' <unary_expr> ;
 
-<if_stmt> : KW_IF '(' <expr> ')' <embedded_stmt>
-          | KW_IF '(' <expr> ')' <embedded_stmt> KW_ELSE <embedded_stmt>
+<if_stmt> : 'if' '(' <expr> ')' <embedded_stmt>
+          | 'if' '(' <expr> ')' <embedded_stmt> 'else' <embedded_stmt>
           ;
 
-<switch_stmt> : KW_SWITCH '(' <expr> ')' '{' <switch_section_list_opt> '}'
+<switch_stmt> : 'switch' '(' <expr> ')' '{' <switch_section_list_opt> '}'
               ;
 
 <switch_section_list_opt> : <switch_section_list>
@@ -1026,18 +1026,18 @@ KW_EQUALS_LINQ   = 'KW_EQUALS_LINQ_SYNTHETIC_NEVER_EMITTED'
                 | <switch_labels> <switch_label>
                 ;
 
-<switch_label> : KW_CASE <pattern> ':'
-               | KW_CASE <pattern> KW_WHEN <expr> ':'
-               | KW_DEFAULT ':'
+<switch_label> : 'case' <pattern> ':'
+               | 'case' <pattern> 'when' <expr> ':'
+               | 'default' ':'
                ;
 
-<while_stmt> : KW_WHILE '(' <expr> ')' <embedded_stmt>
+<while_stmt> : 'while' '(' <expr> ')' <embedded_stmt>
              ;
 
-<do_stmt> : KW_DO <embedded_stmt> KW_WHILE '(' <expr> ')' ';'
+<do_stmt> : 'do' <embedded_stmt> 'while' '(' <expr> ')' ';'
           ;
 
-<for_stmt> : KW_FOR '(' <for_initializer_opt> ';' <for_condition_opt> ';' <for_iterator_opt> ')' <embedded_stmt>
+<for_stmt> : 'for' '(' <for_initializer_opt> ';' <for_condition_opt> ';' <for_iterator_opt> ')' <embedded_stmt>
            ;
 
 <for_initializer_opt> : <local_var_decl>
@@ -1057,64 +1057,64 @@ KW_EQUALS_LINQ   = 'KW_EQUALS_LINQ_SYNTHETIC_NEVER_EMITTED'
                  | <stmt_expr_list> ',' <stmt_expr>
                  ;
 
-<foreach_stmt> : KW_FOREACH '(' <foreach_var> KW_IN <expr> ')' <embedded_stmt>
+<foreach_stmt> : 'foreach' '(' <foreach_var> 'in' <expr> ')' <embedded_stmt>
                ;
 
 <foreach_var> : <type> IDENT
-              | KW_VAR IDENT
-              | KW_REF <type> IDENT
+              | 'var' IDENT
+              | 'ref' <type> IDENT
               ;
 
-<break_stmt> : KW_BREAK ';' ;
-<continue_stmt> : KW_CONTINUE ';' ;
+<break_stmt> : 'break' ';' ;
+<continue_stmt> : 'continue' ';' ;
 
-<return_stmt> : KW_RETURN ';'
-              | KW_RETURN <expr> ';'
+<return_stmt> : 'return' ';'
+              | 'return' <expr> ';'
               ;
 
-<throw_stmt> : KW_THROW ';'
-             | KW_THROW <expr> ';'
+<throw_stmt> : 'throw' ';'
+             | 'throw' <expr> ';'
              ;
 
-<try_stmt> : KW_TRY <block> <catch_clauses>
-           | KW_TRY <block> <catch_clauses> KW_FINALLY <block>
-           | KW_TRY <block> KW_FINALLY <block>
+<try_stmt> : 'try' <block> <catch_clauses>
+           | 'try' <block> <catch_clauses> 'finally' <block>
+           | 'try' <block> 'finally' <block>
            ;
 
 <catch_clauses> : <catch_clauses> <catch_clause>
                 | <catch_clause>
                 ;
 
-<catch_clause> : KW_CATCH <block>
-               | KW_CATCH '(' <type> ')' <catch_filter_opt> <block>
-               | KW_CATCH '(' <type> IDENT ')' <catch_filter_opt> <block>
+<catch_clause> : 'catch' <block>
+               | 'catch' '(' <type> ')' <catch_filter_opt> <block>
+               | 'catch' '(' <type> IDENT ')' <catch_filter_opt> <block>
                ;
 
-<catch_filter_opt> : KW_WHEN '(' <expr> ')'
+<catch_filter_opt> : 'when' '(' <expr> ')'
                    |
                    ;
 
-<using_stmt> : KW_USING '(' <using_resource> ')' <embedded_stmt>
-             | KW_USING <local_var_decl> ';'
+<using_stmt> : 'using' '(' <using_resource> ')' <embedded_stmt>
+             | 'using' <local_var_decl> ';'
              ;
 
 <using_resource> : <local_var_decl>
                  | <expr>
                  ;
 
-<lock_stmt> : KW_LOCK '(' <expr> ')' <embedded_stmt>
+<lock_stmt> : 'lock' '(' <expr> ')' <embedded_stmt>
             ;
 
-<yield_stmt> : KW_YIELD KW_RETURN <expr> ';'
-             | KW_YIELD KW_BREAK ';'
+<yield_stmt> : 'yield' 'return' <expr> ';'
+             | 'yield' 'break' ';'
              ;
 
-<checked_stmt> : KW_CHECKED <block> ;
-<unchecked_stmt> : KW_UNCHECKED <block> ;
+<checked_stmt> : 'checked' <block> ;
+<unchecked_stmt> : 'unchecked' <block> ;
 
-<goto_stmt> : KW_GOTO IDENT ';'
-            | KW_GOTO KW_CASE <expr> ';'
-            | KW_GOTO KW_DEFAULT ';'
+<goto_stmt> : 'goto' IDENT ';'
+            | 'goto' 'case' <expr> ';'
+            | 'goto' 'default' ';'
             ;
 
 # --- patterns -----------------------------------------------------------
@@ -1137,7 +1137,7 @@ KW_EQUALS_LINQ   = 'KW_EQUALS_LINQ_SYNTHETIC_NEVER_EMITTED'
 <pattern> : <expr>
           | <type>
           | <type> IDENT
-          | KW_VAR IDENT
+          | 'var' IDENT
           | <property_pattern>
           | <type> <property_pattern>
           | <type> <property_pattern> IDENT
@@ -1281,13 +1281,13 @@ KW_EQUALS_LINQ   = 'KW_EQUALS_LINQ_SYNTHETIC_NEVER_EMITTED'
                   | <relational_expr> '>'  <shift_expr>
                   | <relational_expr> '<=' <shift_expr>
                   | <relational_expr> '>=' <shift_expr>
-                  | <relational_expr> KW_IS <type>
-                  | <relational_expr> KW_IS <type> IDENT
-                  | <relational_expr> KW_IS <property_pattern>
-                  | <relational_expr> KW_IS <type> <property_pattern>
-                  | <relational_expr> KW_IS <type> <property_pattern> IDENT
-                  | <relational_expr> KW_IS <list_pattern>
-                  | <relational_expr> KW_AS <type>
+                  | <relational_expr> 'is' <type>
+                  | <relational_expr> 'is' <type> IDENT
+                  | <relational_expr> 'is' <property_pattern>
+                  | <relational_expr> 'is' <type> <property_pattern>
+                  | <relational_expr> 'is' <type> <property_pattern> IDENT
+                  | <relational_expr> 'is' <list_pattern>
+                  | <relational_expr> 'as' <type>
                   ;
 
 <shift_expr> : <additive_expr>
@@ -1317,7 +1317,7 @@ KW_EQUALS_LINQ   = 'KW_EQUALS_LINQ_SYNTHETIC_NEVER_EMITTED'
              | '++' <unary_expr>
              | '--' <unary_expr>
              | LPAREN_CAST <type> ')' <unary_expr>
-             | KW_AWAIT <unary_expr>
+             | 'await' <unary_expr>
              ;
 
 # Primary expressions and their suffix chain.
@@ -1329,10 +1329,10 @@ KW_EQUALS_LINQ   = 'KW_EQUALS_LINQ_SYNTHETIC_NEVER_EMITTED'
 # matches the ECMA-334 disambiguating-set rule.
 <primary_expr> : <literal>
                | IDENT
-               | KW_GLOBAL '::' IDENT
-               | KW_THIS
-               | KW_BASE
-               | KW_FIELD
+               | 'global' '::' IDENT
+               | 'this'
+               | 'base'
+               | 'field'
                | <parenthesized_expr>
                | <tuple_expr>
                | <object_creation_expr>
@@ -1378,14 +1378,14 @@ KW_EQUALS_LINQ   = 'KW_EQUALS_LINQ_SYNTHETIC_NEVER_EMITTED'
           | VSTRING_LIT
           | ISTRING_LIT
           | IVSTRING_LIT
-          | KW_TRUE
-          | KW_FALSE
-          | KW_NULL
+          | 'true'
+          | 'false'
+          | 'null'
           ;
 
-<object_creation_expr> : KW_NEW <type> '(' <arg_list_opt> ')' <object_initializer_opt>
-                       | KW_NEW <type> <object_initializer>
-                       | KW_NEW <object_initializer>
+<object_creation_expr> : 'new' <type> '(' <arg_list_opt> ')' <object_initializer_opt>
+                       | 'new' <type> <object_initializer>
+                       | 'new' <object_initializer>
                        ;
 
 <object_initializer_opt> : <object_initializer>
@@ -1416,9 +1416,9 @@ KW_EQUALS_LINQ   = 'KW_EQUALS_LINQ_SYNTHETIC_NEVER_EMITTED'
                      | <array_initializer>
                      ;
 
-<array_creation_expr> : KW_NEW <non_array_type> '[' <expr_list> ']' <rank_specifiers_opt> <array_initializer_opt>
-                      | KW_NEW <non_array_type> <rank_specifiers> <array_initializer>
-                      | KW_NEW <rank_specifiers> <array_initializer>
+<array_creation_expr> : 'new' <non_array_type> '[' <expr_list> ']' <rank_specifiers_opt> <array_initializer_opt>
+                      | 'new' <non_array_type> <rank_specifiers> <array_initializer>
+                      | 'new' <rank_specifiers> <array_initializer>
                       ;
 
 <rank_specifiers_opt> : <rank_specifiers>
@@ -1429,17 +1429,17 @@ KW_EQUALS_LINQ   = 'KW_EQUALS_LINQ_SYNTHETIC_NEVER_EMITTED'
                         |
                         ;
 
-<typeof_expr> : KW_TYPEOF '(' <type> ')' ;
-<sizeof_expr> : KW_SIZEOF '(' <type> ')' ;
-<nameof_expr> : KW_NAMEOF '(' <expr> ')' ;
+<typeof_expr> : 'typeof' '(' <type> ')' ;
+<sizeof_expr> : 'sizeof' '(' <type> ')' ;
+<nameof_expr> : 'nameof' '(' <expr> ')' ;
 # `default(T)` only — the bare `default` literal (C# 7.1+) would
 # conflict with the switch-statement `default:` label and the
 # `default` modifier-keyword positions; LR(1) would need extra
 # lookahead to distinguish. The semantic phase can synthesise the
 # zero-arg form when the target type is inferrable.
-<default_expr> : KW_DEFAULT '(' <type> ')' ;
-<checked_expr> : KW_CHECKED '(' <expr> ')' ;
-<unchecked_expr> : KW_UNCHECKED '(' <expr> ')' ;
+<default_expr> : 'default' '(' <type> ')' ;
+<checked_expr> : 'checked' '(' <expr> ')' ;
+<unchecked_expr> : 'unchecked' '(' <expr> ')' ;
 
 # --- LINQ query expressions ---------------------------------------------
 #
@@ -1453,8 +1453,8 @@ KW_EQUALS_LINQ   = 'KW_EQUALS_LINQ_SYNTHETIC_NEVER_EMITTED'
 <query_expr> : <from_clause> <query_body>
              ;
 
-<from_clause> : KW_FROM_LINQ IDENT KW_IN <expr>
-              | KW_FROM_LINQ <type> IDENT KW_IN <expr>
+<from_clause> : KW_FROM_LINQ IDENT 'in' <expr>
+              | KW_FROM_LINQ <type> IDENT 'in' <expr>
               ;
 
 <query_body> : <query_body_clauses_opt> <select_or_group_clause> <query_continuation_opt>
@@ -1481,10 +1481,10 @@ KW_EQUALS_LINQ   = 'KW_EQUALS_LINQ_SYNTHETIC_NEVER_EMITTED'
 <where_linq_clause> : KW_WHERE_LINQ <expr>
                     ;
 
-<join_clause> : KW_JOIN_LINQ IDENT KW_IN <expr> KW_ON_LINQ <expr> KW_EQUALS_LINQ <expr>
-              | KW_JOIN_LINQ IDENT KW_IN <expr> KW_ON_LINQ <expr> KW_EQUALS_LINQ <expr> KW_INTO_LINQ IDENT
-              | KW_JOIN_LINQ <type> IDENT KW_IN <expr> KW_ON_LINQ <expr> KW_EQUALS_LINQ <expr>
-              | KW_JOIN_LINQ <type> IDENT KW_IN <expr> KW_ON_LINQ <expr> KW_EQUALS_LINQ <expr> KW_INTO_LINQ IDENT
+<join_clause> : KW_JOIN_LINQ IDENT 'in' <expr> KW_ON_LINQ <expr> KW_EQUALS_LINQ <expr>
+              | KW_JOIN_LINQ IDENT 'in' <expr> KW_ON_LINQ <expr> KW_EQUALS_LINQ <expr> KW_INTO_LINQ IDENT
+              | KW_JOIN_LINQ <type> IDENT 'in' <expr> KW_ON_LINQ <expr> KW_EQUALS_LINQ <expr>
+              | KW_JOIN_LINQ <type> IDENT 'in' <expr> KW_ON_LINQ <expr> KW_EQUALS_LINQ <expr> KW_INTO_LINQ IDENT
               ;
 
 <orderby_clause> : KW_ORDERBY_LINQ <ordering_list>
@@ -1517,10 +1517,10 @@ KW_EQUALS_LINQ   = 'KW_EQUALS_LINQ_SYNTHETIC_NEVER_EMITTED'
 
 <arg> : <expr>
       | IDENT ':' <expr>
-      | KW_REF <expr>
-      | KW_OUT <expr>
-      | KW_OUT <type> IDENT
-      | KW_IN <expr>
+      | 'ref' <expr>
+      | 'out' <expr>
+      | 'out' <type> IDENT
+      | 'in' <expr>
       ;
 
 <expr_list> : <expr>

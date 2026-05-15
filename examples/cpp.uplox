@@ -371,30 +371,30 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 # Modules (C++20). A translation unit may declare a module
 # (`export module M;` or `module M;`), import another module
 # (`import M;`), or export declarations (`export <decl>`).
-<module_declaration> : KW_MODULE <qualified_namespace_name> ';'
-                     | KW_EXPORT KW_MODULE <qualified_namespace_name> ';'
+<module_declaration> : 'module' <qualified_namespace_name> ';'
+                     | 'export' 'module' <qualified_namespace_name> ';'
                      ;
 
-<import_declaration> : KW_IMPORT <qualified_namespace_name> ';'
-                     | KW_IMPORT STRING_LIT ';'
-                     | KW_EXPORT KW_IMPORT <qualified_namespace_name> ';'
-                     | KW_EXPORT KW_IMPORT STRING_LIT ';'
+<import_declaration> : 'import' <qualified_namespace_name> ';'
+                     | 'import' STRING_LIT ';'
+                     | 'export' 'import' <qualified_namespace_name> ';'
+                     | 'export' 'import' STRING_LIT ';'
                      ;
 
 # `export` of a single declaration or a brace-enclosed list.
-<export_declaration> : KW_EXPORT <declaration>
-                     | KW_EXPORT <function_definition>
-                     | KW_EXPORT <namespace_definition>
-                     | KW_EXPORT <template_declaration>
-                     | KW_EXPORT <forward_decl>
-                     | KW_EXPORT <concept_definition>
-                     | KW_EXPORT '{' <top_decls_opt> '}'
+<export_declaration> : 'export' <declaration>
+                     | 'export' <function_definition>
+                     | 'export' <namespace_definition>
+                     | 'export' <template_declaration>
+                     | 'export' <forward_decl>
+                     | 'export' <concept_definition>
+                     | 'export' '{' <top_decls_opt> '}'
                      ;
 
 # Concept definition (C++20): `template<typename T> concept C
 # = expr;`. The `expr` is constexpr and typically uses
 # requires-clauses / requires-expressions.
-<concept_definition> : KW_TEMPLATE LT_TEMPLATE <template_parameter_list> GT_TEMPLATE KW_CONCEPT IDENT '=' <conditional_expr> ';'
+<concept_definition> : 'template' LT_TEMPLATE <template_parameter_list> GT_TEMPLATE 'concept' IDENT '=' <conditional_expr> ';'
                      ;
 
 # Forward / type-reference declaration: `class Foo;`,
@@ -407,27 +407,27 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 # only spec).
 <forward_decl> : <class_key> IDENT ';'
                | <class_key> IDENT_TYPE ';'
-               | KW_ENUM KW_CLASS IDENT ';'
-               | KW_ENUM KW_CLASS IDENT_TYPE ';'
-               | KW_FRIEND <class_key> IDENT ';'
-               | KW_FRIEND <class_key> IDENT_TYPE ';'
+               | 'enum' 'class' IDENT ';'
+               | 'enum' 'class' IDENT_TYPE ';'
+               | 'friend' <class_key> IDENT ';'
+               | 'friend' <class_key> IDENT_TYPE ';'
                ;
 
-<static_assert_decl> : KW_STATIC_ASSERT '(' <expression> ')' ';'
-                     | KW_STATIC_ASSERT '(' <expression> ',' STRING_LIT ')' ';'
+<static_assert_decl> : 'static_assert' '(' <expression> ')' ';'
+                     | 'static_assert' '(' <expression> ',' STRING_LIT ')' ';'
                      ;
 
-<linkage_specification> : KW_EXTERN STRING_LIT '{' <top_decls_opt> '}'
-                        | KW_EXTERN STRING_LIT <declaration>
-                        | KW_EXTERN STRING_LIT <function_definition>
+<linkage_specification> : 'extern' STRING_LIT '{' <top_decls_opt> '}'
+                        | 'extern' STRING_LIT <declaration>
+                        | 'extern' STRING_LIT <function_definition>
                         ;
 
 # --- namespaces ----------------------------------------------------------
 
-<namespace_definition> : KW_NAMESPACE IDENT '{' <top_decls_opt> '}'
-                       | KW_NAMESPACE '{' <top_decls_opt> '}'
-                       | KW_INLINE KW_NAMESPACE IDENT '{' <top_decls_opt> '}'
-                       | KW_NAMESPACE IDENT '=' <qualified_namespace_name> ';'
+<namespace_definition> : 'namespace' IDENT '{' <top_decls_opt> '}'
+                       | 'namespace' '{' <top_decls_opt> '}'
+                       | 'inline' 'namespace' IDENT '{' <top_decls_opt> '}'
+                       | 'namespace' IDENT '=' <qualified_namespace_name> ';'
                        ;
 
 <qualified_namespace_name> : IDENT
@@ -443,19 +443,19 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
               | <typedef_declaration>
               ;
 
-<using_declaration> : KW_USING IDENT ';'
-                    | KW_USING IDENT_TYPE ';'
-                    | KW_USING <nested_name_spec> IDENT ';'
-                    | KW_USING <nested_name_spec> IDENT_TYPE ';'
-                    | KW_USING KW_NAMESPACE <qualified_namespace_name> ';'
-                    | KW_USING KW_TYPENAME <nested_name_spec> IDENT ';'
-                    | KW_USING KW_TYPENAME <nested_name_spec> IDENT_TYPE ';'
+<using_declaration> : 'using' IDENT ';'
+                    | 'using' IDENT_TYPE ';'
+                    | 'using' <nested_name_spec> IDENT ';'
+                    | 'using' <nested_name_spec> IDENT_TYPE ';'
+                    | 'using' 'namespace' <qualified_namespace_name> ';'
+                    | 'using' 'typename' <nested_name_spec> IDENT ';'
+                    | 'using' 'typename' <nested_name_spec> IDENT_TYPE ';'
                     ;
 
-<alias_declaration> : KW_USING IDENT '=' <type_id> ';'
+<alias_declaration> : 'using' IDENT '=' <type_id> ';'
                     ;
 
-<typedef_declaration> : KW_TYPEDEF <decl_specs> <init_declarator_list> ';'
+<typedef_declaration> : 'typedef' <decl_specs> <init_declarator_list> ';'
                       ;
 
 # --- declaration specifiers ----------------------------------------------
@@ -468,18 +468,18 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
             | <type_spec>
             | <function_spec>
             | <cv_qualifier>
-            | KW_CONSTEXPR | KW_CONSTEVAL | KW_CONSTINIT
-            | KW_THREAD_LOCAL
-            | KW_FRIEND
+            | 'constexpr' | 'consteval' | 'constinit'
+            | 'thread_local'
+            | 'friend'
             ;
 
-<storage_class_spec> : KW_STATIC | KW_EXTERN | KW_REGISTER | KW_MUTABLE
+<storage_class_spec> : 'static' | 'extern' | 'register' | 'mutable'
                      ;
 
-<function_spec> : KW_INLINE | KW_VIRTUAL | KW_EXPLICIT
+<function_spec> : 'inline' | 'virtual' | 'explicit'
                 ;
 
-<cv_qualifier> : KW_CONST | KW_VOLATILE
+<cv_qualifier> : 'const' | 'volatile'
                ;
 
 <type_spec> : <simple_type_spec>
@@ -497,24 +497,24 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 # To reference a type-key-prefixed class, use `typename` —
 # `typename ::Foo p;` instead of `class Foo p;`. Forward
 # declarations use the `<forward_decl>` top-level rule.
-<elaborated_type_spec> : KW_ENUM IDENT_TYPE
-                       | KW_ENUM <nested_name_spec> IDENT_TYPE
-                       | KW_TYPENAME <nested_name_spec> IDENT
-                       | KW_TYPENAME <nested_name_spec> IDENT_TYPE
+<elaborated_type_spec> : 'enum' IDENT_TYPE
+                       | 'enum' <nested_name_spec> IDENT_TYPE
+                       | 'typename' <nested_name_spec> IDENT
+                       | 'typename' <nested_name_spec> IDENT_TYPE
                        ;
 
-<simple_type_spec> : KW_VOID | KW_BOOL | KW_CHAR | KW_CHAR8_T
-                   | KW_CHAR16_T | KW_CHAR32_T | KW_WCHAR_T
-                   | KW_SHORT | KW_INT | KW_LONG
-                   | KW_SIGNED | KW_UNSIGNED
-                   | KW_FLOAT | KW_DOUBLE
-                   | KW_AUTO
+<simple_type_spec> : 'void' | 'bool' | 'char' | 'char8_t'
+                   | 'char16_t' | 'char32_t' | 'wchar_t'
+                   | 'short' | 'int' | 'long'
+                   | 'signed' | 'unsigned'
+                   | 'float' | 'double'
+                   | 'auto'
                    | <decltype_spec>
                    | <type_name>
                    ;
 
-<decltype_spec> : KW_DECLTYPE '(' <expression> ')'
-                | KW_DECLTYPE '(' KW_AUTO ')'
+<decltype_spec> : 'decltype' '(' <expression> ')'
+                | 'decltype' '(' 'auto' ')'
                 ;
 
 # A type-name reference: simple IDENT_TYPE (from the host
@@ -564,7 +564,7 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 # class definition (`class Foo { … }`) on the `{`-shifting
 # decision. In real C++ code, elaborated forms only appear
 # for already-declared types, so requiring IDENT_TYPE
-<class_key> : KW_CLASS | KW_STRUCT | KW_UNION
+<class_key> : 'class' | 'struct' | 'union'
             ;
 
 # --- init declarator list ------------------------------------------------
@@ -608,15 +608,15 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                       |
                       ;
 
-<function_qualifier> : KW_CONST | KW_VOLATILE
+<function_qualifier> : 'const' | 'volatile'
                      | '&' | '&&'
                      | <noexcept_specifier>
                      | <trailing_return_type>
-                     | KW_OVERRIDE | KW_FINAL
+                     | 'override' | 'final'
                      ;
 
-<noexcept_specifier> : KW_NOEXCEPT
-                     | KW_NOEXCEPT '(' <expression> ')'
+<noexcept_specifier> : 'noexcept'
+                     | 'noexcept' '(' <expression> ')'
                      ;
 
 <trailing_return_type> : ARROW_PTR <type_id>
@@ -637,7 +637,7 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 # in the AST builder; explicit destructor invocation is rare
 # in user code outside of templated cleanup utilities.
 <unqualified_id> : IDENT
-                 | KW_OPERATOR_KW <overloadable_operator>
+                 | 'operator' <overloadable_operator>
                  ;
 
 <overloadable_operator> : '+' | '-' | '*' | '/' | '%'
@@ -651,9 +651,9 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                         | '++' | '--'
                         | ',' | '->' | '->*'
                         | '(' ')' | '[' ']'
-                        | KW_NEW | KW_DELETE
-                        | KW_NEW '[' ']' | KW_DELETE '[' ']'
-                        | KW_CO_AWAIT
+                        | 'new' | 'delete'
+                        | 'new' '[' ']' | 'delete' '[' ']'
+                        | 'co_await'
                         ;
 
 # --- parameter declaration clause ----------------------------------------
@@ -733,8 +733,8 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 <class_head> : <class_key>
              | <class_key> IDENT <base_clause_opt>
              | <class_key> IDENT_TYPE <base_clause_opt>
-             | <class_key> IDENT KW_FINAL <base_clause_opt>
-             | <class_key> IDENT_TYPE KW_FINAL <base_clause_opt>
+             | <class_key> IDENT 'final' <base_clause_opt>
+             | <class_key> IDENT_TYPE 'final' <base_clause_opt>
              ;
 
 <base_clause_opt> : ':' <base_specifier_list>
@@ -747,12 +747,12 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 
 <base_specifier> : <type_name>
                  | <access_specifier> <type_name>
-                 | KW_VIRTUAL <type_name>
-                 | KW_VIRTUAL <access_specifier> <type_name>
-                 | <access_specifier> KW_VIRTUAL <type_name>
+                 | 'virtual' <type_name>
+                 | 'virtual' <access_specifier> <type_name>
+                 | <access_specifier> 'virtual' <type_name>
                  ;
 
-<access_specifier> : KW_PUBLIC | KW_PRIVATE | KW_PROTECTED
+<access_specifier> : 'public' | 'private' | 'protected'
                    ;
 
 <class_member_specifications_opt> : <class_member_specifications>
@@ -792,8 +792,8 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 <member_declarator> : <declarator>
                     | <declarator> '=' <conditional_expr>
                     | <declarator> '{' <initializer_clause_list> '}'
-                    | <declarator> '=' KW_DEFAULT
-                    | <declarator> '=' KW_DELETE
+                    | <declarator> '=' 'default'
+                    | <declarator> '=' 'delete'
                     ;
 
 # --- enum specifier ------------------------------------------------------
@@ -801,10 +801,10 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 <enum_specifier> : <enum_head> '{' <enumerator_list_opt> '}'
                  ;
 
-<enum_head> : KW_ENUM <enum_key_opt> <enum_head_name_opt> <enum_base_opt>
+<enum_head> : 'enum' <enum_key_opt> <enum_head_name_opt> <enum_base_opt>
             ;
 
-<enum_key_opt> : KW_CLASS | KW_STRUCT
+<enum_key_opt> : 'class' | 'struct'
                |
                ;
 
@@ -848,7 +848,7 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 # `<member_declarator>` (only valid for class members
 # anyway).
 <function_body> : <compound_statement>
-                | KW_TRY <compound_statement> <handlers>
+                | 'try' <compound_statement> <handlers>
                 ;
 
 <ctor_initializer> : ':' <mem_initializer_list>
@@ -874,7 +874,7 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
            | <handlers> <handler>
            ;
 
-<handler> : KW_CATCH '(' <exception_declaration> ')' <compound_statement>
+<handler> : 'catch' '(' <exception_declaration> ')' <compound_statement>
           ;
 
 <exception_declaration> : <decl_specs>
@@ -887,14 +887,14 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 # Template declaration with optional `requires` clause
 # (C++20). The clause constrains the template parameters
 # with a constexpr expression (typically a concept).
-<template_declaration> : KW_TEMPLATE LT_TEMPLATE <template_parameter_list> GT_TEMPLATE <template_body>
-                       | KW_TEMPLATE LT_TEMPLATE <template_parameter_list> GT_TEMPLATE <requires_clause> <template_body>
+<template_declaration> : 'template' LT_TEMPLATE <template_parameter_list> GT_TEMPLATE <template_body>
+                       | 'template' LT_TEMPLATE <template_parameter_list> GT_TEMPLATE <requires_clause> <template_body>
                        ;
 
 # A `requires` clause: `requires <constraint-expression>`.
 # Used after template parameter lists and after function
 # declarators.
-<requires_clause> : KW_REQUIRES <conditional_expr>
+<requires_clause> : 'requires' <conditional_expr>
                   ;
 
 <template_parameter_list> : <template_parameter>
@@ -905,16 +905,16 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                      | <parameter_declaration>
                      ;
 
-                <type_parameter> : KW_TYPENAME
-                 | KW_TYPENAME IDENT
-                 | KW_TYPENAME IDENT '=' <type_id>
-                 | KW_TYPENAME ELLIPSIS
-                 | KW_TYPENAME ELLIPSIS IDENT
-                 | KW_CLASS
-                 | KW_CLASS IDENT
-                 | KW_CLASS IDENT '=' <type_id>
-                 | KW_CLASS ELLIPSIS
-                 | KW_CLASS ELLIPSIS IDENT
+                <type_parameter> : 'typename'
+                 | 'typename' IDENT
+                 | 'typename' IDENT '=' <type_id>
+                 | 'typename' ELLIPSIS
+                 | 'typename' ELLIPSIS IDENT
+                 | 'class'
+                 | 'class' IDENT
+                 | 'class' IDENT '=' <type_id>
+                 | 'class' ELLIPSIS
+                 | 'class' ELLIPSIS IDENT
                  ;
 
 <template_body> : <declaration>
@@ -953,17 +953,17 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 <declaration_statement> : <declaration>
                         ;
 
-<selection_statement> : KW_IF '(' <expression> ')' <statement>
-                      | KW_IF '(' <expression> ')' <statement> KW_ELSE <statement>
-                      | KW_IF KW_CONSTEXPR '(' <expression> ')' <statement>
-                      | KW_IF KW_CONSTEXPR '(' <expression> ')' <statement> KW_ELSE <statement>
-                      | KW_SWITCH '(' <expression> ')' <statement>
+<selection_statement> : 'if' '(' <expression> ')' <statement>
+                      | 'if' '(' <expression> ')' <statement> 'else' <statement>
+                      | 'if' 'constexpr' '(' <expression> ')' <statement>
+                      | 'if' 'constexpr' '(' <expression> ')' <statement> 'else' <statement>
+                      | 'switch' '(' <expression> ')' <statement>
                       ;
 
-<iteration_statement> : KW_WHILE '(' <expression> ')' <statement>
-                      | KW_DO <statement> KW_WHILE '(' <expression> ')' ';'
-                      | KW_FOR '(' <for_init> <expression_opt> ';' <expression_opt> ')' <statement>
-                      | KW_FOR '(' <for_range_declaration> ':' <expression> ')' <statement>
+<iteration_statement> : 'while' '(' <expression> ')' <statement>
+                      | 'do' <statement> 'while' '(' <expression> ')' ';'
+                      | 'for' '(' <for_init> <expression_opt> ';' <expression_opt> ')' <statement>
+                      | 'for' '(' <for_range_declaration> ':' <expression> ')' <statement>
                       ;
 
 <for_init> : <expression> ';'
@@ -974,20 +974,20 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 <for_range_declaration> : <decl_specs> <declarator>
                         ;
 
-<jump_statement> : KW_BREAK ';'
-                 | KW_CONTINUE ';'
-                 | KW_RETURN <expression_opt> ';'
-                 | KW_RETURN <braced_init_list> ';'
-                 | KW_GOTO IDENT ';'
-                 | KW_CO_RETURN <expression_opt> ';'
+<jump_statement> : 'break' ';'
+                 | 'continue' ';'
+                 | 'return' <expression_opt> ';'
+                 | 'return' <braced_init_list> ';'
+                 | 'goto' IDENT ';'
+                 | 'co_return' <expression_opt> ';'
                  ;
 
-<try_block> : KW_TRY <compound_statement> <handlers>
+<try_block> : 'try' <compound_statement> <handlers>
             ;
 
 <labelled_statement> : IDENT ':' <statement>
-                     | KW_CASE <conditional_expr> ':' <statement>
-                     | KW_DEFAULT ':' <statement>
+                     | 'case' <conditional_expr> ':' <statement>
+                     | 'default' ':' <statement>
                      ;
 
 # --- expressions ---------------------------------------------------------
@@ -1025,8 +1025,8 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                   | <logical_or_expr> <assignment_operator> <assignment_expr>
                   ;
 
-<throw_expr> : KW_THROW
-             | KW_THROW <assignment_expr>
+<throw_expr> : 'throw'
+             | 'throw' <assignment_expr>
              ;
 
 <assignment_operator> : '=' | '+=' | '-=' | '*=' | '/=' | '%='
@@ -1102,26 +1102,26 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
              | '-' <cast_expr>
              | '!' <cast_expr>
              | '~' <cast_expr>
-             | KW_SIZEOF <unary_expr>
-             | KW_SIZEOF '(' <type_id> ')'
-             | KW_SIZEOF ELLIPSIS '(' IDENT ')'
-             | KW_ALIGNOF '(' <type_id> ')'
-             | KW_NOEXCEPT '(' <expression> ')'
+             | 'sizeof' <unary_expr>
+             | 'sizeof' '(' <type_id> ')'
+             | 'sizeof' ELLIPSIS '(' IDENT ')'
+             | 'alignof' '(' <type_id> ')'
+             | 'noexcept' '(' <expression> ')'
              | <new_expr>
              | <delete_expr>
-             | KW_CO_AWAIT <cast_expr>
-             | KW_CO_YIELD <assignment_expr>
+             | 'co_await' <cast_expr>
+             | 'co_yield' <assignment_expr>
              ;
 
-<new_expr> : KW_NEW <type_id>
-           | KW_NEW <type_id> '(' <expression_list_opt> ')'
-           | KW_NEW <type_id> <braced_init_list>
-           | KW_NEW '(' <expression_list> ')' <type_id>
-           | KW_NEW '(' <expression_list> ')' <type_id> '(' <expression_list_opt> ')'
+<new_expr> : 'new' <type_id>
+           | 'new' <type_id> '(' <expression_list_opt> ')'
+           | 'new' <type_id> <braced_init_list>
+           | 'new' '(' <expression_list> ')' <type_id>
+           | 'new' '(' <expression_list> ')' <type_id> '(' <expression_list_opt> ')'
            ;
 
-<delete_expr> : KW_DELETE <cast_expr>
-              | KW_DELETE '[' ']' <cast_expr>
+<delete_expr> : 'delete' <cast_expr>
+              | 'delete' '[' ']' <cast_expr>
               ;
 
 <postfix_expr> : <primary_expr>
@@ -1132,16 +1132,16 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                | <postfix_expr> '++'
                | <postfix_expr> '--'
                | <simple_type_spec> '(' <expression_list_opt> ')'
-               | KW_TYPEID '(' <expression> ')'
-               | KW_TYPEID '(' <type_id> ')'
-               | KW_STATIC_CAST LT_TEMPLATE <type_id> GT_TEMPLATE '(' <expression> ')'
-               | KW_DYNAMIC_CAST LT_TEMPLATE <type_id> GT_TEMPLATE '(' <expression> ')'
-               | KW_CONST_CAST LT_TEMPLATE <type_id> GT_TEMPLATE '(' <expression> ')'
-               | KW_REINTERPRET_CAST LT_TEMPLATE <type_id> GT_TEMPLATE '(' <expression> ')'
+               | 'typeid' '(' <expression> ')'
+               | 'typeid' '(' <type_id> ')'
+               | 'static_cast' LT_TEMPLATE <type_id> GT_TEMPLATE '(' <expression> ')'
+               | 'dynamic_cast' LT_TEMPLATE <type_id> GT_TEMPLATE '(' <expression> ')'
+               | 'const_cast' LT_TEMPLATE <type_id> GT_TEMPLATE '(' <expression> ')'
+               | 'reinterpret_cast' LT_TEMPLATE <type_id> GT_TEMPLATE '(' <expression> ')'
                ;
 
 <primary_expr> : <literal>
-               | KW_THIS
+               | 'this'
                | '(' <paren_expression_contents> ')'
                | <id_expression>
                | <lambda_expression>
@@ -1157,7 +1157,7 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 # The parameter form uses `<parameter_list>` (the JLS
 # param list non-terminal — also used in lambda declarators)
 # to keep state-explosion local.
-<requires_expression> : KW_REQUIRES <compound_statement>
+<requires_expression> : 'requires' <compound_statement>
                       ;
 
 # Parenthesised expression — accepts the comma-expression
@@ -1169,7 +1169,7 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 
 <literal> : INT_LIT | FLOAT_LIT
           | CHAR_LIT | STRING_LIT
-          | KW_TRUE | KW_FALSE | KW_NULLPTR
+          | 'true' | 'false' | 'nullptr'
           ;
 
 <id_expression> : <unqualified_id>
@@ -1196,8 +1196,8 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 
 <lambda_capture> : IDENT
                  | '&' IDENT
-                 | KW_THIS
-                 | '*' KW_THIS
+                 | 'this'
+                 | '*' 'this'
                  | IDENT '=' <conditional_expr>
                  | '&' IDENT '=' <conditional_expr>
                  ;

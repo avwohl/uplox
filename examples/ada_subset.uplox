@@ -139,8 +139,8 @@ PIPE       = '|'
                    |
                    ;
 
-<context_item>     : KW_WITH <name_list> SEMI
-                   | KW_USE  <name_list> SEMI
+<context_item>     : 'WITH' <name_list> SEMI
+                   | 'USE'  <name_list> SEMI
                    | <pragma>
                    ;
 
@@ -154,8 +154,8 @@ PIPE       = '|'
 # Pragmas
 # ===========================================================================
 
-<pragma>           : KW_PRAGMA IDENT SEMI
-                   | KW_PRAGMA IDENT LPAREN <pragma_args> RPAREN SEMI
+<pragma>           : 'PRAGMA' IDENT SEMI
+                   | 'PRAGMA' IDENT LPAREN <pragma_args> RPAREN SEMI
                    ;
 
 <pragma_args>      : <pragma_arg>
@@ -178,7 +178,7 @@ PIPE       = '|'
 
 <name>             : IDENT
                    | <name> DOT IDENT
-                   | <name> DOT KW_ALL
+                   | <name> DOT 'ALL'
                    | <name> LPAREN <expr_or_assoc_list> RPAREN
                    | <name> TICK IDENT
                    ;
@@ -197,7 +197,7 @@ PIPE       = '|'
 <expr_or_assoc>    : <expr>
                    | <expr> DOTDOT <expr>
                    | <name> ARROW <expr>
-                   | KW_OTHERS ARROW <expr>
+                   | 'OTHERS' ARROW <expr>
                    ;
 
 # ===========================================================================
@@ -206,10 +206,10 @@ PIPE       = '|'
 
 <subprogram_decl>  : <subprogram_spec> SEMI ;
 
-<subprogram_body>  : <subprogram_spec> KW_IS <decl_part> KW_BEGIN <stmt_seq> KW_END <opt_designator> SEMI ;
+<subprogram_body>  : <subprogram_spec> 'IS' <decl_part> 'BEGIN' <stmt_seq> 'END' <opt_designator> SEMI ;
 
-<subprogram_spec>  : KW_PROCEDURE <designator> <formal_part_opt>
-                   | KW_FUNCTION  <designator> <formal_part_opt> KW_RETURN <name>
+<subprogram_spec>  : 'PROCEDURE' <designator> <formal_part_opt>
+                   | 'FUNCTION'  <designator> <formal_part_opt> 'RETURN' <name>
                    ;
 
 <designator>       : IDENT
@@ -232,9 +232,9 @@ PIPE       = '|'
 <formal_param>     : <ident_list> COLON <mode> <name> <default_expr_opt>
                    ;
 
-<mode>             : KW_IN
-                   | KW_OUT
-                   | KW_IN KW_OUT
+<mode>             : 'IN'
+                   | 'OUT'
+                   | 'IN' 'OUT'
                    |
                    ;
 
@@ -250,15 +250,15 @@ PIPE       = '|'
 # Packages
 # ===========================================================================
 
-<package_decl>     : KW_PACKAGE IDENT KW_IS <decl_part> <private_part_opt> KW_END <opt_designator> SEMI ;
+<package_decl>     : 'PACKAGE' IDENT 'IS' <decl_part> <private_part_opt> 'END' <opt_designator> SEMI ;
 
-<private_part_opt> : KW_PRIVATE <decl_part>
+<private_part_opt> : 'PRIVATE' <decl_part>
                    |
                    ;
 
-<package_body>     : KW_PACKAGE KW_BODY IDENT KW_IS <decl_part> <init_part_opt> KW_END <opt_designator> SEMI ;
+<package_body>     : 'PACKAGE' 'BODY' IDENT 'IS' <decl_part> <init_part_opt> 'END' <opt_designator> SEMI ;
 
-<init_part_opt>    : KW_BEGIN <stmt_seq>
+<init_part_opt>    : 'BEGIN' <stmt_seq>
                    |
                    ;
 
@@ -285,21 +285,21 @@ PIPE       = '|'
                    | <number_decl>
                    ;
 
-<use_clause>       : KW_USE <name_list> SEMI
-                   | KW_USE KW_TYPE <name_list> SEMI
+<use_clause>       : 'USE' <name_list> SEMI
+                   | 'USE' 'TYPE' <name_list> SEMI
                    ;
 
 # ``Pi : constant := 3.14;`` — number declaration without explicit type.
-<number_decl>      : <ident_list> COLON KW_CONSTANT ASSIGN <expr> SEMI ;
+<number_decl>      : <ident_list> COLON 'CONSTANT' ASSIGN <expr> SEMI ;
 
 # ``X, Y : [aliased] [constant] T [:= expr];``
 <object_decl>      : <ident_list> COLON <object_qualifiers> <subtype_indication> <init_opt> SEMI
                    | <ident_list> COLON <object_qualifiers> <array_type_def> <init_opt> SEMI
                    ;
 
-<object_qualifiers> : KW_ALIASED KW_CONSTANT
-                    | KW_ALIASED
-                    | KW_CONSTANT
+<object_qualifiers> : 'ALIASED' 'CONSTANT'
+                    | 'ALIASED'
+                    | 'CONSTANT'
                     |
                     ;
 
@@ -311,17 +311,17 @@ PIPE       = '|'
 # Type & subtype declarations
 # ===========================================================================
 
-<subtype_decl>     : KW_SUBTYPE IDENT KW_IS <subtype_indication> SEMI ;
+<subtype_decl>     : 'SUBTYPE' IDENT 'IS' <subtype_indication> SEMI ;
 
-<type_decl>        : KW_TYPE IDENT KW_IS <type_definition> SEMI
-                   | KW_TYPE IDENT SEMI                              # incomplete type
+<type_decl>        : 'TYPE' IDENT 'IS' <type_definition> SEMI
+                   | 'TYPE' IDENT SEMI                              # incomplete type
                    ;
 
 <type_definition>  : <enum_type_def>
                    | <integer_type_def>
                    | <array_type_def>
                    | <record_type_def>
-                   | KW_NEW <subtype_indication>                     # derived type
+                   | 'NEW' <subtype_indication>                     # derived type
                    ;
 
 <enum_type_def>    : LPAREN <enum_literal_list> RPAREN ;
@@ -335,11 +335,11 @@ PIPE       = '|'
                    ;
 
 # ``range L .. H`` or ``mod 256``.
-<integer_type_def> : KW_RANGE <expr> DOTDOT <expr>
-                   | KW_MOD <expr>
+<integer_type_def> : 'RANGE' <expr> DOTDOT <expr>
+                   | 'MOD' <expr>
                    ;
 
-<array_type_def>   : KW_ARRAY LPAREN <index_constraint_list> RPAREN KW_OF <subtype_indication>
+<array_type_def>   : 'ARRAY' LPAREN <index_constraint_list> RPAREN 'OF' <subtype_indication>
                    ;
 
 <index_constraint_list> : <index_constraint>
@@ -347,12 +347,12 @@ PIPE       = '|'
                         ;
 
 <index_constraint> : <expr> DOTDOT <expr>
-                   | <name> KW_RANGE BOX
+                   | <name> 'RANGE' BOX
                    | <name>
                    ;
 
-<record_type_def>  : KW_RECORD <component_list> KW_END KW_RECORD
-                   | KW_NULL KW_RECORD
+<record_type_def>  : 'RECORD' <component_list> 'END' 'RECORD'
+                   | 'NULL' 'RECORD'
                    ;
 
 <component_list>   : <component_list> <component_decl>
@@ -376,7 +376,7 @@ PIPE       = '|'
 # rule. The semantic phase decides whether those parens are a call,
 # an index, or a constraint based on what the leading name resolves to.
 <subtype_indication> : <name>
-                     | <name> KW_RANGE <expr> DOTDOT <expr>
+                     | <name> 'RANGE' <expr> DOTDOT <expr>
                      ;
 
 # ===========================================================================
@@ -407,7 +407,7 @@ PIPE       = '|'
                    | <pragma>
                    ;
 
-<null_stmt>        : KW_NULL SEMI ;
+<null_stmt>        : 'NULL' SEMI ;
 
 <assignment_stmt>  : <name> ASSIGN <expr> SEMI ;
 
@@ -415,27 +415,27 @@ PIPE       = '|'
 # Sharing ``<name>`` keeps this conflict-free.
 <call_stmt>        : <name> SEMI ;
 
-<return_stmt>      : KW_RETURN SEMI
-                   | KW_RETURN <expr> SEMI
+<return_stmt>      : 'RETURN' SEMI
+                   | 'RETURN' <expr> SEMI
                    ;
 
-<if_stmt>          : KW_IF <expr> KW_THEN <stmt_seq> <elsif_part> <else_part> KW_END KW_IF SEMI ;
+<if_stmt>          : 'IF' <expr> 'THEN' <stmt_seq> <elsif_part> <else_part> 'END' 'IF' SEMI ;
 
-<elsif_part>       : <elsif_part> KW_ELSIF <expr> KW_THEN <stmt_seq>
+<elsif_part>       : <elsif_part> 'ELSIF' <expr> 'THEN' <stmt_seq>
                    |
                    ;
 
-<else_part>        : KW_ELSE <stmt_seq>
+<else_part>        : 'ELSE' <stmt_seq>
                    |
                    ;
 
-<case_stmt>        : KW_CASE <expr> KW_IS <case_alternatives> KW_END KW_CASE SEMI ;
+<case_stmt>        : 'CASE' <expr> 'IS' <case_alternatives> 'END' 'CASE' SEMI ;
 
 <case_alternatives> : <case_alternatives> <case_alternative>
                     | <case_alternative>
                     ;
 
-<case_alternative> : KW_WHEN <discrete_choice_list> ARROW <stmt_seq>
+<case_alternative> : 'WHEN' <discrete_choice_list> ARROW <stmt_seq>
                    ;
 
 <discrete_choice_list> : <discrete_choice>
@@ -444,40 +444,40 @@ PIPE       = '|'
 
 <discrete_choice>  : <expr>
                    | <expr> DOTDOT <expr>
-                   | KW_OTHERS
+                   | 'OTHERS'
                    ;
 
 # Loops: plain ``loop ... end loop;``, ``while`` and ``for`` heads.
-<loop_stmt>        : <iteration_scheme> KW_LOOP <stmt_seq> KW_END KW_LOOP <opt_loop_label> SEMI ;
+<loop_stmt>        : <iteration_scheme> 'LOOP' <stmt_seq> 'END' 'LOOP' <opt_loop_label> SEMI ;
 
-<iteration_scheme> : KW_WHILE <expr>
-                   | KW_FOR IDENT KW_IN <reverse_opt> <discrete_range>
+<iteration_scheme> : 'WHILE' <expr>
+                   | 'FOR' IDENT 'IN' <reverse_opt> <discrete_range>
                    |
                    ;
 
-<reverse_opt>      : KW_REVERSE
+<reverse_opt>      : 'REVERSE'
                    |
                    ;
 
 <discrete_range>   : <expr> DOTDOT <expr>
                    | <name>
-                   | <name> KW_RANGE <expr> DOTDOT <expr>
+                   | <name> 'RANGE' <expr> DOTDOT <expr>
                    ;
 
 <opt_loop_label>   : IDENT
                    |
                    ;
 
-<exit_stmt>        : KW_EXIT SEMI
-                   | KW_EXIT IDENT SEMI
-                   | KW_EXIT KW_WHEN <expr> SEMI
-                   | KW_EXIT IDENT KW_WHEN <expr> SEMI
+<exit_stmt>        : 'EXIT' SEMI
+                   | 'EXIT' IDENT SEMI
+                   | 'EXIT' 'WHEN' <expr> SEMI
+                   | 'EXIT' IDENT 'WHEN' <expr> SEMI
                    ;
 
-<goto_stmt>        : KW_GOTO IDENT SEMI ;
+<goto_stmt>        : 'GOTO' IDENT SEMI ;
 
-<block_stmt>       : KW_DECLARE <decl_part> KW_BEGIN <stmt_seq> KW_END SEMI
-                   | KW_BEGIN <stmt_seq> KW_END SEMI
+<block_stmt>       : 'DECLARE' <decl_part> 'BEGIN' <stmt_seq> 'END' SEMI
+                   | 'BEGIN' <stmt_seq> 'END' SEMI
                    ;
 
 # ===========================================================================
@@ -490,11 +490,11 @@ PIPE       = '|'
 # Short-circuit is two tokens, modelled as a separate alternative.
 
 <expr>             : <relation>
-                   | <expr> KW_AND <relation>
-                   | <expr> KW_AND KW_THEN <relation>
-                   | <expr> KW_OR <relation>
-                   | <expr> KW_OR KW_ELSE <relation>
-                   | <expr> KW_XOR <relation>
+                   | <expr> 'AND' <relation>
+                   | <expr> 'AND' 'THEN' <relation>
+                   | <expr> 'OR' <relation>
+                   | <expr> 'OR' 'ELSE' <relation>
+                   | <expr> 'XOR' <relation>
                    ;
 
 <relation>         : <simple_expr>
@@ -504,8 +504,8 @@ PIPE       = '|'
                    | <simple_expr> LE  <simple_expr>
                    | <simple_expr> GT  <simple_expr>
                    | <simple_expr> GE  <simple_expr>
-                   | <simple_expr> KW_IN <simple_expr> DOTDOT <simple_expr>
-                   | <simple_expr> KW_NOT KW_IN <simple_expr> DOTDOT <simple_expr>
+                   | <simple_expr> 'IN' <simple_expr> DOTDOT <simple_expr>
+                   | <simple_expr> 'NOT' 'IN' <simple_expr> DOTDOT <simple_expr>
                    ;
 
 <simple_expr>      : <term>
@@ -519,14 +519,14 @@ PIPE       = '|'
 <term>             : <factor>
                    | <term> STAR  <factor>
                    | <term> SLASH <factor>
-                   | <term> KW_MOD <factor>
-                   | <term> KW_REM <factor>
+                   | <term> 'MOD' <factor>
+                   | <term> 'REM' <factor>
                    ;
 
 <factor>           : <primary>
                    | <primary> STARSTAR <primary>
-                   | KW_NOT <primary>
-                   | KW_ABS <primary>
+                   | 'NOT' <primary>
+                   | 'ABS' <primary>
                    ;
 
 <primary>          : <name>
@@ -534,9 +534,9 @@ PIPE       = '|'
                    | REAL_LIT
                    | CHAR_LIT
                    | STRING_LIT
-                   | KW_NULL
-                   | KW_TRUE
-                   | KW_FALSE
+                   | 'NULL'
+                   | 'TRUE'
+                   | 'FALSE'
                    | LPAREN <expr> RPAREN
                    | <aggregate>
                    | <qualified_expr>

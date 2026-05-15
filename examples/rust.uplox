@@ -406,10 +406,10 @@ MACRO_BODY_TT = /[a-z]/
 
 # Path-name leaf for expression / pattern / type paths.
 <path_name> : IDENT
-            | KW_SELF
-            | KW_SUPER
-            | KW_CRATE
-            | KW_SELF_TYPE
+            | 'self'
+            | 'super'
+            | 'crate'
+            | 'Self'
             ;
 
 # Path-name leaf for simple paths (attributes / visibility / use).
@@ -432,11 +432,11 @@ MACRO_BODY_TT = /[a-z]/
 
 # --- visibility -----------------------------------------------------------
 
-<visibility_opt> : KW_PUB
-                 | KW_PUB '(' KW_CRATE ')'
-                 | KW_PUB '(' KW_SUPER ')'
-                 | KW_PUB '(' KW_SELF ')'
-                 | KW_PUB '(' KW_IN <simple_path> ')'
+<visibility_opt> : 'pub'
+                 | 'pub' '(' 'crate' ')'
+                 | 'pub' '(' 'super' ')'
+                 | 'pub' '(' 'self' ')'
+                 | 'pub' '(' 'in' <simple_path> ')'
                  |
                  ;
 
@@ -462,7 +462,7 @@ MACRO_BODY_TT = /[a-z]/
 
 # Trait alias (RFC 1733, stable). `trait Foo<T> = Bar<T> +
 # Baz` defines a shorthand for a set of trait bounds.
-<trait_alias> : <trait_qualifiers> KW_TRAIT IDENT <generics_opt> '=' <type_bound_list> <where_clause_opt> ';'
+<trait_alias> : <trait_qualifiers> 'trait' IDENT <generics_opt> '=' <type_bound_list> <where_clause_opt> ';'
               ;
 
 # `macro_rules!` definition. The body (the rule list with
@@ -470,25 +470,25 @@ MACRO_BODY_TT = /[a-z]/
 # slurp — pattern syntax is bespoke (token-tree fragments,
 # repetition metavariables, etc.) and doesn't fit any of
 # Rust's expression / item / type grammars.
-<macro_rules_definition> : KW_MACRO_RULES '!' IDENT '{' MACRO_BODY_TT '}'
-                         | KW_MACRO_RULES '!' IDENT '(' MACRO_BODY_TT ')' ';'
-                         | KW_MACRO_RULES '!' IDENT '[' MACRO_BODY_TT ']' ';'
+<macro_rules_definition> : 'macro_rules' '!' IDENT '{' MACRO_BODY_TT '}'
+                         | 'macro_rules' '!' IDENT '(' MACRO_BODY_TT ')' ';'
+                         | 'macro_rules' '!' IDENT '[' MACRO_BODY_TT ']' ';'
                          ;
 
 # ---- functions -----------------------------------------------------------
 
-<fn_item> : <fn_qualifiers> KW_FN IDENT <generics_opt> '(' <fn_params_opt> ')' <fn_return_opt> <where_clause_opt> <fn_body>
+<fn_item> : <fn_qualifiers> 'fn' IDENT <generics_opt> '(' <fn_params_opt> ')' <fn_return_opt> <where_clause_opt> <fn_body>
           ;
 
 <fn_qualifiers> : <fn_qualifiers> <fn_qualifier>
                 |
                 ;
 
-<fn_qualifier> : KW_CONST
-               | KW_ASYNC
-               | KW_UNSAFE
-               | KW_EXTERN
-               | KW_EXTERN STRING_LIT
+<fn_qualifier> : 'const'
+               | 'async'
+               | 'unsafe'
+               | 'extern'
+               | 'extern' STRING_LIT
                ;
 
 <fn_body> : <block>
@@ -512,14 +512,14 @@ MACRO_BODY_TT = /[a-z]/
 
 # Self parameter shapes: `self`, `&self`, `&mut self`, `&'a self`,
 # `&'a mut self`, `mut self`, `self: T`.
-<self_param> : KW_SELF
-             | KW_MUT KW_SELF
-             | '&' KW_SELF
-             | '&' KW_MUT KW_SELF
-             | '&' LIFETIME KW_SELF
-             | '&' LIFETIME KW_MUT KW_SELF
-             | KW_SELF ':' <type>
-             | KW_MUT KW_SELF ':' <type>
+<self_param> : 'self'
+             | 'mut' 'self'
+             | '&' 'self'
+             | '&' 'mut' 'self'
+             | '&' LIFETIME 'self'
+             | '&' LIFETIME 'mut' 'self'
+             | 'self' ':' <type>
+             | 'mut' 'self' ':' <type>
              ;
 
 <fn_param_list> : <fn_param>
@@ -531,7 +531,7 @@ MACRO_BODY_TT = /[a-z]/
 
 # ---- structs -------------------------------------------------------------
 
-<struct_item> : KW_STRUCT IDENT <generics_opt> <where_clause_opt> <struct_tail>
+<struct_item> : 'struct' IDENT <generics_opt> <where_clause_opt> <struct_tail>
               ;
 
 # Three shapes: braced (`struct Foo { x: T }`), tuple
@@ -567,7 +567,7 @@ MACRO_BODY_TT = /[a-z]/
 
 # ---- enums ---------------------------------------------------------------
 
-<enum_item> : KW_ENUM IDENT <generics_opt> <where_clause_opt> '{' <enum_variants_opt> '}'
+<enum_item> : 'enum' IDENT <generics_opt> <where_clause_opt> '{' <enum_variants_opt> '}'
             ;
 
 <enum_variants_opt> : <enum_variants>
@@ -589,15 +589,15 @@ MACRO_BODY_TT = /[a-z]/
 
 # ---- unions --------------------------------------------------------------
 
-<union_item> : KW_UNION IDENT <generics_opt> <where_clause_opt> '{' <struct_fields_opt> '}'
+<union_item> : 'union' IDENT <generics_opt> <where_clause_opt> '{' <struct_fields_opt> '}'
              ;
 
 # ---- traits --------------------------------------------------------------
 
-<trait_item> : <trait_qualifiers> KW_TRAIT IDENT <generics_opt> <trait_supertraits_opt> <where_clause_opt> '{' <trait_members> '}'
+<trait_item> : <trait_qualifiers> 'trait' IDENT <generics_opt> <trait_supertraits_opt> <where_clause_opt> '{' <trait_members> '}'
              ;
 
-<trait_qualifiers> : KW_UNSAFE
+<trait_qualifiers> : 'unsafe'
                    |
                    ;
 
@@ -620,16 +620,16 @@ MACRO_BODY_TT = /[a-z]/
 
 # ---- impl blocks ---------------------------------------------------------
 
-<impl_item> : <impl_qualifiers> KW_IMPL <generics_opt> <impl_subject> <where_clause_opt> '{' <impl_members> '}'
+<impl_item> : <impl_qualifiers> 'impl' <generics_opt> <impl_subject> <where_clause_opt> '{' <impl_members> '}'
             ;
 
-<impl_qualifiers> : KW_UNSAFE
+<impl_qualifiers> : 'unsafe'
                   |
                   ;
 
 # Inherent impl `impl T { … }` versus trait impl `impl Trait for T { … }`.
 <impl_subject> : <type>
-               | <type> KW_FOR <type>
+               | <type> 'for' <type>
                ;
 
 <impl_members> : <impl_members> <impl_member>
@@ -647,12 +647,12 @@ MACRO_BODY_TT = /[a-z]/
 
 # ---- use / mod / type alias / const / static -----------------------------
 
-<use_item> : KW_USE <use_tree> ';'
+<use_item> : 'use' <use_tree> ';'
            ;
 
 <use_tree> : <simple_path>
-           | <simple_path> KW_AS IDENT
-           | <simple_path> KW_AS '_'
+           | <simple_path> 'as' IDENT
+           | <simple_path> 'as' '_'
            | <simple_path> '::' '*'
            | <simple_path> '::' '{' <use_tree_list_opt> '}'
            | '::' '{' <use_tree_list_opt> '}'
@@ -668,30 +668,30 @@ MACRO_BODY_TT = /[a-z]/
                 | <use_tree_list> ',' <use_tree>
                 ;
 
-<mod_item> : KW_MOD IDENT ';'
-           | KW_MOD IDENT '{' <inner_attrs_opt> <items> '}'
+<mod_item> : 'mod' IDENT ';'
+           | 'mod' IDENT '{' <inner_attrs_opt> <items> '}'
            ;
 
-<type_alias> : KW_TYPE IDENT <generics_opt> <where_clause_opt> '=' <type> ';'
-             | KW_TYPE IDENT <generics_opt> <where_clause_opt> ';'
+<type_alias> : 'type' IDENT <generics_opt> <where_clause_opt> '=' <type> ';'
+             | 'type' IDENT <generics_opt> <where_clause_opt> ';'
              ;
 
-<const_item> : KW_CONST IDENT ':' <type> '=' <expr> ';'
-             | KW_CONST IDENT ':' <type> ';'
-             | KW_CONST '_' ':' <type> '=' <expr> ';'
+<const_item> : 'const' IDENT ':' <type> '=' <expr> ';'
+             | 'const' IDENT ':' <type> ';'
+             | 'const' '_' ':' <type> '=' <expr> ';'
              ;
 
-<static_item> : KW_STATIC <static_mut_opt> IDENT ':' <type> '=' <expr> ';'
-              | KW_STATIC <static_mut_opt> IDENT ':' <type> ';'
+<static_item> : 'static' <static_mut_opt> IDENT ':' <type> '=' <expr> ';'
+              | 'static' <static_mut_opt> IDENT ':' <type> ';'
               ;
 
-<static_mut_opt> : KW_MUT
+<static_mut_opt> : 'mut'
                  |
                  ;
 
 # ---- extern blocks / extern crate ----------------------------------------
 
-<extern_block> : KW_EXTERN <abi_opt> '{' <inner_attrs_opt> <extern_items> '}'
+<extern_block> : 'extern' <abi_opt> '{' <inner_attrs_opt> <extern_items> '}'
                ;
 
 <abi_opt> : STRING_LIT
@@ -711,9 +711,9 @@ MACRO_BODY_TT = /[a-z]/
                    | <macro_invocation_item>
                    ;
 
-<extern_crate> : KW_EXTERN KW_CRATE IDENT ';'
-               | KW_EXTERN KW_CRATE IDENT KW_AS IDENT ';'
-               | KW_EXTERN KW_CRATE IDENT KW_AS '_' ';'
+<extern_crate> : 'extern' 'crate' IDENT ';'
+               | 'extern' 'crate' IDENT 'as' IDENT ';'
+               | 'extern' 'crate' IDENT 'as' '_' ';'
                ;
 
 # ---- macro invocations as items ------------------------------------------
@@ -735,7 +735,7 @@ MACRO_BODY_TT = /[a-z]/
 
 <generic_param> : <outer_attrs_opt> LIFETIME <lifetime_bounds_opt>
                 | <outer_attrs_opt> IDENT <type_param_bounds_opt> <type_param_default_opt>
-                | <outer_attrs_opt> KW_CONST IDENT ':' <type> <const_param_default_opt>
+                | <outer_attrs_opt> 'const' IDENT ':' <type> <const_param_default_opt>
                 ;
 
 <lifetime_bounds_opt> : ':' <lifetime_bound_list>
@@ -758,7 +758,7 @@ MACRO_BODY_TT = /[a-z]/
                           |
                           ;
 
-<where_clause_opt> : KW_WHERE <where_predicates>
+<where_clause_opt> : 'where' <where_predicates>
                    |
                    ;
 
@@ -784,7 +784,7 @@ MACRO_BODY_TT = /[a-z]/
 
 <trait_bound> : <type_path>
               | '?' <type_path>
-              | KW_FOR '<' <generic_params> '>' <type_path>
+              | 'for' '<' <generic_params> '>' <type_path>
               ;
 
 # --- types ----------------------------------------------------------------
@@ -794,10 +794,10 @@ MACRO_BODY_TT = /[a-z]/
        | <trait_object_type>
        ;
 
-<impl_trait_type> : KW_IMPL <type_bound_list>
+<impl_trait_type> : 'impl' <type_bound_list>
                   ;
 
-<trait_object_type> : KW_DYN <type_bound_list>
+<trait_object_type> : 'dyn' <type_bound_list>
                     ;
 
 <type_no_bounds> : <type_path>
@@ -843,13 +843,13 @@ MACRO_BODY_TT = /[a-z]/
            ;
 
 <reference_type> : '&' <type>
-                 | '&' KW_MUT <type>
+                 | '&' 'mut' <type>
                  | '&' LIFETIME <type>
-                 | '&' LIFETIME KW_MUT <type>
+                 | '&' LIFETIME 'mut' <type>
                  ;
 
-<raw_pointer_type> : '*' KW_CONST <type>
-                   | '*' KW_MUT <type>
+<raw_pointer_type> : '*' 'const' <type>
+                   | '*' 'mut' <type>
                    ;
 
 # Array `[T; N]` or slice `[T]`.
@@ -870,17 +870,17 @@ MACRO_BODY_TT = /[a-z]/
                  | <type_list_tail> ',' <type>
                  ;
 
-<fn_pointer_type> : <fn_pointer_qualifiers> KW_FN '(' <fn_ptr_params_opt> ')' <fn_return_opt>
+<fn_pointer_type> : <fn_pointer_qualifiers> 'fn' '(' <fn_ptr_params_opt> ')' <fn_return_opt>
                   ;
 
 <fn_pointer_qualifiers> : <fn_pointer_qualifiers> <fn_pointer_qualifier>
                         |
                         ;
 
-<fn_pointer_qualifier> : KW_UNSAFE
-                       | KW_EXTERN
-                       | KW_EXTERN STRING_LIT
-                       | KW_FOR '<' <generic_params> '>'
+<fn_pointer_qualifier> : 'unsafe'
+                       | 'extern'
+                       | 'extern' STRING_LIT
+                       | 'for' '<' <generic_params> '>'
                        ;
 
 <fn_ptr_params_opt> : <fn_ptr_param_list>
@@ -939,9 +939,9 @@ MACRO_BODY_TT = /[a-z]/
                         | <modifier_prefix> <path_in_expression> <pattern_path_tail>
                         ;
 
-<modifier_prefix> : KW_REF
-                  | KW_MUT
-                  | KW_REF KW_MUT
+<modifier_prefix> : 'ref'
+                  | 'mut'
+                  | 'ref' 'mut'
                   ;
 
 <pattern_path_tail> : '@' <pattern_no_top_alt>
@@ -958,8 +958,8 @@ MACRO_BODY_TT = /[a-z]/
                   | BYTE_LIT
                   | BYTE_STR_LIT
                   | RAW_STR_LIT
-                  | KW_TRUE
-                  | KW_FALSE
+                  | 'true'
+                  | 'false'
                   | '-' INT_LIT
                   | '-' FLOAT_LIT
                   | '-' FLOAT_EXP_LIT
@@ -970,7 +970,7 @@ MACRO_BODY_TT = /[a-z]/
 <rest_pattern>     : '..' ;
 
 <reference_pattern> : '&' <pattern_no_top_alt>
-                    | '&' KW_MUT <pattern_no_top_alt>
+                    | '&' 'mut' <pattern_no_top_alt>
                     | '&&' <pattern_no_top_alt>
                     ;
 
@@ -993,9 +993,9 @@ MACRO_BODY_TT = /[a-z]/
 <struct_pat_field> : <outer_attrs_opt> IDENT ':' <pattern>
                    | <outer_attrs_opt> INT_LIT ':' <pattern>
                    | <outer_attrs_opt> IDENT
-                   | <outer_attrs_opt> KW_REF IDENT
-                   | <outer_attrs_opt> KW_MUT IDENT
-                   | <outer_attrs_opt> KW_REF KW_MUT IDENT
+                   | <outer_attrs_opt> 'ref' IDENT
+                   | <outer_attrs_opt> 'mut' IDENT
+                   | <outer_attrs_opt> 'ref' 'mut' IDENT
                    ;
 
 <tuple_pattern> : '(' ')'
@@ -1083,8 +1083,8 @@ MACRO_BODY_TT = /[a-z]/
        | ';'
        ;
 
-<let_stmt> : <outer_attrs_opt> KW_LET <pattern> <let_type_opt> <let_init_opt> ';'
-           | <outer_attrs_opt> KW_LET <pattern> <let_type_opt> '=' <expr> KW_ELSE <block> ';'
+<let_stmt> : <outer_attrs_opt> 'let' <pattern> <let_type_opt> <let_init_opt> ';'
+           | <outer_attrs_opt> 'let' <pattern> <let_type_opt> '=' <expr> 'else' <block> ';'
            ;
 
 <let_type_opt> : ':' <type>
@@ -1212,7 +1212,7 @@ MACRO_BODY_TT = /[a-z]/
                       ;
 
 <cast_expr> : <unary_expr>
-            | <cast_expr> KW_AS <type_no_bounds>
+            | <cast_expr> 'as' <type_no_bounds>
             ;
 
 # Unary operators: `-`, `!` (logical not / bitwise not), `*`
@@ -1222,9 +1222,9 @@ MACRO_BODY_TT = /[a-z]/
              | '!' <unary_expr>
              | '*' <unary_expr>
              | '&' <unary_expr>
-             | '&' KW_MUT <unary_expr>
+             | '&' 'mut' <unary_expr>
              | '&&' <unary_expr>
-             | '&&' KW_MUT <unary_expr>
+             | '&&' 'mut' <unary_expr>
              ;
 
 # Postfix chain: method call, field access, tuple index, indexing,
@@ -1233,7 +1233,7 @@ MACRO_BODY_TT = /[a-z]/
                | <postfix_expr> '.' IDENT
                | <postfix_expr> '.' IDENT '::<' <type_args> '>'
                | <postfix_expr> '.' INT_LIT
-               | <postfix_expr> '.' KW_AWAIT
+               | <postfix_expr> '.' 'await'
                | <postfix_expr> '?'
                | <postfix_expr> '[' <expr> ']'
                | <postfix_expr> '(' <call_args_opt> ')'
@@ -1272,8 +1272,8 @@ MACRO_BODY_TT = /[a-z]/
                | BYTE_LIT
                | BYTE_STR_LIT
                | RAW_STR_LIT
-               | KW_TRUE
-               | KW_FALSE
+               | 'true'
+               | 'false'
                ;
 
 <path_expr> : <path_in_expression>
@@ -1323,12 +1323,12 @@ MACRO_BODY_TT = /[a-z]/
 # LR(1) conflict against the bare `|` opener.
 <closure_expr> : '|' <closure_params_opt> '|' <closure_return_opt> <closure_body>
                | '||' <closure_return_opt> <closure_body>
-               | KW_MOVE '|' <closure_params_opt> '|' <closure_return_opt> <closure_body>
-               | KW_MOVE '||' <closure_return_opt> <closure_body>
-               | KW_ASYNC '|' <closure_params_opt> '|' <closure_return_opt> <closure_body>
-               | KW_ASYNC '||' <closure_return_opt> <closure_body>
-               | KW_ASYNC KW_MOVE '|' <closure_params_opt> '|' <closure_return_opt> <closure_body>
-               | KW_ASYNC KW_MOVE '||' <closure_return_opt> <closure_body>
+               | 'move' '|' <closure_params_opt> '|' <closure_return_opt> <closure_body>
+               | 'move' '||' <closure_return_opt> <closure_body>
+               | 'async' '|' <closure_params_opt> '|' <closure_return_opt> <closure_body>
+               | 'async' '||' <closure_return_opt> <closure_body>
+               | 'async' 'move' '|' <closure_params_opt> '|' <closure_return_opt> <closure_body>
+               | 'async' 'move' '||' <closure_return_opt> <closure_body>
                ;
 
 <closure_params_opt> : <closure_params>
@@ -1354,13 +1354,13 @@ MACRO_BODY_TT = /[a-z]/
 <closure_body> : <expr>
                ;
 
-<return_expr> : KW_RETURN <expr_opt>
+<return_expr> : 'return' <expr_opt>
               ;
 
-<break_expr> : KW_BREAK <break_label_opt> <expr_opt>
+<break_expr> : 'break' <break_label_opt> <expr_opt>
              ;
 
-<continue_expr> : KW_CONTINUE <break_label_opt>
+<continue_expr> : 'continue' <break_label_opt>
                 ;
 
 <break_label_opt> : LIFETIME
@@ -1388,31 +1388,31 @@ MACRO_BODY_TT = /[a-z]/
 <block_expr> : <block>
              ;
 
-<unsafe_block_expr> : KW_UNSAFE <block>
+<unsafe_block_expr> : 'unsafe' <block>
                     ;
 
-<async_block_expr> : KW_ASYNC <block>
-                   | KW_ASYNC KW_MOVE <block>
+<async_block_expr> : 'async' <block>
+                   | 'async' 'move' <block>
                    ;
 
-<loop_expr> : <label_opt> KW_LOOP <block>
+<loop_expr> : <label_opt> 'loop' <block>
             ;
 
 <label_opt> : LIFETIME ':'
             |
             ;
 
-<while_expr> : <label_opt> KW_WHILE <expr_no_struct> <block>
+<while_expr> : <label_opt> 'while' <expr_no_struct> <block>
              ;
 
-<while_let_expr> : <label_opt> KW_WHILE KW_LET <pattern> '=' <expr_no_struct> <block>
+<while_let_expr> : <label_opt> 'while' 'let' <pattern> '=' <expr_no_struct> <block>
                  ;
 
-<for_expr> : <label_opt> KW_FOR <pattern> KW_IN <expr_no_struct> <block>
+<for_expr> : <label_opt> 'for' <pattern> 'in' <expr_no_struct> <block>
            ;
 
-<if_expr> : KW_IF <expr_no_struct> <block>
-          | KW_IF <expr_no_struct> <block> KW_ELSE <else_tail>
+<if_expr> : 'if' <expr_no_struct> <block>
+          | 'if' <expr_no_struct> <block> 'else' <else_tail>
           ;
 
 <else_tail> : <block>
@@ -1420,11 +1420,11 @@ MACRO_BODY_TT = /[a-z]/
             | <if_let_expr>
             ;
 
-<if_let_expr> : KW_IF KW_LET <pattern> '=' <expr_no_struct> <block>
-              | KW_IF KW_LET <pattern> '=' <expr_no_struct> <block> KW_ELSE <else_tail>
+<if_let_expr> : 'if' 'let' <pattern> '=' <expr_no_struct> <block>
+              | 'if' 'let' <pattern> '=' <expr_no_struct> <block> 'else' <else_tail>
               ;
 
-<match_expr> : KW_MATCH <expr_no_struct> '{' <inner_attrs_opt> <match_arms_opt> '}'
+<match_expr> : 'match' <expr_no_struct> '{' <inner_attrs_opt> <match_arms_opt> '}'
              ;
 
 <match_arms_opt> : <match_arms>
@@ -1438,7 +1438,7 @@ MACRO_BODY_TT = /[a-z]/
 <match_arm> : <outer_attrs_opt> <pattern> <match_arm_guard_opt> '=>' <match_arm_body>
             ;
 
-<match_arm_guard_opt> : KW_IF <expr>
+<match_arm_guard_opt> : 'if' <expr>
                       |
                       ;
 
@@ -1537,7 +1537,7 @@ MACRO_BODY_TT = /[a-z]/
                      ;
 
 <expr_no_struct_cast> : <expr_no_struct_unary>
-                      | <expr_no_struct_cast> KW_AS <type_no_bounds>
+                      | <expr_no_struct_cast> 'as' <type_no_bounds>
                       ;
 
 <expr_no_struct_unary> : <expr_no_struct_postfix>
@@ -1545,16 +1545,16 @@ MACRO_BODY_TT = /[a-z]/
                        | '!' <expr_no_struct_unary>
                        | '*' <expr_no_struct_unary>
                        | '&' <expr_no_struct_unary>
-                       | '&' KW_MUT <expr_no_struct_unary>
+                       | '&' 'mut' <expr_no_struct_unary>
                        | '&&' <expr_no_struct_unary>
-                       | '&&' KW_MUT <expr_no_struct_unary>
+                       | '&&' 'mut' <expr_no_struct_unary>
                        ;
 
 <expr_no_struct_postfix> : <atom_no_struct>
                          | <expr_no_struct_postfix> '.' IDENT
                          | <expr_no_struct_postfix> '.' IDENT '::<' <type_args> '>'
                          | <expr_no_struct_postfix> '.' INT_LIT
-                         | <expr_no_struct_postfix> '.' KW_AWAIT
+                         | <expr_no_struct_postfix> '.' 'await'
                          | <expr_no_struct_postfix> '?'
                          | <expr_no_struct_postfix> '[' <expr> ']'
                          | <expr_no_struct_postfix> '(' <call_args_opt> ')'

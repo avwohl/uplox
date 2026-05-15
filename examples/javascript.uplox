@@ -350,7 +350,7 @@ AT          = '@'
 <empty_stmt> : ';'
              ;
 
-<debugger_stmt> : KW_DEBUGGER ';'
+<debugger_stmt> : 'debugger' ';'
                 ;
 
 # --- variable declarations -----------------------------------------------
@@ -361,9 +361,9 @@ AT          = '@'
 <variable_decl> : <var_kind> <binding_list>
                 ;
 
-<var_kind> : KW_VAR
-           | KW_LET
-           | KW_CONST
+<var_kind> : 'var'
+           | 'let'
+           | 'const'
            ;
 
 <binding_list> : <binding>
@@ -451,11 +451,11 @@ AT          = '@'
                         | INT_LIT '(' <parameter_list_opt> ')' <block>
                         | FLOAT_LIT '(' <parameter_list_opt> ')' <block>
                         | '[' <assignment_expr> ']' '(' <parameter_list_opt> ')' <block>
-                        | KW_GET <method_key> '(' ')' <block>
-                        | KW_SET <method_key> '(' <parameter> ')' <block>
-                        | KW_ASYNC <method_key> '(' <parameter_list_opt> ')' <block>
+                        | 'get' <method_key> '(' ')' <block>
+                        | 'set' <method_key> '(' <parameter> ')' <block>
+                        | 'async' <method_key> '(' <parameter_list_opt> ')' <block>
                         | '*' <method_key> '(' <parameter_list_opt> ')' <block>
-                        | KW_ASYNC '*' <method_key> '(' <parameter_list_opt> ')' <block>
+                        | 'async' '*' <method_key> '(' <parameter_list_opt> ')' <block>
                         | '...' <assignment_expr>
                         ;
 
@@ -521,8 +521,8 @@ AT          = '@'
                   | <relational_expr> '>'  <shift_expr>
                   | <relational_expr> '<=' <shift_expr>
                   | <relational_expr> '>=' <shift_expr>
-                  | <relational_expr> KW_IN <shift_expr>
-                  | <relational_expr> KW_INSTANCEOF <shift_expr>
+                  | <relational_expr> 'in' <shift_expr>
+                  | <relational_expr> 'instanceof' <shift_expr>
                   ;
 
 <shift_expr> : <additive_expr>
@@ -548,14 +548,14 @@ AT          = '@'
                       ;
 
 <unary_expr> : <update_expr>
-             | KW_DELETE <unary_expr>
-             | KW_VOID <unary_expr>
-             | KW_TYPEOF <unary_expr>
+             | 'delete' <unary_expr>
+             | 'void' <unary_expr>
+             | 'typeof' <unary_expr>
              | '+' <unary_expr>
              | '-' <unary_expr>
              | '~' <unary_expr>
              | '!' <unary_expr>
-             | KW_AWAIT <unary_expr>
+             | 'await' <unary_expr>
              ;
 
 <update_expr> : <lhs_expr>
@@ -572,25 +572,25 @@ AT          = '@'
            ;
 
 <new_expr> : <member_expr>
-           | KW_NEW <new_expr>
+           | 'new' <new_expr>
            ;
 
 <member_expr> : <primary_expr>
               | <member_expr> '.' IDENT
               | <member_expr> '.' PRIVATE_IDENT
               | <member_expr> '[' <expression> ']'
-              | KW_NEW <member_expr> '(' <arguments_opt> ')'
+              | 'new' <member_expr> '(' <arguments_opt> ')'
               | <super_property>
               ;
 
-<super_property> : KW_SUPER '.' IDENT
-                 | KW_SUPER '[' <expression> ']'
+<super_property> : 'super' '.' IDENT
+                 | 'super' '[' <expression> ']'
                  ;
 
 # Call expressions. Optional-chaining `?.` segments fold into
 # the suffix chain.
 <call_expr> : <member_expr> '(' <arguments_opt> ')'
-            | KW_SUPER '(' <arguments_opt> ')'
+            | 'super' '(' <arguments_opt> ')'
             | <call_expr> '(' <arguments_opt> ')'
             | <call_expr> '.' IDENT
             | <call_expr> '.' PRIVATE_IDENT
@@ -622,7 +622,7 @@ AT          = '@'
 
 # --- primary expressions / atoms -----------------------------------------
 
-<primary_expr> : KW_THIS
+<primary_expr> : 'this'
                | IDENT
                | <literal>
                | <array_or_pattern>
@@ -633,10 +633,10 @@ AT          = '@'
                | <template_literal>
                ;
 
-<literal> : KW_NULL
-          | KW_UNDEFINED
-          | KW_TRUE
-          | KW_FALSE
+<literal> : 'null'
+          | 'undefined'
+          | 'true'
+          | 'false'
           | INT_LIT
           | FLOAT_LIT
           | STRING_LIT
@@ -659,11 +659,11 @@ AT          = '@'
 # shared form would reduce-reduce against the matching
 # expression-context reductions (`literal -> STRING_LIT`, etc.).
 <method_def> : <method_key> '(' <parameter_list_opt> ')' <block>
-             | KW_GET <method_key> '(' ')' <block>
-             | KW_SET <method_key> '(' <parameter> ')' <block>
-             | KW_ASYNC <method_key> '(' <parameter_list_opt> ')' <block>
+             | 'get' <method_key> '(' ')' <block>
+             | 'set' <method_key> '(' <parameter> ')' <block>
+             | 'async' <method_key> '(' <parameter_list_opt> ')' <block>
              | '*' <method_key> '(' <parameter_list_opt> ')' <block>
-             | KW_ASYNC '*' <method_key> '(' <parameter_list_opt> ')' <block>
+             | 'async' '*' <method_key> '(' <parameter_list_opt> ')' <block>
              ;
 
 # Method-key sub-non-terminal lives ONLY under method_def; it
@@ -686,10 +686,10 @@ AT          = '@'
 # non-terminal so LR(1) doesn't have to choose between two
 # productions with identical RHS; the AST builder decides
 # declaration vs expression by parent context.
-<hoisted_function> : KW_FUNCTION IDENT '(' <parameter_list_opt> ')' <block>
-                   | KW_FUNCTION '*' IDENT '(' <parameter_list_opt> ')' <block>
-                   | KW_ASYNC KW_FUNCTION IDENT '(' <parameter_list_opt> ')' <block>
-                   | KW_ASYNC KW_FUNCTION '*' IDENT '(' <parameter_list_opt> ')' <block>
+<hoisted_function> : 'function' IDENT '(' <parameter_list_opt> ')' <block>
+                   | 'function' '*' IDENT '(' <parameter_list_opt> ')' <block>
+                   | 'async' 'function' IDENT '(' <parameter_list_opt> ')' <block>
+                   | 'async' 'function' '*' IDENT '(' <parameter_list_opt> ')' <block>
                    ;
 
 # Anonymous function forms — only valid in expression
@@ -702,10 +702,10 @@ AT          = '@'
 # function expressions parse via `<hoisted_function>` in
 # expression positions where the parent context already
 # disambiguates.
-<function_expr> : KW_FUNCTION '(' <parameter_list_opt> ')' <block>
-                | KW_FUNCTION '*' '(' <parameter_list_opt> ')' <block>
-                | KW_ASYNC KW_FUNCTION '(' <parameter_list_opt> ')' <block>
-                | KW_ASYNC KW_FUNCTION '*' '(' <parameter_list_opt> ')' <block>
+<function_expr> : 'function' '(' <parameter_list_opt> ')' <block>
+                | 'function' '*' '(' <parameter_list_opt> ')' <block>
+                | 'async' 'function' '(' <parameter_list_opt> ')' <block>
+                | 'async' 'function' '*' '(' <parameter_list_opt> ')' <block>
                 ;
 
 <parameter_list_opt> : <parameter_list>
@@ -741,9 +741,9 @@ AT          = '@'
 # disambiguates after-the-fact based on `=>` presence and
 # re-interprets the args as params if needed.
 <arrow_function> : IDENT '=>' <arrow_body>
-                 | KW_ASYNC IDENT '=>' <arrow_body>
+                 | 'async' IDENT '=>' <arrow_body>
                  | <paren_or_arrow_head> '=>' <arrow_body>
-                 | KW_ASYNC <paren_or_arrow_head> '=>' <arrow_body>
+                 | 'async' <paren_or_arrow_head> '=>' <arrow_body>
                  ;
 
 # Paren-wrapped argument / parameter list. Same shape whether
@@ -843,8 +843,8 @@ AT          = '@'
                            | <relational_expr_no_brace> '>'  <shift_expr>
                            | <relational_expr_no_brace> '<=' <shift_expr>
                            | <relational_expr_no_brace> '>=' <shift_expr>
-                           | <relational_expr_no_brace> KW_IN <shift_expr>
-                           | <relational_expr_no_brace> KW_INSTANCEOF <shift_expr>
+                           | <relational_expr_no_brace> 'in' <shift_expr>
+                           | <relational_expr_no_brace> 'instanceof' <shift_expr>
                            ;
 
 <shift_expr_no_brace> : <additive_expr_no_brace>
@@ -874,14 +874,14 @@ AT          = '@'
 # alternatives reach the full (brace-permitting) `<unary_expr>`
 # subtree because they've already consumed a non-`{` token.
 <unary_expr_no_brace> : <update_expr_no_brace>
-                      | KW_DELETE <unary_expr>
-                      | KW_VOID <unary_expr>
-                      | KW_TYPEOF <unary_expr>
+                      | 'delete' <unary_expr>
+                      | 'void' <unary_expr>
+                      | 'typeof' <unary_expr>
                       | '+' <unary_expr>
                       | '-' <unary_expr>
                       | '~' <unary_expr>
                       | '!' <unary_expr>
-                      | KW_AWAIT <unary_expr>
+                      | 'await' <unary_expr>
                       ;
 
 <update_expr_no_brace> : <lhs_expr_no_brace>
@@ -896,7 +896,7 @@ AT          = '@'
                     ;
 
 <new_expr_no_brace> : <member_expr_no_brace>
-                    | KW_NEW <new_expr>
+                    | 'new' <new_expr>
                     ;
 
 # Member-expr suffix chain: the LEAD `<primary_expr>` is
@@ -907,12 +907,12 @@ AT          = '@'
                        | <member_expr_no_brace> '.' IDENT
                        | <member_expr_no_brace> '.' PRIVATE_IDENT
                        | <member_expr_no_brace> '[' <expression> ']'
-                       | KW_NEW <member_expr> '(' <arguments_opt> ')'
+                       | 'new' <member_expr> '(' <arguments_opt> ')'
                        | <super_property>
                        ;
 
 <call_expr_no_brace> : <member_expr_no_brace> '(' <arguments_opt> ')'
-                     | KW_SUPER '(' <arguments_opt> ')'
+                     | 'super' '(' <arguments_opt> ')'
                      | <call_expr_no_brace> '(' <arguments_opt> ')'
                      | <call_expr_no_brace> '.' IDENT
                      | <call_expr_no_brace> '.' PRIVATE_IDENT
@@ -934,7 +934,7 @@ AT          = '@'
 # `<primary_expr>`. Every other primary form starts with a
 # non-`{` token, so all the upstream `_no_brace` rungs can
 # safely terminate here.
-<primary_expr_no_brace> : KW_THIS
+<primary_expr_no_brace> : 'this'
                         | IDENT
                         | <literal>
                         | <array_or_pattern>
@@ -946,9 +946,9 @@ AT          = '@'
 
 # --- yield expression ----------------------------------------------------
 
-<yield_expr> : KW_YIELD
-             | KW_YIELD <assignment_expr>
-             | KW_YIELD '*' <assignment_expr>
+<yield_expr> : 'yield'
+             | 'yield' <assignment_expr>
+             | 'yield' '*' <assignment_expr>
              ;
 
 # --- classes -------------------------------------------------------------
@@ -958,17 +958,17 @@ AT          = '@'
 # expression-level named-class. The anonymous expression form
 # `class extends Bar {}` is a separate production used only via
 # <class_expr>.
-<hoisted_class> : KW_CLASS IDENT <class_heritage_opt> '{' <class_body> '}'
-                | <decorator_list> KW_CLASS IDENT <class_heritage_opt> '{' <class_body> '}'
+<hoisted_class> : 'class' IDENT <class_heritage_opt> '{' <class_body> '}'
+                | <decorator_list> 'class' IDENT <class_heritage_opt> '{' <class_body> '}'
                 ;
 
 # Anonymous class expression — same separation rationale as
 # function expressions. Use a hoisted declaration followed by
 # rename if you need a named class in expression position.
-<class_expr> : KW_CLASS <class_heritage_opt> '{' <class_body> '}'
+<class_expr> : 'class' <class_heritage_opt> '{' <class_body> '}'
              ;
 
-<class_heritage_opt> : KW_EXTENDS <lhs_expr>
+<class_heritage_opt> : 'extends' <lhs_expr>
                      |
                      ;
 
@@ -981,13 +981,13 @@ AT          = '@'
                      ;
 
 <class_element> : <method_def>
-                | KW_STATIC <method_def>
+                | 'static' <method_def>
                 | <field_def> ';'
-                | KW_STATIC <field_def> ';'
+                | 'static' <field_def> ';'
                 | <decorator_list> <method_def>
-                | <decorator_list> KW_STATIC <method_def>
+                | <decorator_list> 'static' <method_def>
                 | <decorator_list> <field_def> ';'
-                | <decorator_list> KW_STATIC <field_def> ';'
+                | <decorator_list> 'static' <field_def> ';'
                 | ';'
                 ;
 
@@ -1027,8 +1027,8 @@ AT          = '@'
 <expression_stmt> : <expression_no_brace> ';'
                   ;
 
-<if_stmt> : KW_IF '(' <expression> ')' <statement>
-          | KW_IF '(' <expression> ')' <statement> KW_ELSE <statement>
+<if_stmt> : 'if' '(' <expression> ')' <statement>
+          | 'if' '(' <expression> ')' <statement> 'else' <statement>
           ;
 
 <iteration_stmt> : <while_stmt>
@@ -1038,16 +1038,16 @@ AT          = '@'
                  | <for_of_stmt>
                  ;
 
-<while_stmt> : KW_WHILE '(' <expression> ')' <statement>
+<while_stmt> : 'while' '(' <expression> ')' <statement>
              ;
 
-<do_while_stmt> : KW_DO <statement> KW_WHILE '(' <expression> ')' ';'
+<do_while_stmt> : 'do' <statement> 'while' '(' <expression> ')' ';'
                 ;
 
 # Three for-statement shapes — classic C-style, `in`, and `of`.
 # Each splits out as a separate alternative so the LR(1) decision
 # stays local to the `(` head.
-<for_stmt> : KW_FOR '(' <for_init_opt> ';' <expression_opt> ';' <expression_opt> ')' <statement>
+<for_stmt> : 'for' '(' <for_init_opt> ';' <expression_opt> ';' <expression_opt> ')' <statement>
            ;
 
 # Classic for-init is restricted to assignment-like / update
@@ -1091,11 +1091,11 @@ AT          = '@'
                  |
                  ;
 
-<for_in_stmt> : KW_FOR '(' <for_lhs> KW_IN <expression> ')' <statement>
+<for_in_stmt> : 'for' '(' <for_lhs> 'in' <expression> ')' <statement>
               ;
 
-<for_of_stmt> : KW_FOR '(' <for_lhs> KW_OF <assignment_expr> ')' <statement>
-              | KW_FOR KW_AWAIT '(' <for_lhs> KW_OF <assignment_expr> ')' <statement>
+<for_of_stmt> : 'for' '(' <for_lhs> 'of' <assignment_expr> ')' <statement>
+              | 'for' 'await' '(' <for_lhs> 'of' <assignment_expr> ')' <statement>
               ;
 
 # A for-in / for-of LHS is either a binding (with var/let/const)
@@ -1104,7 +1104,7 @@ AT          = '@'
           | <lhs_expr>
           ;
 
-<switch_stmt> : KW_SWITCH '(' <expression> ')' '{' <case_clauses_opt> '}'
+<switch_stmt> : 'switch' '(' <expression> ')' '{' <case_clauses_opt> '}'
               ;
 
 <case_clauses_opt> : <case_clauses>
@@ -1115,35 +1115,35 @@ AT          = '@'
                | <case_clauses> <case_clause>
                ;
 
-<case_clause> : KW_CASE <expression> ':' <statement_list_opt>
-              | KW_DEFAULT ':' <statement_list_opt>
+<case_clause> : 'case' <expression> ':' <statement_list_opt>
+              | 'default' ':' <statement_list_opt>
               ;
 
-<break_stmt> : KW_BREAK ';'
-             | KW_BREAK IDENT ';'
+<break_stmt> : 'break' ';'
+             | 'break' IDENT ';'
              ;
 
-<continue_stmt> : KW_CONTINUE ';'
-                | KW_CONTINUE IDENT ';'
+<continue_stmt> : 'continue' ';'
+                | 'continue' IDENT ';'
                 ;
 
-<return_stmt> : KW_RETURN ';'
-              | KW_RETURN <expression> ';'
+<return_stmt> : 'return' ';'
+              | 'return' <expression> ';'
               ;
 
-<throw_stmt> : KW_THROW <expression> ';'
+<throw_stmt> : 'throw' <expression> ';'
              ;
 
-<try_stmt> : KW_TRY <block> <catch_clause>
-           | KW_TRY <block> <finally_clause>
-           | KW_TRY <block> <catch_clause> <finally_clause>
+<try_stmt> : 'try' <block> <catch_clause>
+           | 'try' <block> <finally_clause>
+           | 'try' <block> <catch_clause> <finally_clause>
            ;
 
-<catch_clause> : KW_CATCH <block>
-               | KW_CATCH '(' <binding_target> ')' <block>
+<catch_clause> : 'catch' <block>
+               | 'catch' '(' <binding_target> ')' <block>
                ;
 
-<finally_clause> : KW_FINALLY <block>
+<finally_clause> : 'finally' <block>
                  ;
 
 <labelled_stmt> : IDENT ':' <statement>
@@ -1151,8 +1151,8 @@ AT          = '@'
 
 # --- modules -------------------------------------------------------------
 
-<import_stmt> : KW_IMPORT STRING_LIT ';'
-              | KW_IMPORT <import_clause> KW_FROM STRING_LIT ';'
+<import_stmt> : 'import' STRING_LIT ';'
+              | 'import' <import_clause> 'from' STRING_LIT ';'
               ;
 
 # Import clauses: default, namespace, named, or combinations.
@@ -1161,7 +1161,7 @@ AT          = '@'
                 | <named_import_or_namespace>
                 ;
 
-<named_import_or_namespace> : '*' KW_AS IDENT
+<named_import_or_namespace> : '*' 'as' IDENT
                             | '{' '}'
                             | '{' <named_import_list> '}'
                             | '{' <named_import_list> ',' '}'
@@ -1172,25 +1172,25 @@ AT          = '@'
                     ;
 
 <named_import> : IDENT
-               | IDENT KW_AS IDENT
-               | STRING_LIT KW_AS IDENT
+               | IDENT 'as' IDENT
+               | STRING_LIT 'as' IDENT
                ;
 
 # Export forms: named, default, namespace re-export, named
 # re-export, declaration export.
-<export_stmt> : KW_EXPORT '*' KW_FROM STRING_LIT ';'
-              | KW_EXPORT '*' KW_AS IDENT KW_FROM STRING_LIT ';'
-              | KW_EXPORT '{' '}' ';'
-              | KW_EXPORT '{' <export_list> '}' ';'
-              | KW_EXPORT '{' <export_list> ',' '}' ';'
-              | KW_EXPORT '{' <export_list> '}' KW_FROM STRING_LIT ';'
-              | KW_EXPORT '{' <export_list> ',' '}' KW_FROM STRING_LIT ';'
-              | KW_EXPORT KW_DEFAULT <assignment_expr> ';'
-              | KW_EXPORT KW_DEFAULT <hoisted_function>
-              | KW_EXPORT KW_DEFAULT <hoisted_class>
-              | KW_EXPORT <variable_decl_stmt>
-              | KW_EXPORT <hoisted_function>
-              | KW_EXPORT <hoisted_class>
+<export_stmt> : 'export' '*' 'from' STRING_LIT ';'
+              | 'export' '*' 'as' IDENT 'from' STRING_LIT ';'
+              | 'export' '{' '}' ';'
+              | 'export' '{' <export_list> '}' ';'
+              | 'export' '{' <export_list> ',' '}' ';'
+              | 'export' '{' <export_list> '}' 'from' STRING_LIT ';'
+              | 'export' '{' <export_list> ',' '}' 'from' STRING_LIT ';'
+              | 'export' 'default' <assignment_expr> ';'
+              | 'export' 'default' <hoisted_function>
+              | 'export' 'default' <hoisted_class>
+              | 'export' <variable_decl_stmt>
+              | 'export' <hoisted_function>
+              | 'export' <hoisted_class>
               ;
 
 <export_list> : <export_specifier>
@@ -1198,6 +1198,6 @@ AT          = '@'
               ;
 
 <export_specifier> : IDENT
-                   | IDENT KW_AS IDENT
-                   | IDENT KW_AS STRING_LIT
+                   | IDENT 'as' IDENT
+                   | IDENT 'as' STRING_LIT
                    ;
