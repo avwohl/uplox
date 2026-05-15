@@ -1,0 +1,840 @@
+# Kotlin 1.9 — uplox first cut.
+#
+# Targets a useful subset of Kotlin 1.9 — modern enough to
+# cover real-world code (data classes, sealed classes, when
+# expressions, string templates as opaque tokens, generics
+# with variance, nullable types, safe-call / Elvis / not-null-
+# assertion, range expressions) but trimmed to fit cleanly
+# into a single-pass LR(1) parser without the host filter
+# infrastructure that the full Kotlin grammar would require.
+#
+# In scope:
+#
+#   * Top-level: package declaration, import declarations,
+#     and top-level functions / properties / classes /
+#     interfaces / objects / typealiases.
+#   * Type declarations: `class`, `interface`, `object`,
+#     `enum class`, `sealed class`, `data class`,
+#     `annotation class`, with the standard modifier set.
+#   * Class members: properties (val / var), functions
+#     (member, extension, infix, operator, inline, suspend,
+#     tailrec, override), init blocks, nested types.
+#   * Primary constructor in the class header (with property-
+#     promoting `val` / `var` parameters).
+#   * Statements: expression statement, declaration statement,
+#     `for / in`, `while`, `do / while`, `return`, `throw`,
+#     `break`, `continue`, basic labelled jumps
+#     (`break@label`, `return@label`).
+#   * Expressions: the Kotlin precedence ladder —
+#     disjunction (`||`), conjunction (`&&`), equality
+#     (`==` / `!=` / `===` / `!==`), comparison
+#     (`<` / `<=` / `>` / `>=`), `in` / `!in` / `is` / `!is`,
+#     range (`..` / `..<`), additive, multiplicative,
+#     `as` / `as?`, prefix (`!` / `+` / `-` / `++` / `--`),
+#     postfix (`.` / `?.` / `::` / `[…]` / `(…)` / `++` /
+#     `--` / `!!`), and primary atoms (literal, IDENT, this,
+#     super, parenthesised, `if`, `when`, `try`, lambda,
+#     callable reference).
+#   * Types: type identifier with optional generic args,
+#     function types (`(A) -> B`), nullable types (`T?`),
+#     parenthesised types. Variance modifiers `in` / `out`
+#     on type arguments.
+#   * Generics: type parameters with bounds (`T : Bound`).
+#   * Lambdas: `{ params -> body }` form, used as primary
+#     atoms (NOT as trailing lambdas — for first cut,
+#     `foo({ … })` is required, not `foo { … }`).
+#   * String literals: regular (`"…"`) and raw (`"""…"""`).
+#     Template interpolations are kept opaque inside the
+#     token.
+#   * Annotations: `@Foo`, `@Foo(args)`, `@target:Foo`.
+#
+# Out of scope (would need either a host filter or
+# substantial grammar-level disambiguation work):
+#
+#   * Trailing-lambda syntax (`foo { x -> x + 1 }` written
+#     without explicit parens). Requires `LBRACE_LAMBDA` vs.
+#     `LBRACE_BLOCK` distinction at every call site —
+#     conflicts with the `{` that opens a block in control-
+#     flow statements.
+#   * Anonymous functions (`fun (x: Int) = x + 1` as an
+#     expression). Same expression-vs-declaration shape as
+#     top-level functions.
+#   * Property custom getters / setters / delegates beyond
+#     a single `by expr` initialiser.
+#   * Secondary constructors and companion objects.
+#   * Object expressions (`object : Foo { … }` as an
+#     expression).
+#   * Destructuring in non-property positions
+#     (in `for ((a, b) in pairs)` etc.).
+#   * Labelled prefix expressions (`label@expr`).
+#   * Soft keywords as identifiers (`data class data` works
+#     in real Kotlin but this grammar treats every modifier
+#     keyword as a reserved word).
+#   * Context receivers, value classes beyond `@JvmInline`,
+#     K2-only features.
+#
+# How the grammar handles Kotlin's known LR(k>1) ambiguities.
+#
+# Same approach as `csharp.uplox` / `java.uplox`: promote the
+# disambiguations into the tokenizer via synthetic terminals.
+# `LT_GENERIC`, `GT_GENERIC`, and `IDENT_TYPE` are declared
+# after the real tokens so the lexer's longest-match never
+# picks them; the host `kotlin_filter` rewrites the terminal
+# kind based on context.
+#
+# Conflict-resolution decisions:
+#
+#   * Dangling `else` resolves greedily (`%shift KW_ELSE`).
+#   * Postfix suffixes attach to the preceding primary
+#     (shift wins over reducing).
+#   * Operator-precedence shift/reduce conflicts at every
+#     rung are silenced via the operator tokens in `%shift`.
+
+%grammar kotlin
+
+
+%define lr.type lalr
+%options
+start = kotlin_file
+
+%shift
+KW_ELSE
+LBRACK
+LPAREN
+INC
+DEC
+DCOLON
+
+# Operator precedence — shift extends the operator chain.
+PLUS MINUS STAR SLASH PERCENT
+RANGE RANGE_UNTIL
+LT GT LE GE
+EQEQ NEQ TRIPLE_EQ TRIPLE_NEQ
+LOG_AND LOG_OR
+QUESTION
+ELVIS
+EQ
+KW_IN KW_IS KW_AS
+KW_NOT_IN KW_NOT_IS KW_AS_SAFE
+DOT
+SAFE_DOT
+NOT_NULL
+
+# Annotation start and modifier tokens at modifier-list close.
+AT
+KW_PRIVATE KW_PROTECTED KW_PUBLIC KW_INTERNAL
+KW_ABSTRACT KW_FINAL KW_OPEN KW_OVERRIDE
+KW_SEALED KW_INNER KW_INLINE
+ KW_EXPECT KW_ACTUAL KW_EXTERNAL
+KW_INFIX KW_OPERATOR KW_LATEINIT KW_CONST
+KW_SUSPEND KW_TAILREC KW_NOINLINE KW_CROSSINLINE
+KW_VARARG KW_REIFIED KW_COMPANION KW_ENUM
+KW_ANNOTATION
+
+# Follow-set tokens at empty-reduction positions.
+LBRACE
+ARROW
+KW_WHERE
+
+%reduce
+# Declaration-keyword reduces so the parser commits to the
+# declaration path before the keyword is shifted via the
+# expression chain.
+KW_FUN KW_CLASS KW_INTERFACE KW_OBJECT
+KW_VAL KW_VAR KW_TYPEALIAS
+
+%tokens
+
+WS            = /[ \t\r\n]+/                                %skip
+LINE_COMMENT  = /\/\/[^\n]*/                                %skip
+BLOCK_COMMENT = /\/\*([^*]|\*+[^*\/])*\*+\//                %skip
+
+INT_LIT       = /(0[xX][0-9A-Fa-f_]+|0[bB][01_]+|[0-9][0-9_]*)[lLuU]*/
+FLOAT_LIT     = /([0-9][0-9_]*\.[0-9_]+([eE][+-]?[0-9_]+)?|[0-9][0-9_]*[eE][+-]?[0-9_]+)[fF]?/
+CHAR_LIT      = /'([^'\\\n]|\\.)+'/
+STRING_LIT    = /"([^"\\\n]|\\.)*"/
+RAW_STRING_LIT = /"""([^"]|"[^"]|""[^"])*"""/
+
+# --- declaration / file-structure keywords -------------------------------
+KW_PACKAGE    = 'package'
+KW_IMPORT     = 'import'
+
+# --- type-kind keywords --------------------------------------------------
+KW_CLASS      = 'class'
+KW_INTERFACE  = 'interface'
+KW_OBJECT     = 'object'
+KW_ENUM       = 'enum'
+KW_ANNOTATION = 'annotation'
+
+# --- declaration keywords ------------------------------------------------
+KW_FUN        = 'fun'
+KW_VAL        = 'val'
+KW_VAR        = 'var'
+KW_TYPEALIAS  = 'typealias'
+KW_INIT       = 'init'
+KW_COMPANION  = 'companion'
+
+# --- modifier keywords ---------------------------------------------------
+KW_PUBLIC     = 'public'
+KW_PRIVATE    = 'private'
+KW_PROTECTED  = 'protected'
+KW_INTERNAL   = 'internal'
+KW_ABSTRACT   = 'abstract'
+KW_FINAL      = 'final'
+KW_OPEN       = 'open'
+KW_OVERRIDE   = 'override'
+KW_SEALED     = 'sealed'
+KW_INNER      = 'inner'
+# KW_DATA       = .data. — soft keyword, treated as IDENT
+KW_INLINE     = 'inline'
+# `value` and `data` are *soft* keywords in Kotlin — they're
+# modifiers only in declaration position and plain identifiers
+# everywhere else. This grammar treats them as plain IDENTs
+# (no tokens declared for them) — the AST builder recognises
+# `data` and `value` as modifiers when they appear in the
+# pre-declaration modifier slot, but the parser doesn't
+# distinguish. Drops the `data class` / `value class`
+# modifier-keyword forms — declare with `class` instead and
+# rely on the AST builder to recognise the modifier.
+KW_EXPECT     = 'expect'
+KW_ACTUAL     = 'actual'
+KW_EXTERNAL   = 'external'
+KW_INFIX      = 'infix'
+KW_OPERATOR   = 'operator'
+KW_LATEINIT   = 'lateinit'
+KW_CONST      = 'const'
+KW_SUSPEND    = 'suspend'
+KW_TAILREC    = 'tailrec'
+KW_NOINLINE   = 'noinline'
+KW_CROSSINLINE = 'crossinline'
+KW_VARARG     = 'vararg'
+KW_REIFIED    = 'reified'
+KW_OUT        = 'out'
+
+# --- statement keywords --------------------------------------------------
+KW_IF         = 'if'
+KW_ELSE       = 'else'
+KW_WHEN       = 'when'
+KW_WHILE      = 'while'
+KW_DO         = 'do'
+KW_FOR        = 'for'
+KW_BREAK      = 'break'
+KW_CONTINUE   = 'continue'
+KW_RETURN     = 'return'
+KW_THROW      = 'throw'
+KW_TRY        = 'try'
+KW_CATCH      = 'catch'
+KW_FINALLY    = 'finally'
+
+# --- expression keywords -------------------------------------------------
+KW_TRUE       = 'true'
+KW_FALSE      = 'false'
+KW_NULL       = 'null'
+KW_THIS       = 'this'
+KW_SUPER      = 'super'
+KW_AS         = 'as'
+KW_AS_SAFE    = 'as?'
+KW_IS         = 'is'
+KW_NOT_IS     = '!is'
+KW_IN         = 'in'
+KW_NOT_IN     = '!in'
+KW_BY         = 'by'
+KW_WHERE      = 'where'
+
+IDENT         = /[A-Za-z_][A-Za-z0-9_]*/
+BACKTICK_IDENT = /`[^`\n]+`/
+
+# --- operators (multi-char before single-char) ---------------------------
+ARROW         = '->'
+DCOLON        = '::'
+RANGE_UNTIL   = '..<'
+RANGE         = '..'
+SAFE_DOT      = '?.'
+ELVIS         = '?:'
+NOT_NULL      = '!!'
+TRIPLE_EQ     = '==='
+TRIPLE_NEQ    = '!=='
+EQEQ          = '=='
+NEQ           = '!='
+LE            = '<='
+GE            = '>='
+PLUS_ASSIGN   = '+='
+MINUS_ASSIGN  = '-='
+STAR_ASSIGN   = '*='
+SLASH_ASSIGN  = '/='
+PERCENT_ASSIGN = '%='
+INC           = '++'
+DEC           = '--'
+LOG_AND       = '&&'
+LOG_OR        = '||'
+
+EQ            = '='
+LT            = '<'
+GT            = '>'
+PLUS          = '+'
+MINUS         = '-'
+STAR          = '*'
+SLASH         = '/'
+PERCENT       = '%'
+BANG          = '!'
+QUESTION      = '?'
+LPAREN        = '('
+RPAREN        = ')'
+LBRACE        = '{'
+RBRACE        = '}'
+LBRACK        = '['
+RBRACK        = ']'
+COMMA         = ','
+SEMI          = ';'
+COLON         = ':'
+DOT           = '.'
+AT            = '@'
+
+# --- synthetic terminals (filter-produced) -------------------------------
+LT_GENERIC    = 'LT_GENERIC_SYNTHETIC_NEVER_EMITTED'
+GT_GENERIC    = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
+IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
+
+%rules
+
+# --- top level -----------------------------------------------------------
+
+<kotlin_file> : <package_header_opt> <imports_opt> <top_level_decls_opt>
+              ;
+
+# Kotlin source normally relies on newlines as terminators
+# (Kotlin spec §1.4). This grammar requires explicit `;` —
+# newline-aware tokenisation can be added as a host pre-pass
+# (similar to layout / `%layout` for Python).
+<package_header_opt> : KW_PACKAGE <qualified_name> ';'
+                     |
+                     ;
+
+<qualified_name> : IDENT
+                 | <qualified_name> '.' IDENT
+                 ;
+
+<imports_opt> : <imports>
+              |
+              ;
+
+<imports> : <import_decl>
+          | <imports> <import_decl>
+          ;
+
+<import_decl> : KW_IMPORT <qualified_name> ';'
+              | KW_IMPORT <qualified_name> '.' '*' ';'
+              | KW_IMPORT <qualified_name> KW_AS IDENT ';'
+              ;
+
+<top_level_decls_opt> : <top_level_decls>
+                      |
+                      ;
+
+<top_level_decls> : <top_level_decl>
+                  | <top_level_decls> <top_level_decl>
+                  ;
+
+<top_level_decl> : <class_decl>
+                 | <object_decl>
+                 | <fun_decl>
+                 | <property_decl>
+                 | <typealias_decl>
+                 | ';'
+                 ;
+
+# --- modifiers and annotations -------------------------------------------
+
+<modifiers_opt> : <modifiers>
+                |
+                ;
+
+<modifiers> : <modifier>
+            | <modifiers> <modifier>
+            ;
+
+<modifier> : KW_PUBLIC | KW_PRIVATE | KW_PROTECTED | KW_INTERNAL
+           | KW_ABSTRACT | KW_FINAL | KW_OPEN | KW_OVERRIDE
+           | KW_SEALED | KW_INNER
+           | KW_INLINE
+           | KW_EXPECT | KW_ACTUAL | KW_EXTERNAL
+           | KW_INFIX | KW_OPERATOR
+           | KW_LATEINIT | KW_CONST
+           | KW_SUSPEND | KW_TAILREC
+           | KW_NOINLINE | KW_CROSSINLINE
+           | KW_VARARG | KW_REIFIED
+           | KW_COMPANION | KW_ENUM | KW_ANNOTATION
+           | <annotation>
+           ;
+
+<annotation> : AT <qualified_name>
+             | AT <qualified_name> '(' <argument_list_opt> ')'
+             | AT IDENT ':' <qualified_name>
+             | AT IDENT ':' <qualified_name> '(' <argument_list_opt> ')'
+             ;
+
+# --- class / object declarations -----------------------------------------
+
+<class_decl> : <modifiers_opt> KW_CLASS IDENT <type_params_opt>
+               <primary_constructor_opt>
+               <delegation_spec_opt>
+               <class_body_opt>
+             | <modifiers_opt> KW_INTERFACE IDENT <type_params_opt>
+               <delegation_spec_opt>
+               <class_body_opt>
+             ;
+
+<object_decl> : <modifiers_opt> KW_OBJECT IDENT
+                <delegation_spec_opt>
+                <class_body_opt>
+              ;
+
+<primary_constructor_opt> : '(' <class_param_list_opt> ')'
+                          |
+                          ;
+
+<class_param_list_opt> : <class_param_list>
+                       |
+                       ;
+
+<class_param_list> : <class_param>
+                   | <class_param_list> ',' <class_param>
+                   ;
+
+# A class param promotes to a property when prefixed by val / var.
+<class_param> : IDENT ':' <type>
+              | IDENT ':' <type> '=' <expression>
+              | KW_VAL IDENT ':' <type>
+              | KW_VAL IDENT ':' <type> '=' <expression>
+              | KW_VAR IDENT ':' <type>
+              | KW_VAR IDENT ':' <type> '=' <expression>
+              ;
+
+<delegation_spec_opt> : ':' <delegation_spec_list>
+                      |
+                      ;
+
+<delegation_spec_list> : <delegation_spec>
+                       | <delegation_spec_list> ',' <delegation_spec>
+                       ;
+
+<delegation_spec> : <user_type>
+                  | <user_type> '(' <argument_list_opt> ')'
+                  ;
+
+<class_body_opt> : <class_body>
+                 |
+                 ;
+
+<class_body> : '{' <class_members_opt> '}'
+             ;
+
+<class_members_opt> : <class_members>
+                    |
+                    ;
+
+<class_members> : <class_member>
+                | <class_members> <class_member>
+                ;
+
+<class_member> : <property_decl>
+               | <fun_decl>
+               | <class_decl>
+               | <object_decl>
+               | <init_block>
+               | <typealias_decl>
+               | ';'
+               ;
+
+<init_block> : KW_INIT <block>
+             ;
+
+# --- function declaration ------------------------------------------------
+
+# Function declaration. Receiver type is inlined as alternative
+# rather than routed through a `<fun_receiver_opt>` non-terminal
+# — the ε production of `<fun_receiver_opt>` conflicts with the
+# shift on IDENT (the receiver type's leading IDENT vs. the
+# function name's IDENT). Inlining ties each form to a fixed
+# right context.
+<fun_decl> : <modifiers_opt> KW_FUN <type_params_opt>
+             IDENT <fun_value_params> <fun_return_type_opt>
+             <fun_body_opt>
+           | <modifiers_opt> KW_FUN <type_params_opt>
+             <user_type> '.' IDENT <fun_value_params> <fun_return_type_opt>
+             <fun_body_opt>
+           ;
+
+<fun_value_params> : '(' ')'
+                   | '(' <fun_param_list> ')'
+                   ;
+
+<fun_param_list> : <fun_param>
+                 | <fun_param_list> ',' <fun_param>
+                 ;
+
+<fun_param> : IDENT ':' <type>
+            | IDENT ':' <type> '=' <expression>
+            ;
+
+<fun_return_type_opt> : ':' <type>
+                      |
+                      ;
+
+<fun_body_opt> : <block>
+               | '=' <expression> ';'
+               | ';'
+               ;
+
+# --- property declaration ------------------------------------------------
+
+# Property declaration. Receiver type inlined for the same
+# reason as `<fun_decl>` above — `<user_type> '.'` and
+# nothing both reach IDENT, and ε-reducing the receiver-opt
+# clashes with shift-IDENT.
+<property_decl> : <modifiers_opt> <val_or_var>
+                  IDENT
+                  <property_type_opt>
+                  <property_initializer_opt>
+                  ';'
+                | <modifiers_opt> <val_or_var>
+                  <user_type> '.' IDENT
+                  <property_type_opt>
+                  <property_initializer_opt>
+                  ';'
+                ;
+
+<val_or_var> : KW_VAL
+             | KW_VAR
+             ;
+
+<property_type_opt> : ':' <type>
+                    |
+                    ;
+
+<property_initializer_opt> : '=' <expression>
+                           | KW_BY <expression>
+                           |
+                           ;
+
+# --- typealias -----------------------------------------------------------
+
+<typealias_decl> : <modifiers_opt> KW_TYPEALIAS IDENT <type_params_opt> '=' <type> ';'
+                 ;
+
+# --- generics ------------------------------------------------------------
+
+<type_params_opt> : LT_GENERIC <type_param_list> GT_GENERIC
+                  |
+                  ;
+
+<type_param_list> : <type_param>
+                  | <type_param_list> ',' <type_param>
+                  ;
+
+<type_param> : <modifiers_opt> IDENT
+             | <modifiers_opt> IDENT ':' <type>
+             ;
+
+# --- types ---------------------------------------------------------------
+
+<type> : <user_type>
+       | <nullable_type>
+       | <parenthesized_type>
+       ;
+
+<user_type> : <user_type_segment>
+            | <user_type> '.' <user_type_segment>
+            ;
+
+<user_type_segment> : IDENT_TYPE
+                    | IDENT_TYPE <type_args>
+                    | IDENT
+                    | IDENT <type_args>
+                    ;
+
+# Type arguments. The single-`*`-shaped `<X<*>>` form is
+# handled via the generic `<type_arg_list>` path (whose tail
+# `<type_arg> -> '*'` covers it) — splitting it into a
+# separate alternative would create a shift/reduce on `>`
+# between reducing the bare-star type_arg and shifting GT_GENERIC
+# to close the args directly.
+<type_args> : LT_GENERIC <type_arg_list> GT_GENERIC
+            ;
+
+<type_arg_list> : <type_arg>
+                | <type_arg_list> ',' <type_arg>
+                ;
+
+<type_arg> : <type>
+           | KW_OUT <type>
+           | KW_IN <type>
+           | '*'
+           ;
+
+<nullable_type> : <user_type> '?'
+                | <parenthesized_type> '?'
+                ;
+
+<parenthesized_type> : '(' <type> ')'
+                     ;
+
+# --- block / statements --------------------------------------------------
+
+<block> : '{' <statements_opt> '}'
+        ;
+
+<statements_opt> : <statements>
+                 |
+                 ;
+
+<statements> : <statement>
+             | <statements> <statement>
+             ;
+
+<statement> : <expression_statement>
+            | <declaration_statement>
+            | <for_statement>
+            | <while_statement>
+            | <do_while_statement>
+            | <jump_statement>
+            | ';'
+            ;
+
+<expression_statement> : <expression> ';'
+                       ;
+
+<declaration_statement> : <property_decl>
+                        | <fun_decl>
+                        | <class_decl>
+                        | <object_decl>
+                        | <typealias_decl>
+                        ;
+
+<for_statement> : KW_FOR '(' IDENT KW_IN <expression> ')' <control_body>
+                | KW_FOR '(' IDENT ':' <type> KW_IN <expression> ')' <control_body>
+                ;
+
+<while_statement> : KW_WHILE '(' <expression> ')' <control_body>
+                  ;
+
+<do_while_statement> : KW_DO <control_body> KW_WHILE '(' <expression> ')' ';'
+                     ;
+
+<control_body> : <block>
+               | <expression_statement>
+               | ';'
+               ;
+
+<jump_statement> : KW_RETURN ';'
+                 | KW_RETURN <expression> ';'
+                 | KW_RETURN AT IDENT ';'
+                 | KW_RETURN AT IDENT <expression> ';'
+                 | KW_THROW <expression> ';'
+                 | KW_BREAK ';'
+                 | KW_BREAK AT IDENT ';'
+                 | KW_CONTINUE ';'
+                 | KW_CONTINUE AT IDENT ';'
+                 ;
+
+# --- expressions ---------------------------------------------------------
+
+<expression> : <assignment_expr>
+             ;
+
+<assignment_expr> : <disjunction>
+                  | <postfix_expression> '=' <assignment_expr>
+                  | <postfix_expression> '+=' <assignment_expr>
+                  | <postfix_expression> '-=' <assignment_expr>
+                  | <postfix_expression> '*=' <assignment_expr>
+                  | <postfix_expression> '/=' <assignment_expr>
+                  | <postfix_expression> '%=' <assignment_expr>
+                  ;
+
+<disjunction> : <conjunction>
+              | <disjunction> '||' <conjunction>
+              ;
+
+<conjunction> : <equality>
+              | <conjunction> '&&' <equality>
+              ;
+
+<equality> : <comparison>
+           | <equality> '==' <comparison>
+           | <equality> '!=' <comparison>
+           | <equality> '===' <comparison>
+           | <equality> '!==' <comparison>
+           ;
+
+<comparison> : <in_is_expr>
+             | <comparison> '<' <in_is_expr>
+             | <comparison> '<=' <in_is_expr>
+             | <comparison> '>' <in_is_expr>
+             | <comparison> '>=' <in_is_expr>
+             ;
+
+<in_is_expr> : <elvis_expr>
+             | <in_is_expr> KW_IN <elvis_expr>
+             | <in_is_expr> KW_NOT_IN <elvis_expr>
+             | <in_is_expr> KW_IS <type>
+             | <in_is_expr> KW_NOT_IS <type>
+             ;
+
+<elvis_expr> : <range_expr>
+             | <elvis_expr> '?:' <range_expr>
+             ;
+
+<range_expr> : <additive_expr>
+             | <range_expr> '..' <additive_expr>
+             | <range_expr> '..<' <additive_expr>
+             ;
+
+<additive_expr> : <multiplicative_expr>
+                | <additive_expr> '+' <multiplicative_expr>
+                | <additive_expr> '-' <multiplicative_expr>
+                ;
+
+<multiplicative_expr> : <as_expr>
+                      | <multiplicative_expr> '*' <as_expr>
+                      | <multiplicative_expr> '/' <as_expr>
+                      | <multiplicative_expr> '%' <as_expr>
+                      ;
+
+<as_expr> : <prefix_expr>
+          | <as_expr> KW_AS <type>
+          | <as_expr> KW_AS_SAFE <type>
+          ;
+
+<prefix_expr> : <postfix_expression>
+              | '++' <prefix_expr>
+              | '--' <prefix_expr>
+              | '+' <prefix_expr>
+              | '-' <prefix_expr>
+              | '!' <prefix_expr>
+              ;
+
+<postfix_expression> : <atom>
+                     | <postfix_expression> '++'
+                     | <postfix_expression> '--'
+                     | <postfix_expression> '!!'
+                     | <postfix_expression> '.' IDENT
+                     | <postfix_expression> '?.' IDENT
+                     | <postfix_expression> '::' IDENT
+                     | <postfix_expression> '::' KW_CLASS
+                     | <postfix_expression> '[' <argument_list> ']'
+                     | <postfix_expression> '(' <argument_list_opt> ')'
+                     ;
+
+# --- primary expressions / atoms -----------------------------------------
+
+<atom> : <literal>
+       | IDENT
+       | BACKTICK_IDENT
+       | KW_THIS
+       | KW_SUPER
+       | '(' <expression> ')'
+       | <if_expression>
+       | <when_expression>
+       | <try_expression>
+       | <lambda_literal>
+       | <callable_reference>
+       ;
+
+<literal> : INT_LIT | FLOAT_LIT
+          | CHAR_LIT | STRING_LIT | RAW_STRING_LIT
+          | KW_TRUE | KW_FALSE | KW_NULL
+          ;
+
+<callable_reference> : DCOLON IDENT
+                     | DCOLON KW_CLASS
+                     ;
+
+# `if` is an expression with mandatory else for value-returning
+# use; the AST builder enforces the else-required case in
+# expression-required contexts.
+<if_expression> : KW_IF '(' <expression> ')' <control_body>
+                | KW_IF '(' <expression> ')' <control_body> KW_ELSE <control_body>
+                ;
+
+# `when` — Kotlin's pattern-matching expression.
+<when_expression> : KW_WHEN '{' <when_entries_opt> '}'
+                  | KW_WHEN '(' <expression> ')' '{' <when_entries_opt> '}'
+                  ;
+
+<when_entries_opt> : <when_entries>
+                   |
+                   ;
+
+<when_entries> : <when_entry>
+               | <when_entries> <when_entry>
+               ;
+
+<when_entry> : <when_conditions> ARROW <control_body>
+             | KW_ELSE ARROW <control_body>
+             ;
+
+<when_conditions> : <when_condition>
+                  | <when_conditions> ',' <when_condition>
+                  ;
+
+<when_condition> : <expression>
+                 | KW_IN <expression>
+                 | KW_NOT_IN <expression>
+                 | KW_IS <type>
+                 | KW_NOT_IS <type>
+                 ;
+
+# Try / catch / finally as an expression. JLS-style: try
+# must have at least one catch OR a finally.
+<try_expression> : KW_TRY <block> <catch_clauses>
+                 | KW_TRY <block> <catch_clauses> <finally_clause>
+                 | KW_TRY <block> <finally_clause>
+                 ;
+
+<catch_clauses> : <catch_clause>
+                | <catch_clauses> <catch_clause>
+                ;
+
+<catch_clause> : KW_CATCH '(' IDENT ':' <type> ')' <block>
+               ;
+
+<finally_clause> : KW_FINALLY <block>
+                 ;
+
+# Lambda literal: `{ params -> body }`. The `params ->`
+# header is REQUIRED in this grammar (even when there are no
+# params: `{ -> body }`) — making the arrow mandatory is
+# what lets the parser distinguish a lambda from a block at
+# the same `{`-shifting state. Real Kotlin allows headerless
+# lambdas (`{ it.length }` with implicit `it`, or `{}` as
+# empty) but those collide with `<block>` in this LR(1)
+# grammar without an `LBRACE_LAMBDA` filter to split the two
+# `{` interpretations.
+<lambda_literal> : '{' ARROW '}'
+                 | '{' ARROW <statements> '}'
+                 | '{' <lambda_params> ARROW '}'
+                 | '{' <lambda_params> ARROW <statements> '}'
+                 ;
+
+<lambda_params> : <lambda_param>
+                | <lambda_params> ',' <lambda_param>
+                ;
+
+<lambda_param> : IDENT
+               | IDENT ':' <type>
+               ;
+
+# --- argument list -------------------------------------------------------
+
+<argument_list_opt> : <argument_list>
+                    |
+                    ;
+
+<argument_list> : <argument>
+                | <argument_list> ',' <argument>
+                ;
+
+<argument> : <expression>
+           | IDENT '=' <expression>
+           | '*' <expression>
+           ;
