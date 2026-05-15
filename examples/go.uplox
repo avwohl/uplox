@@ -1,0 +1,1031 @@
+# Go 1.21+ — uplox first cut.
+#
+# Targets modern Go — packages, imports, type / var / const
+# declarations, functions and methods, generics (Go 1.18+
+# `[T any]` type parameters with `T[U]` instantiation),
+# structs / interfaces / maps / slices / channels, goroutines,
+# defer, the full statement set (incl. type switch and select),
+# composite literals, type assertions, and the standard
+# operator precedence ladder.
+#
+# Go was designed to be LR-friendly:
+#
+#   * Generics use `[...]` brackets, not `<...>` — no
+#     less-than ambiguity, no host filter required.
+#   * No `?:` ternary.
+#   * Casts are written `T(x)`, syntactically a call.
+#   * Method receivers are explicit (`func (r T) Name(...)`)
+#     so method definitions don't share a prefix with regular
+#     functions in a way LR cares about.
+#
+# The two LR(k>1) challenges Go does have:
+#
+#   * **Automatic semicolon insertion**: Go's lexer inserts
+#     `;` at the end of significant lines per the spec. This
+#     grammar requires explicit `;` after every statement.
+#     The host's tokeniser should insert them before handing
+#     tokens to the parser — `gofmt` output is already
+#     consistent with the explicit form.
+#   * **Composite-literal vs block**: `if T{...} { body }` is
+#     ambiguous between "if (T struct literal) then block" and
+#     "if (T) then block ('{...}' = block start)". Go's spec
+#     forbids composite literals as the direct condition
+#     expression of `if` / `for` / `switch` heads — users wrap
+#     them in parens (`if (T{...}) == p { ... }`) when they
+#     genuinely want the literal. This grammar enforces the
+#     restriction by lifting composite literals to a dedicated
+#     `<composite_lit>` form that's only reached through a
+#     primary-expression position; the `if` / `for` / `switch`
+#     heads route through `<expression>` directly so the
+#     `<primary_expr> '{...}'` trailer never fires there.
+#     `%shift LBRACE` biases the `{` after a condition
+#     expression toward the body block.
+#
+# In scope:
+#
+#   * Top-level: package declaration, import declarations
+#     (single-spec and grouped `( … )`), top-level
+#     type / var / const / func / method declarations.
+#   * Declarations: `var x [T] = expr`, `const x [T] = expr`,
+#     `type X [T] = U` (type alias), `type X [T] U` (type
+#     definition), grouped forms, generic type parameters.
+#   * Functions: `func name[T any](params) result { body }`,
+#     method receivers `(r T)` / `(r *T)`, variadic last
+#     parameter `args ...T`, multi-result returns
+#     `(a, b T)` and labelled returns
+#     `(x int, err error)`.
+#   * Types: identifiers (qualified or not), generic
+#     instantiations `Foo[T, U]`, `*T`, `[]T`, `[N]T`,
+#     `[...]T`, `map[K]V`, `chan T` / `<-chan T` /
+#     `chan<- T`, `func(p T) R`, `struct { … }`, `interface
+#     { … }` (incl. embedded interfaces and the Go 1.18
+#     type-element set form `~int | ~string`), parenthesised.
+#   * Statements: simple statements (expression, assignment,
+#     send `ch <- v`, increment / decrement, short var decl
+#     `:=`), labelled statements, `if / else` with optional
+#     simple-init clause, three flavours of `for` (classic
+#     C-style, condition-only, `range`), `switch` (expression
+#     and type-switch forms), `select`, `defer`, `go`,
+#     `return`, `break` / `continue` / `goto` (with labels),
+#     `fallthrough`.
+#   * Expressions: standard precedence — logical or `||`,
+#     logical and `&&`, comparison, additive (`+`, `-`,
+#     `|`, `^`), multiplicative (`*`, `/`, `%`, `<<`, `>>`,
+#     `&`, `&^`), unary (`+`, `-`, `!`, `^`, `*`, `&`,
+#     `<-`), primary (operand + trailers: selector `.x`,
+#     index `[i]`, slice `[i:j:k]`, type assertion `.(T)`,
+#     call `(args)` with `...` spread, generic instantiation
+#     `[T]`).
+#   * Composite literals: `T{…}` with positional or
+#     `key: value` elements, nested literals.
+#   * Closures: `func(p T) R { body }` as a function
+#     literal in expression position.
+#
+# Out of scope (a few real-Go-grammar carve-outs we couldn't
+# resolve cleanly under LALR(1)):
+#
+#   * **Composite-literal-vs-block in conditions.** With
+#     `%shift LBRACE` biasing toward the composite-literal
+#     trailer, `if T { body }` (where T ends in an
+#     identifier) parses as `if (T{body})` rather than `if T
+#     then { body }`. Workaround: wrap such conditions in
+#     parens — `if (cond) { body }`, `for x := range (slice)
+#     { body }`, `switch (v) { … }`. Comparison conditions
+#     (`if x > 0 { ... }`) are unaffected. A future host
+#     filter could emit a synthetic `LBRACE_BLOCK` token to
+#     distinguish.
+#   * **Shared-type parameter lists** (`func f(a, b int)`)
+#     are OUT — the parser can't tell at IDENT whether it's
+#     a name list or a list of unnamed types. Use one
+#     parameter per declaration (`func f(a int, b int)`).
+#   * **Multi-argument generic call instantiation**
+#     (`f[A, B](x)`) is OUT — clashes reduce/reduce with
+#     the `[expr, expr]` index form. Use partial
+#     application: `var f2 = f[A]; f2[B](x)`. Single-arg
+#     `f[T]` parses via the index trailer (semantic phase
+#     interprets).
+#   * **Embedded struct fields** (`type T struct { Foo;
+#     *pkg.Bar }`) — bare-IDENT-as-field clashes
+#     reduce/reduce with the named-field IDENT-list start.
+#     Use named fields and let the AST builder recognise
+#     name-equals-type as embedded.
+#   * **Send-only / recv-only channel types** (`chan<- T`,
+#     `<-chan T`) — `chan <- chan T` is ambiguous between
+#     bidirectional-of-recv-only and send-only-of-chan.
+#     Only the bidirectional `chan T` form is covered.
+#   * **Multi-name type parameters** (`[T, U any]`) — same
+#     class of conflict as shared-type params. Spell each
+#     parameter individually: `[T any, U any]`.
+#   * Automatic semicolon insertion. The host handles it.
+#   * Cgo `import "C"` magic comment directives — accepted
+#     as a regular import.
+#   * Compiler `//go:` pragmas — they're regular line
+#     comments at the grammar level.
+#   * `//line` directives.
+#
+# Conflict-resolution decisions:
+#
+#   * Dangling `else` resolves greedily (`%shift KW_ELSE`).
+#   * Composite-literal vs block — `<composite_lit>` is a
+#     dedicated primary form (not a `<primary_expr>` trailer)
+#     so `{` after a condition expression doesn't try to
+#     extend the expression. `%shift LBRACE` further biases
+#     the block-start interpretation.
+#   * Postfix `(`, `[`, `.` attach to the preceding primary.
+#   * `<-` is the channel-receive prefix in expression
+#     position and the send operator in send-statement
+#     position; the grammar splits the two via dedicated
+#     productions.
+
+%grammar go
+
+
+%define lr.type lalr
+%options
+start = source_file
+
+%shift
+KW_ELSE
+
+# Postfix attaches to the preceding primary rather than
+# closing the expression.
+DOT LBRACK LPAREN
+
+# Operator continuations.
+LOG_OR LOG_AND
+EQEQ NEQ LT GT LE GE
+PLUS MINUS PIPE CARET
+STAR SLASH PERCENT
+LSHIFT RSHIFT AMP AND_NOT
+
+# `<-` is the channel operator. In send-statement context it's
+# greedy (extends the LHS into a send).
+SEND
+
+# `:=` after an IDENT is the short-var-decl introducer; shift
+# extends the simple-statement rather than reducing IDENT to
+# a bare-expression operand.
+DECLARE
+
+# `)` after `IDENT` in a parameter / receiver context: shift
+# extends the parameter list rather than reducing the IDENT to
+# a single-type parameter (which would close the param list
+# early and lose the option of seeing the trailing type for a
+# named parameter).
+RPAREN
+
+# `{` after a function signature extends the function with a
+# body block rather than reducing the bodyless form (which is
+# for ambient declarations / interface methods).
+LBRACE
+
+%tokens
+
+WS            = /[ \t\r\n]+/                                  %skip
+LINE_COMMENT  = /\/\/[^\n]*/                                  %skip
+BLOCK_COMMENT = /\/\*([^*]|\*+[^*\/])*\*+\//                  %skip
+
+# Numeric literals — decimal, binary `0b`, octal `0o` /
+# leading-zero, hex `0x`, with underscore separators (Go
+# 1.13+) and optional imaginary suffix `i`.
+INT_LIT      = /(0[xX][0-9A-Fa-f_]+|0[bB][01_]+|0[oO]?[0-7_]+|[0-9][0-9_]*)i?/
+FLOAT_LIT    = /([0-9][0-9_]*\.[0-9_]*([eE][+-]?[0-9_]+)?|\.[0-9_]+([eE][+-]?[0-9_]+)?|[0-9][0-9_]*[eE][+-]?[0-9_]+)i?/
+
+# String literals — interpreted (`"..."` with backslash
+# escapes) and raw (`` `...` `` with no escapes).
+STRING_LIT   = /"([^"\\\n]|\\.)*"/
+RAW_STRING   = /`[^`]*`/
+
+# Rune literal — `'a'`, `'\n'`, `'ÿ'`, etc.
+RUNE_LIT     = /'([^'\\]|\\.)+'/
+
+# --- declaration keywords ------------------------------------------------
+KW_PACKAGE   = 'package'
+KW_IMPORT    = 'import'
+KW_FUNC      = 'func'
+KW_VAR       = 'var'
+KW_CONST     = 'const'
+KW_TYPE      = 'type'
+
+# --- type / composite keywords -------------------------------------------
+KW_STRUCT    = 'struct'
+KW_INTERFACE = 'interface'
+KW_MAP       = 'map'
+KW_CHAN      = 'chan'
+
+# --- statement keywords --------------------------------------------------
+KW_IF        = 'if'
+KW_ELSE      = 'else'
+KW_FOR       = 'for'
+KW_RANGE     = 'range'
+KW_SWITCH    = 'switch'
+KW_CASE      = 'case'
+KW_DEFAULT   = 'default'
+KW_SELECT    = 'select'
+KW_RETURN    = 'return'
+KW_BREAK     = 'break'
+KW_CONTINUE  = 'continue'
+KW_GOTO      = 'goto'
+KW_FALLTHROUGH = 'fallthrough'
+KW_DEFER     = 'defer'
+KW_GO        = 'go'
+
+# --- expression keywords -------------------------------------------------
+KW_NIL       = 'nil'
+KW_TRUE      = 'true'
+KW_FALSE     = 'false'
+
+# Identifiers — declared after the keyword tokens so the
+# lexer's longest-match prefers keyword spellings. The leading
+# `_` is allowed (Go's blank identifier `_`).
+IDENT        = /[A-Za-z_][A-Za-z0-9_]*/
+
+# --- multi-character operators (declared before single-char) -------------
+SEND         = '<-'
+DECLARE      = ':='
+ELLIPSIS     = '...'
+PLUS_ASSIGN  = '+='
+MINUS_ASSIGN = '-='
+STAR_ASSIGN  = '*='
+SLASH_ASSIGN = '/='
+PERCENT_ASSIGN = '%='
+AMP_ASSIGN   = '&='
+PIPE_ASSIGN  = '|='
+CARET_ASSIGN = '^='
+LSHIFT_ASSIGN = '<<='
+RSHIFT_ASSIGN = '>>='
+AND_NOT_ASSIGN = '&^='
+AND_NOT      = '&^'
+LOG_AND      = '&&'
+LOG_OR       = '||'
+EQEQ         = '=='
+NEQ          = '!='
+LE           = '<='
+GE           = '>='
+LSHIFT       = '<<'
+RSHIFT       = '>>'
+INC          = '++'
+DEC          = '--'
+
+EQ           = '='
+LT           = '<'
+GT           = '>'
+PLUS         = '+'
+MINUS        = '-'
+STAR         = '*'
+SLASH        = '/'
+PERCENT      = '%'
+AMP          = '&'
+PIPE         = '|'
+CARET        = '^'
+TILDE        = '~'
+BANG         = '!'
+LPAREN       = '('
+RPAREN       = ')'
+LBRACE       = '{'
+RBRACE       = '}'
+LBRACK       = '['
+RBRACK       = ']'
+COMMA        = ','
+SEMI         = ';'
+COLON        = ':'
+DOT          = '.'
+
+%rules
+
+# --- source file ---------------------------------------------------------
+
+<source_file> : <package_clause> ';' <import_decls_opt> <top_level_decls_opt>
+              ;
+
+<package_clause> : 'package' IDENT
+                 ;
+
+<import_decls_opt> : <import_decls>
+                   |
+                   ;
+
+<import_decls> : <import_decl>
+               | <import_decls> <import_decl>
+               ;
+
+# Single-spec or grouped-spec form.
+<import_decl> : 'import' <import_spec> ';'
+              | 'import' '(' <import_spec_list_opt> ')' ';'
+              ;
+
+<import_spec_list_opt> : <import_spec_list>
+                       |
+                       ;
+
+<import_spec_list> : <import_spec> ';'
+                   | <import_spec_list> <import_spec> ';'
+                   ;
+
+# Import path is always a string; the leading specifier is
+# either `.` (dot-import), `_` (blank import), or a package
+# name to bind under.
+<import_spec> : <import_path>
+              | IDENT <import_path>
+              | '.' <import_path>
+              ;
+
+<import_path> : STRING_LIT
+              | RAW_STRING
+              ;
+
+# --- top-level declarations ---------------------------------------------
+
+<top_level_decls_opt> : <top_level_decls>
+                      |
+                      ;
+
+<top_level_decls> : <top_level_decl>
+                  | <top_level_decls> <top_level_decl>
+                  ;
+
+<top_level_decl> : <declaration>
+                 | <function_decl>
+                 | <method_decl>
+                 ;
+
+# Var / const / type declarations come in single-spec and
+# grouped-spec forms.
+<declaration> : <const_decl>
+              | <type_decl>
+              | <var_decl>
+              ;
+
+<const_decl> : 'const' <const_spec> ';'
+             | 'const' '(' <const_spec_list_opt> ')' ';'
+             ;
+
+<const_spec_list_opt> : <const_spec_list>
+                      |
+                      ;
+
+<const_spec_list> : <const_spec> ';'
+                  | <const_spec_list> <const_spec> ';'
+                  ;
+
+<const_spec> : <ident_list>
+             | <ident_list> '=' <expression_list>
+             | <ident_list> <type> '=' <expression_list>
+             ;
+
+<var_decl> : 'var' <var_spec> ';'
+           | 'var' '(' <var_spec_list_opt> ')' ';'
+           ;
+
+<var_spec_list_opt> : <var_spec_list>
+                    |
+                    ;
+
+<var_spec_list> : <var_spec> ';'
+                | <var_spec_list> <var_spec> ';'
+                ;
+
+<var_spec> : <ident_list> <type>
+           | <ident_list> <type> '=' <expression_list>
+           | <ident_list> '=' <expression_list>
+           ;
+
+<type_decl> : 'type' <type_spec> ';'
+            | 'type' '(' <type_spec_list_opt> ')' ';'
+            ;
+
+<type_spec_list_opt> : <type_spec_list>
+                     |
+                     ;
+
+<type_spec_list> : <type_spec> ';'
+                 | <type_spec_list> <type_spec> ';'
+                 ;
+
+# `type X T` defines X; `type X = T` aliases X to T (Go 1.9+).
+# Generic type parameters `[T any]` introduced in Go 1.18.
+<type_spec> : IDENT <type>
+            | IDENT '=' <type>
+            | IDENT <type_params> <type>
+            | IDENT <type_params> '=' <type>
+            ;
+
+<ident_list> : IDENT
+             | <ident_list> ',' IDENT
+             ;
+
+# --- function and method declarations -----------------------------------
+
+# Regular `func` declaration; the optional `<type_params>` is
+# the generic parameter list. Method receivers go through
+# `<method_decl>` below.
+<function_decl> : 'func' IDENT <signature> ';'
+                | 'func' IDENT <signature> <block> ';'
+                | 'func' IDENT <type_params> <signature> ';'
+                | 'func' IDENT <type_params> <signature> <block> ';'
+                ;
+
+<method_decl> : 'func' <receiver> IDENT <signature> ';'
+              | 'func' <receiver> IDENT <signature> <block> ';'
+              ;
+
+<receiver> : '(' IDENT <type> ')'
+           | '(' <type> ')'
+           ;
+
+<signature> : <parameters>
+            | <parameters> <result>
+            ;
+
+<parameters> : '(' ')'
+             | '(' <parameter_list> ')'
+             | '(' <parameter_list> ',' ')'
+             ;
+
+<parameter_list> : <parameter_decl>
+                 | <parameter_list> ',' <parameter_decl>
+                 ;
+
+# A parameter declaration is either a bare type (unnamed
+# parameter) or `IDENT type` (named single parameter), with
+# the trailing `...` variadic form. Shared-type parameter
+# lists (`func f(a, b int)`) are NOT covered here — they'd
+# clash reduce/reduce with the unnamed-types interpretation
+# `func f(a, b)` (multiple type names). Users must write
+# `func f(a int, b int)` instead. Spell `...` for variadic
+# only on the last parameter.
+<parameter_decl> : <type>
+                 | IDENT <type>
+                 | IDENT '...' <type>
+                 | '...' <type>
+                 ;
+
+# Result is either a single bare type or a parameter list.
+<result> : <parameters>
+         | <type>
+         ;
+
+# --- type parameters (Go 1.18+) -----------------------------------------
+
+<type_params> : '[' <type_param_list> ']'
+              | '[' <type_param_list> ',' ']'
+              ;
+
+<type_param_list> : <type_param>
+                  | <type_param_list> ',' <type_param>
+                  ;
+
+# `[T any]`, `[T comparable]`, `[T ~int | ~string]`. The
+# single-name-per-param form is the LR-friendly cut; the
+# shared-constraint `[T, U any]` form is OUT because it clashes
+# with multiple-named bindings in nearby contexts (`var a, b
+# int` etc.) and an LALR(1) parser can't see far enough to
+# disambiguate. Users can write `[T any, U any]` instead.
+<type_param> : IDENT <type_constraint>
+             ;
+
+# The type constraint is a type element — a `|`-separated list
+# of types, each optionally prefixed with `~` (underlying-type
+# match).
+<type_constraint> : <type_element>
+                  ;
+
+<type_element> : <type_term>
+               | <type_element> '|' <type_term>
+               ;
+
+<type_term> : <type>
+            | '~' <type>
+            ;
+
+# --- types --------------------------------------------------------------
+
+<type> : <qualified_name>
+       | <qualified_name> <type_args>
+       | <type_lit>
+       | '(' <type> ')'
+       ;
+
+# Qualified identifier — `IDENT` or `pkg.IDENT`. Used both as
+# a type name (in type-position contexts) and as an operand
+# name (in expression-position contexts). Merging the two
+# avoids a reduce/reduce conflict at IDENT (and at qualified
+# IDENT.IDENT) when an LALR(1) state covers both contexts.
+<qualified_name> : IDENT
+                 | IDENT '.' IDENT
+                 ;
+
+<type_args> : '[' <type_arg_list> ']'
+            | '[' <type_arg_list> ',' ']'
+            ;
+
+<type_arg_list> : <type>
+                | <type_arg_list> ',' <type>
+                ;
+
+<type_lit> : <array_type>
+           | <slice_type>
+           | <struct_type>
+           | <pointer_type>
+           | <function_type>
+           | <interface_type>
+           | <map_type>
+           | <channel_type>
+           ;
+
+<array_type> : '[' <expression> ']' <type>
+             | '[' '...' ']' <type>
+             ;
+
+<slice_type> : '[' ']' <type>
+             ;
+
+<pointer_type> : '*' <type>
+               ;
+
+<function_type> : 'func' <signature>
+                ;
+
+<map_type> : 'map' '[' <type> ']' <type>
+           ;
+
+# Channel type — only the bidirectional `chan T` form is
+# covered. The send-only `chan<- T` and recv-only `<-chan T`
+# forms create a reduce/reduce in `chan <-chan T` (chan of
+# recv-only chan) vs `chan<- chan T` (send-only chan of
+# chan). Real Go code overwhelmingly uses bidirectional chans
+# in declarations; the directional forms appear mostly in
+# function signatures and can be expressed via type aliases.
+<channel_type> : 'chan' <type>
+               ;
+
+# --- struct types -------------------------------------------------------
+
+<struct_type> : 'struct' '{' <field_decl_list_opt> '}'
+              ;
+
+<field_decl_list_opt> : <field_decl_list>
+                      |
+                      ;
+
+<field_decl_list> : <field_decl> ';'
+                  | <field_decl_list> <field_decl> ';'
+                  ;
+
+# Field declaration — `IdentList Type [tag]`. Embedded fields
+# (`Foo` / `*Foo` / `pkg.Foo` as a bare type, no name) are NOT
+# covered: the single-IDENT form clashes reduce/reduce with
+# the start of a named-field ident-list. Real Go code uses
+# embedded fields heavily for struct composition; users
+# wanting them can declare an explicit name
+# (`Foo Foo` / `inner Foo`) and the semantic phase can opt
+# into embedded-field semantics for any-name == type-name
+# matches.
+<field_decl> : <ident_list> <type>
+             | <ident_list> <type> <tag>
+             ;
+
+<tag> : STRING_LIT
+      | RAW_STRING
+      ;
+
+# --- interface types ----------------------------------------------------
+
+<interface_type> : 'interface' '{' <interface_elem_list_opt> '}'
+                 ;
+
+<interface_elem_list_opt> : <interface_elem_list>
+                          |
+                          ;
+
+<interface_elem_list> : <interface_elem> ';'
+                      | <interface_elem_list> <interface_elem> ';'
+                      ;
+
+# Interface element: a method specification, an embedded
+# interface, or (Go 1.18+) a type element (used for generic
+# type constraints).
+<interface_elem> : IDENT <signature>
+                 | <type_element>
+                 ;
+
+# --- block --------------------------------------------------------------
+
+<block> : '{' <statement_list_opt> '}'
+        ;
+
+<statement_list_opt> : <statement_list>
+                     |
+                     ;
+
+<statement_list> : <statement>
+                 | <statement_list> <statement>
+                 ;
+
+# --- statements ---------------------------------------------------------
+
+<statement> : <declaration>
+            | <labeled_stmt>
+            | <simple_stmt> ';'
+            | <go_stmt> ';'
+            | <return_stmt> ';'
+            | <break_stmt> ';'
+            | <continue_stmt> ';'
+            | <goto_stmt> ';'
+            | <fallthrough_stmt> ';'
+            | <block> ';'
+            | <if_stmt> ';'
+            | <switch_stmt> ';'
+            | <select_stmt> ';'
+            | <for_stmt> ';'
+            | <defer_stmt> ';'
+            | ';'
+            ;
+
+<labeled_stmt> : IDENT ':' <statement>
+               ;
+
+# Simple-statement cover grammar — the leading
+# expression-list is unified across all simple statement
+# shapes; the trailing operator (`:=`, `=`, `+=` etc., `++`,
+# `--`, `<-`, or nothing) commits to the specific shape. The
+# semantic phase rejects illegal LHS / RHS combinations
+# (e.g. `5 := 1`, non-lvalue assignment target).
+<simple_stmt> : <expression_list> <simple_stmt_tail>
+              ;
+
+<simple_stmt_tail> : <assign_op> <expression_list>
+                   | ':=' <expression_list>
+                   | '++'
+                   | '--'
+                   | '<-' <expression>
+                   |
+                   ;
+
+<assign_op> : '=' | '+=' | '-=' | '*=' | '/=' | '%='
+            | '&=' | '|=' | '^=' | '<<=' | '>>=' | '&^='
+            ;
+
+<go_stmt> : 'go' <expression>
+          ;
+
+<return_stmt> : 'return'
+              | 'return' <expression_list>
+              ;
+
+<break_stmt> : 'break'
+             | 'break' IDENT
+             ;
+
+<continue_stmt> : 'continue'
+                | 'continue' IDENT
+                ;
+
+<goto_stmt> : 'goto' IDENT
+            ;
+
+<fallthrough_stmt> : 'fallthrough'
+                   ;
+
+<defer_stmt> : 'defer' <expression>
+             ;
+
+# --- if statement -------------------------------------------------------
+#
+# `if [SimpleStmt ;] Expression Block [else (If | Block)]`.
+# The condition expression uses the no-brace cover chain so a
+# `T{…}` composite literal doesn't get mistaken for the
+# trailing block. Go's spec explicitly forbids composite
+# literals as the direct condition; wrap them in parens to
+# get the literal interpretation back.
+
+<if_stmt> : 'if' <expression> <block> <if_tail_opt>
+          | 'if' <simple_stmt> ';' <expression> <block> <if_tail_opt>
+          ;
+
+
+<if_tail_opt> : 'else' <block>
+              | 'else' <if_stmt>
+              |
+              ;
+
+# --- for statement ------------------------------------------------------
+#
+# Three flavours, plus the bare `for {}` infinite loop:
+#
+#   for { … }
+#   for cond { … }
+#   for init; cond; post { … }
+#   for ident := range expr { … }
+#   for ident, ident := range expr { … }
+#   for ident = range expr { … }
+#   for range expr { … }
+
+<for_stmt> : 'for' <block>
+           | 'for' <expression> <block>
+           | 'for' <simple_stmt_opt> ';' <expression_opt> ';' <simple_stmt_opt> <block>
+           | 'for' <range_clause> <block>
+           ;
+
+<simple_stmt_opt> : <simple_stmt>
+                  |
+                  ;
+
+# Range clause — reuses the expression-list cover for the LHS
+# bindings. The semantic phase enforces that `:=` LHS must be
+# bare identifiers.
+<range_clause> : 'range' <expression>
+               | <expression_list> ':=' 'range' <expression>
+               | <expression_list> '=' 'range' <expression>
+               ;
+
+# --- switch statement ---------------------------------------------------
+#
+# Two flavours: expression switch and type switch. The grammar
+# splits them on the presence of `.(type)` in the guard.
+
+<switch_stmt> : <expr_switch_stmt>
+              | <type_switch_stmt>
+              ;
+
+<expr_switch_stmt> : 'switch' '{' <expr_case_list_opt> '}'
+                   | 'switch' <expression> '{' <expr_case_list_opt> '}'
+                   | 'switch' <simple_stmt> ';' '{' <expr_case_list_opt> '}'
+                   | 'switch' <simple_stmt> ';' <expression> '{' <expr_case_list_opt> '}'
+                   ;
+
+<expr_case_list_opt> : <expr_case_list>
+                     |
+                     ;
+
+<expr_case_list> : <expr_case_clause>
+                 | <expr_case_list> <expr_case_clause>
+                 ;
+
+<expr_case_clause> : 'case' <expression_list> ':' <statement_list_opt>
+                   | 'default' ':' <statement_list_opt>
+                   ;
+
+# Type switch: `switch x := v.(type) { case T: … }`. The guard
+# uses `.(type)` instead of `.(T)`.
+
+<type_switch_stmt> : 'switch' <type_switch_guard> '{' <type_case_list_opt> '}'
+                   | 'switch' <simple_stmt> ';' <type_switch_guard> '{' <type_case_list_opt> '}'
+                   ;
+
+<type_switch_guard> : <expression> '.' '(' 'type' ')'
+                    | IDENT ':=' <expression> '.' '(' 'type' ')'
+                    ;
+
+<type_case_list_opt> : <type_case_list>
+                     |
+                     ;
+
+<type_case_list> : <type_case_clause>
+                 | <type_case_list> <type_case_clause>
+                 ;
+
+<type_case_clause> : 'case' <type_list> ':' <statement_list_opt>
+                   | 'default' ':' <statement_list_opt>
+                   ;
+
+<type_list> : <type>
+            | <type_list> ',' <type>
+            ;
+
+# --- select statement ---------------------------------------------------
+
+<select_stmt> : 'select' '{' <comm_clause_list_opt> '}'
+              ;
+
+<comm_clause_list_opt> : <comm_clause_list>
+                       |
+                       ;
+
+<comm_clause_list> : <comm_clause>
+                   | <comm_clause_list> <comm_clause>
+                   ;
+
+# Communication clause — `case ch <- expr:` (send) or
+# `case [lhs =|:=] <-ch:` (recv) or `default:`. The send /
+# recv forms both flow through `<simple_stmt>` since send is
+# now folded into the simple-statement cover grammar.
+<comm_clause> : 'case' <simple_stmt> ':' <statement_list_opt>
+              | 'default' ':' <statement_list_opt>
+              ;
+
+# `<recv_stmt>` removed — `<simple_stmt>` covers both the
+# recv-bind form and the bare-recv form via the cover-grammar
+# tail.
+
+# --- expressions --------------------------------------------------------
+#
+# Go's operator precedence (lowest → highest):
+#   1. `||`
+#   2. `&&`
+#   3. `==`, `!=`, `<`, `<=`, `>`, `>=`
+#   4. `+`, `-`, `|`, `^`
+#   5. `*`, `/`, `%`, `<<`, `>>`, `&`, `&^`
+# Unary (`+`, `-`, `!`, `^`, `*`, `&`, `<-`) binds tighter
+# than any binary; postfix (selector / index / slice / type
+# assertion / call) tightest of all.
+
+<expression> : <logical_or_expr>
+             ;
+
+<logical_or_expr> : <logical_and_expr>
+                  | <logical_or_expr> '||' <logical_and_expr>
+                  ;
+
+<logical_and_expr> : <comparison_expr>
+                   | <logical_and_expr> '&&' <comparison_expr>
+                   ;
+
+<comparison_expr> : <additive_expr>
+                  | <comparison_expr> '==' <additive_expr>
+                  | <comparison_expr> '!=' <additive_expr>
+                  | <comparison_expr> '<' <additive_expr>
+                  | <comparison_expr> '>' <additive_expr>
+                  | <comparison_expr> '<=' <additive_expr>
+                  | <comparison_expr> '>=' <additive_expr>
+                  ;
+
+<additive_expr> : <multiplicative_expr>
+                | <additive_expr> '+' <multiplicative_expr>
+                | <additive_expr> '-' <multiplicative_expr>
+                | <additive_expr> '|' <multiplicative_expr>
+                | <additive_expr> '^' <multiplicative_expr>
+                ;
+
+<multiplicative_expr> : <unary_expr>
+                      | <multiplicative_expr> '*'  <unary_expr>
+                      | <multiplicative_expr> '/'  <unary_expr>
+                      | <multiplicative_expr> '%'  <unary_expr>
+                      | <multiplicative_expr> '<<' <unary_expr>
+                      | <multiplicative_expr> '>>' <unary_expr>
+                      | <multiplicative_expr> '&'  <unary_expr>
+                      | <multiplicative_expr> '&^' <unary_expr>
+                      ;
+
+<unary_expr> : <primary_expr>
+             | '+' <unary_expr>
+             | '-' <unary_expr>
+             | '!' <unary_expr>
+             | '^' <unary_expr>
+             | '*' <unary_expr>
+             | '&' <unary_expr>
+             | '<-' <unary_expr>
+             ;
+
+# --- primary expressions ------------------------------------------------
+#
+# Primary expression chain: operand + trailers (selector,
+# index, slice, type assertion, call, generic instantiation,
+# composite literal). The composite-literal trailer
+# `<primary_expr> <composite_braces>` is the source of the
+# `if T{…}` ambiguity that the no-brace chain below resolves.
+
+# Primary expression — operand plus the trailer chain. The
+# composite-literal trailer `T{…}` is NOT a general primary
+# trailer here; it's lifted into a dedicated `<composite_lit>`
+# form below so it only attaches to type-shaped primaries
+# (per Go's spec) and so the no-brace chain has a single
+# clean place to opt out of it.
+# The multi-argument generic-call trailer
+# (`f[A, B](args)`) is OUT — `[A, B]` overlaps reduce/reduce
+# with `[expr, expr]` (which isn't a valid index but the
+# parser can't tell at LR(1) until after the bracket closes).
+# Single-arg `f[T]` works via the `[expression]` index trailer
+# (the semantic phase decides between index access and
+# 1-argument generic instantiation based on the callee's
+# type). For multi-argument generics, name the partial
+# application: `var f2 = f[A]; f2[B](args)`.
+<primary_expr> : <operand>
+               | <composite_lit>
+               | <primary_expr> '.' IDENT
+               | <primary_expr> '[' <expression> ']'
+               | <primary_expr> '[' <expression_opt> ':' <expression_opt> ']'
+               | <primary_expr> '[' <expression_opt> ':' <expression_opt> ':' <expression> ']'
+               | <primary_expr> '.' '(' <type> ')'
+               | <primary_expr> '(' <argument_list_opt> ')'
+               ;
+
+# Composite literal — `T{…}` where T is a type-shaped form
+# (struct / array / slice / map literal type, or a named type
+# with optional generic args). The `IDENT{…}` form clashes
+# with `if IDENT { block }` at LR(1); the grammar resolves it
+# by `%shift LBRACE` — `{` after a qualified-name expression
+# is eagerly absorbed as a composite-literal trailer. That
+# means `if Point { body }` parses syntactically as `if
+# (Point{body})` (which the semantic phase rejects as an
+# invalid expression in if-condition position); users wanting
+# the literal-in-condition form wrap in parens:
+# `if (Point{1, 2}) == p { … }`.
+<composite_lit> : <array_type> <composite_braces>
+                | <slice_type> <composite_braces>
+                | <map_type> <composite_braces>
+                | <struct_type> <composite_braces>
+                | <qualified_name> <composite_braces>
+                | <qualified_name> <type_args> <composite_braces>
+                ;
+
+<expression_opt> : <expression>
+                 |
+                 ;
+
+<argument_list_opt> : <argument_list>
+                    | <argument_list> ','
+                    |
+                    ;
+
+<argument_list> : <argument>
+                | <argument_list> ',' <argument>
+                ;
+
+# An argument is either a regular expression or the trailing
+# spread `expr...` (used to forward variadic parameters).
+<argument> : <expression>
+           | <expression> '...'
+           ;
+
+# `<type_arg_list_tail>` removed — see `<primary_expr>`'s
+# trailer-list comment for the multi-arg generic-call cut.
+
+# Composite-literal trailer — `T{…}`. The `<composite_braces>`
+# wrapper accepts the empty `{}`, a single-element list, and
+# trailing-comma forms.
+<composite_braces> : '{' '}'
+                   | '{' <element_list> '}'
+                   | '{' <element_list> ',' '}'
+                   ;
+
+<element_list> : <element>
+               | <element_list> ',' <element>
+               ;
+
+# Composite-literal element — covered as `<expression>`
+# (optionally) followed by `: <expression>` for the keyed
+# form. The IDENT-as-key vs IDENT-as-operand-name ambiguity is
+# resolved by treating ALL keys as expressions and letting the
+# semantic phase narrow to a valid key shape (IDENT for struct
+# fields, INT_LIT for array index, STRING_LIT / expression for
+# map keys). Nested composite-brace elements (`{ {1, 2}, {3, 4}
+# }`) come through the `<composite_braces>` alternative.
+<element> : <expression>
+          | <expression> ':' <expression>
+          | <composite_braces>
+          | <expression> ':' <composite_braces>
+          ;
+
+# --- operands -----------------------------------------------------------
+
+<operand> : <literal>
+          | <qualified_name>
+          | '(' <expression> ')'
+          ;
+
+<literal> : <basic_lit>
+          | <function_lit>
+          ;
+
+<basic_lit> : INT_LIT
+            | FLOAT_LIT
+            | STRING_LIT
+            | RAW_STRING
+            | RUNE_LIT
+            | 'nil'
+            | 'true'
+            | 'false'
+            ;
+
+# Function literal — `func(params) result { body }`. Anonymous
+# function.
+<function_lit> : 'func' <signature> <block>
+               ;
+
+# `<composite_literal_with_type>` removed — composite literals
+# now live on `<composite_lit>` above, alongside the
+# IDENT-named variants.
+
+<expression_list> : <expression>
+                  | <expression_list> ',' <expression>
+                  ;
+
+# The no-brace cover chain has been removed. Go's
+# composite-literal-vs-block ambiguity (`if T{} { body }`)
+# is a true LR(1) ambiguity — canonical-LR(1) construction
+# couldn't break it cleanly either. The compromise here:
+# `%shift LBRACE` makes `{` after a primary always extend
+# the primary as a composite-literal trailer. That means
+# composite literals work everywhere in expression
+# position, but in `if` / `for` / `switch` heads users
+# must wrap a primary-ending-in-IDENT condition in parens
+# to avoid the trailing `{ body }` being absorbed:
+#   `if (cond) { body }` instead of `if cond { body }`
+#   when `cond` ends in a qualified name or generic call.
+#   `for x := range (slice) { body }` instead of
+#   `for x := range slice { body }`.
+# Comparison conditions (`if x > 0 { ... }`) don't trip
+# this, since the `0` literal can't extend with `{`.
+# A future host filter could emit a synthetic
+# `LBRACE_BLOCK` token to remove the restriction.
