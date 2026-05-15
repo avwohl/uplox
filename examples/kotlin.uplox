@@ -8,6 +8,18 @@
 # into a single-pass LR(1) parser without the host filter
 # infrastructure that the full Kotlin grammar would require.
 #
+# Also covers Kotlin Multiplatform (KMP) source. KMP is the
+# same syntactic language — what makes a project
+# "multiplatform" is Gradle source-set layout and `expect` /
+# `actual` matching across source sets, both of which are
+# non-grammatical. The `expect` and `actual` modifiers used
+# on declarations (`expect class Platform`,
+# `actual fun greet(): String`, `expect val NAME: String`,
+# `actual typealias Foo = JvmFoo`) live in the modifier list
+# alongside `external`. KMP-specific annotations
+# (`@OptIn(...)`, `@JsExport`, `@JsName`, `@ObjCName`,
+# `@HiddenFromObjC`) are regular annotations.
+#
 # In scope:
 #
 #   * Top-level: package declaration, import declarations,
