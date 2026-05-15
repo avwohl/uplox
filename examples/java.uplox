@@ -1,12 +1,14 @@
 # Java 17 — uplox first cut.
 #
-# Targets the language at Java 17 LTS — modern enough to cover
-# real-world code (records, sealed classes, switch expressions
-# with arrow patterns, pattern matching for `instanceof`, text
-# blocks, `var`, enhanced enums, generics with wildcards, lambdas
-# and method references) without yet adopting the preview features
-# in Java 18 - 21 (string templates, unnamed classes, record
-# patterns inside switch).
+# Targets the language at Java 21 LTS — records, sealed
+# classes, switch expressions with arrow patterns, pattern
+# matching for `instanceof` (including record patterns and
+# unnamed pattern variables), text blocks, `var`, enhanced
+# enums, generics with wildcards, lambdas, method references,
+# the Java 9 module system, and JEP 512's compact source files
+# (unnamed classes with top-level methods / fields /
+# initialisers). String templates (the JEP 459 preview that
+# became reverted) remain out of scope.
 #
 # Built around the JLS §3 - §15 layout:
 #
@@ -448,25 +450,39 @@ IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
                  | <qualified_name> '.' IDENT
                  ;
 
-<type_decls_opt> : <type_decls>
+<type_decls_opt> : <top_level_decls>
                  |
                  ;
 
-<type_decls> : <type_decl>
-             | <type_decls> <type_decl>
-             ;
+<top_level_decls> : <top_level_decl>
+                  | <top_level_decls> <top_level_decl>
+                  ;
+
+# A top-level declaration: an ordinary type declaration, or
+# (JEP 512, Java 21+) an unnamed-class member — a top-level
+# field, method, or initialiser. The unnamed-class members
+# reuse the class-body productions; they only appear at the
+# top level (not in `<class_member>`) so the two contexts'
+# `<field_or_method>` / `<void_method_decl>` /
+# `<generic_method_decl>` reductions stay disjoint.
+<top_level_decl> : <type_decl>
+                 | <field_or_method>
+                 | <void_method_decl>
+                 | <generic_method_decl>
+                 | <static_initializer>
+                 | <instance_initializer>
+                 ;
 
 # --- type declarations ---------------------------------------------------
 
-# A top-level type declaration. Unnamed classes / top-level
-# methods (JEP 445, preview in Java 21+) would add
-# `<field_or_method>` and similar directly here, but the
-# field/method productions share their prefix
-# (`<modifiers_opt> <type> IDENT`) with `<class_decl>` /
-# `<interface_decl>` headers and create reduce/reduce
-# conflicts when reachable from both top-level and class-
-# member contexts. The unnamed-class feature is preview-only;
-# wrap top-level methods in a `class Main { … }` for now.
+  # A top-level type declaration. Used both as the top-level
+# unit (via `<compilation_unit>`'s `<type_decls_opt>` →
+# `<top_level_decls>`, see below) and as a nested-type
+# member inside `<class_member>`. The unnamed-class members
+# (top-level fields, methods, initialisers — JEP 512
+# "Compact Source Files and Instance Main Methods") live
+# only on `<top_level_decls>` so they don't reduce/reduce
+# with the same shapes inside a class body.
 <type_decl> : <class_decl>
             | <interface_decl>
             | <enum_decl>
