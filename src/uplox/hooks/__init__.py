@@ -46,7 +46,12 @@ __all__ = [
     "SyncSetRecovery",
     "TypedefTracker",
     "scoped_table_hooks",
+    "rewrite_generics",
+    "DIALECTS",
+    "Dialect",
 ]
+
+from .generic_brackets import DIALECTS, Dialect, rewrite_generics
 
 
 # ---- Scoped name table -------------------------------------------------------
