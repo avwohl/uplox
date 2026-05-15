@@ -1,0 +1,1042 @@
+# C++20 / C++23 — uplox first cut.
+#
+# Targets a substantial subset of modern C++ — enough to cover
+# real-world C++20 code (classes with inheritance, member
+# functions, function and class templates, namespaces, lambdas,
+# range-based for, auto, references, smart-pointer
+# instantiations, the four C++ casts, exception handling,
+# attributes [[…]], constexpr, trailing return types,
+# structured bindings, nullptr, override / final) without the
+# very-hard frontier features (concepts, modules, coroutines,
+# full variadic-template pack expansion, pointer-to-member).
+#
+# Out of scope (documented inline where each comes up):
+#
+#   * Preprocessor — delegated to a separate pass (same
+#     convention as c23.uplox; the lexer skips `#…` lines).
+#   * Modules (`import` / `export module`).
+#   * Concepts (`concept C = …`, `requires` expressions).
+#   * Coroutines (`co_yield` / `co_return` — only
+#     `co_await` is parsed, as a unary operator).
+#   * Variadic templates with pack expansion in argument /
+#     parameter position.
+#   * Pointer-to-member types (`T C::*`).
+#   * Full functional-style cast disambiguation (`T(args)` as
+#     constructor call). Handled via the LPAREN_FUNCALL filter
+#     designation if the host classifies the shape.
+#   * Linkage specifications with single-declaration form
+#     (only block form `extern "C" { … }` supported).
+#   * Complex parenthesised abstract declarators (`(*)[]` etc.)
+#     — use a typedef instead.
+#
+# How the grammar handles C++'s LR(k>1) ambiguities.
+#
+# Same approach as `csharp.uplox` / `java.uplox`: promote the
+# disambiguations into the tokenizer via synthetic terminals.
+#
+#   * `LT_TEMPLATE` / `GT_TEMPLATE` — angle brackets opening /
+#     closing a template parameter or argument list. The host
+#     filter scans ahead from each `<` and emits LT_TEMPLATE
+#     when a matching `>` is followed by a
+#     can-end-template-list token (`(`, `)`, `]`, `,`, `.`, `?`,
+#     `;`, `:`, `==`, `!=`, `&&`, `||`, `{`, EOF). `>>` and
+#     `>>>` split into multiple GT_TEMPLATE tokens when inside
+#     an open template list.
+#   * `LPAREN_CAST` — C-style cast opening paren, when the
+#     contents are a complete type and the trailing context
+#     can follow a cast.
+#   * `IDENT_TYPE` — typedef-name / class-name (the C
+#     "typedef hack"), re-applied for class-names and alias
+#     templates. The host filter maintains a per-scope symbol
+#     table (one of the harder host-side jobs in C++ parsing).
+#
+# Conflict-resolution decisions:
+#
+#   * Dangling `else` — `%shift KW_ELSE` (greedy).
+#   * Postfix `[`, `(`, `++`, `--`, `.`, `->`, `::` — shift
+#     beats reducing the primary up the chain.
+#   * Operator-precedence rungs — shift the higher-precedence
+#     operator's lookahead.
+
+%grammar cpp
+
+
+%define lr.type lalr
+%options
+start = translation_unit
+
+%shift
+KW_ELSE
+LBRACK
+LPAREN
+INC
+DEC
+DOT
+ARROW_PTR
+DCOLON
+
+PLUS MINUS STAR SLASH PERCENT
+LSHIFT RSHIFT
+LT GT LE GE
+SPACESHIP
+EQEQ NEQ
+AMP CARET PIPE
+LOG_AND LOG_OR
+QUESTION
+EQ PLUS_EQ MINUS_EQ STAR_EQ SLASH_EQ
+PERCENT_EQ AMP_EQ PIPE_EQ CARET_EQ
+LSHIFT_EQ RSHIFT_EQ
+DOT_STAR ARROW_STAR
+KW_THROW
+
+LBRACE
+KW_FINAL KW_OVERRIDE
+KW_NOEXCEPT
+
+# `class Foo {` — `{` opens class body, not following empty
+# base_clause. Same for COLON (inherit clause start).
+COLON
+
+# After enum / class keyword on IDENT — shift the IDENT as
+# the type name rather than committing to anonymous form.
+IDENT IDENT_TYPE
+
+# After a pointer/reference operator, `const`/`volatile`
+# extends the pointer/reference type rather than closing it.
+KW_CONST KW_VOLATILE
+
+# After a member declarator's `=`, `default` / `delete`
+# extends the special-member form rather than reducing the
+# pure-virtual `= 0` form.
+KW_DEFAULT KW_DELETE
+
+# After `friend`, a class-key continues the forward-friend
+# declaration. Shift over the modifier-list close.
+KW_CLASS KW_STRUCT KW_UNION
+
+# String-literal concatenation — adjacent STRING_LITs join
+# into one literal; shift to keep consuming them.
+STRING_LIT
+RBRACE
+
+%reduce
+KW_AUTO
+KW_VOID KW_CHAR KW_SHORT KW_INT KW_LONG
+KW_SIGNED KW_UNSIGNED KW_FLOAT KW_DOUBLE
+KW_BOOL KW_WCHAR_T KW_CHAR16_T KW_CHAR32_T KW_CHAR8_T
+
+%tokens
+
+WS         = /[ \t\r\n\x0c\x0b]+/                %skip
+LINE_COMMENT = /\/\/[^\n]*/                      %skip
+BLOCK_COMMENT = /\/\*([^*]|\*+[^*\/])*\*+\//     %skip
+PREPROC    = /#([^\n\\]|\\\n|\\.)*/              %skip
+
+FLOAT_LIT  = /(0[xX]([0-9A-Fa-f']+\.[0-9A-Fa-f']*|\.[0-9A-Fa-f']+|[0-9A-Fa-f']+)[pP][+-]?[0-9]+|[0-9']+\.[0-9']*([eE][+-]?[0-9]+)?|\.[0-9']+([eE][+-]?[0-9]+)?|[0-9']+[eE][+-]?[0-9]+)[fFlL]?/
+INT_LIT    = /(0[xX][0-9A-Fa-f']+|0[bB][01']+|0[0-7']*|[1-9][0-9']*)[uUlLzZ]*/
+CHAR_LIT   = /(u8|u|U|L)?'([^'\\\n]|\\.)+'/
+STRING_LIT = /(u8|u|U|L)?"([^"\\\n]|\\.)*"/
+
+KW_VOID    = 'void'
+KW_BOOL    = 'bool'
+KW_CHAR    = 'char'
+KW_CHAR8_T = 'char8_t'
+KW_CHAR16_T = 'char16_t'
+KW_CHAR32_T = 'char32_t'
+KW_WCHAR_T = 'wchar_t'
+KW_SHORT   = 'short'
+KW_INT     = 'int'
+KW_LONG    = 'long'
+KW_SIGNED  = 'signed'
+KW_UNSIGNED = 'unsigned'
+KW_FLOAT   = 'float'
+KW_DOUBLE  = 'double'
+KW_AUTO    = 'auto'
+
+KW_CONST   = 'const'
+KW_VOLATILE = 'volatile'
+KW_MUTABLE = 'mutable'
+KW_STATIC  = 'static'
+KW_EXTERN  = 'extern'
+KW_REGISTER = 'register'
+KW_INLINE  = 'inline'
+KW_CONSTEXPR = 'constexpr'
+KW_CONSTEVAL = 'consteval'
+KW_CONSTINIT = 'constinit'
+KW_THREAD_LOCAL = 'thread_local'
+KW_VIRTUAL = 'virtual'
+KW_EXPLICIT = 'explicit'
+KW_FRIEND  = 'friend'
+KW_TYPEDEF = 'typedef'
+
+KW_CLASS   = 'class'
+KW_STRUCT  = 'struct'
+KW_UNION   = 'union'
+KW_ENUM    = 'enum'
+KW_NAMESPACE = 'namespace'
+KW_USING   = 'using'
+KW_TEMPLATE = 'template'
+KW_TYPENAME = 'typename'
+KW_THIS    = 'this'
+KW_PUBLIC  = 'public'
+KW_PRIVATE = 'private'
+KW_PROTECTED = 'protected'
+
+KW_IF      = 'if'
+KW_ELSE    = 'else'
+KW_WHILE   = 'while'
+KW_DO      = 'do'
+KW_FOR     = 'for'
+KW_SWITCH  = 'switch'
+KW_CASE    = 'case'
+KW_DEFAULT = 'default'
+KW_BREAK   = 'break'
+KW_CONTINUE = 'continue'
+KW_RETURN  = 'return'
+KW_GOTO    = 'goto'
+KW_TRY     = 'try'
+KW_CATCH   = 'catch'
+KW_THROW   = 'throw'
+
+KW_TRUE    = 'true'
+KW_FALSE   = 'false'
+KW_NULLPTR = 'nullptr'
+KW_NEW     = 'new'
+KW_DELETE  = 'delete'
+KW_SIZEOF  = 'sizeof'
+KW_ALIGNOF = 'alignof'
+KW_TYPEID  = 'typeid'
+KW_DECLTYPE = 'decltype'
+KW_NOEXCEPT = 'noexcept'
+KW_STATIC_CAST = 'static_cast'
+KW_DYNAMIC_CAST = 'dynamic_cast'
+KW_CONST_CAST = 'const_cast'
+KW_REINTERPRET_CAST = 'reinterpret_cast'
+KW_STATIC_ASSERT = 'static_assert'
+KW_CO_AWAIT = 'co_await'
+KW_CO_RETURN = 'co_return'
+KW_OVERRIDE = 'override'
+KW_FINAL   = 'final'
+KW_OPERATOR_KW = 'operator'
+
+IDENT      = /[A-Za-z_][A-Za-z0-9_]*/
+
+DCOLON     = '::'
+ARROW_STAR = '->*'
+ARROW_PTR  = '->'
+DOT_STAR   = '.*'
+ELLIPSIS   = '...'
+SPACESHIP  = '<=>'
+LSHIFT_EQ  = '<<='
+RSHIFT_EQ  = '>>='
+PLUS_EQ    = '+='
+MINUS_EQ   = '-='
+STAR_EQ    = '*='
+SLASH_EQ   = '/='
+PERCENT_EQ = '%='
+AMP_EQ     = '&='
+PIPE_EQ    = '|='
+CARET_EQ   = '^='
+EQEQ       = '=='
+NEQ        = '!='
+LE         = '<='
+GE         = '>='
+LSHIFT     = '<<'
+RSHIFT     = '>>'
+LOG_AND    = '&&'
+LOG_OR     = '||'
+INC        = '++'
+DEC        = '--'
+
+EQ         = '='
+LT         = '<'
+GT         = '>'
+PLUS       = '+'
+MINUS      = '-'
+STAR       = '*'
+SLASH      = '/'
+PERCENT    = '%'
+AMP        = '&'
+PIPE       = '|'
+CARET      = '^'
+TILDE      = '~'
+BANG       = '!'
+QUESTION   = '?'
+LPAREN     = '('
+RPAREN     = ')'
+LBRACE     = '{'
+RBRACE     = '}'
+LBRACK     = '['
+RBRACK     = ']'
+COMMA      = ','
+SEMI       = ';'
+COLON      = ':'
+DOT        = '.'
+
+LT_TEMPLATE  = 'LT_TEMPLATE_SYNTHETIC_NEVER_EMITTED'
+GT_TEMPLATE  = 'GT_TEMPLATE_SYNTHETIC_NEVER_EMITTED'
+LPAREN_CAST  = 'LPAREN_CAST_SYNTHETIC_NEVER_EMITTED'
+IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
+
+%rules
+
+# --- translation unit ----------------------------------------------------
+
+<translation_unit> : <top_decls_opt>
+                   ;
+
+<top_decls_opt> : <top_decls>
+                |
+                ;
+
+<top_decls> : <top_decl>
+            | <top_decls> <top_decl>
+            ;
+
+<top_decl> : <declaration>
+           | <function_definition>
+           | <namespace_definition>
+           | <template_declaration>
+           | <linkage_specification>
+           | <static_assert_decl>
+           | <forward_decl>
+           | ';'
+           ;
+
+# Forward / type-reference declaration: `class Foo;`,
+# `struct Bar;`, `enum class Color;`, `friend class Foo;`.
+# Kept as a separate top-level rule so it doesn't collide
+# with the class-definition class_specifier path on `{`
+# vs. `;`.
+<forward_decl> : <class_key> IDENT ';'
+               | <class_key> IDENT_TYPE ';'
+               | KW_ENUM IDENT ';'
+               | KW_ENUM IDENT_TYPE ';'
+               | KW_ENUM KW_CLASS IDENT ';'
+               | KW_ENUM KW_CLASS IDENT_TYPE ';'
+               | KW_FRIEND <class_key> IDENT ';'
+               | KW_FRIEND <class_key> IDENT_TYPE ';'
+               ;
+
+<static_assert_decl> : KW_STATIC_ASSERT '(' <expression> ')' ';'
+                     | KW_STATIC_ASSERT '(' <expression> ',' STRING_LIT ')' ';'
+                     ;
+
+<linkage_specification> : KW_EXTERN STRING_LIT '{' <top_decls_opt> '}'
+                        ;
+
+# --- namespaces ----------------------------------------------------------
+
+<namespace_definition> : KW_NAMESPACE IDENT '{' <top_decls_opt> '}'
+                       | KW_NAMESPACE '{' <top_decls_opt> '}'
+                       | KW_INLINE KW_NAMESPACE IDENT '{' <top_decls_opt> '}'
+                       | KW_NAMESPACE IDENT '=' <qualified_namespace_name> ';'
+                       ;
+
+<qualified_namespace_name> : IDENT
+                           | <qualified_namespace_name> DCOLON IDENT
+                           ;
+
+# --- declarations --------------------------------------------------------
+
+<declaration> : <decl_specs> <init_declarator_list> ';'
+              | <decl_specs> ';'
+              | <using_declaration>
+              | <alias_declaration>
+              | <typedef_declaration>
+              ;
+
+<using_declaration> : KW_USING IDENT ';'
+                    | KW_USING IDENT_TYPE ';'
+                    | KW_USING <nested_name_spec> IDENT ';'
+                    | KW_USING <nested_name_spec> IDENT_TYPE ';'
+                    | KW_USING KW_NAMESPACE <qualified_namespace_name> ';'
+                    | KW_USING KW_TYPENAME <nested_name_spec> IDENT ';'
+                    | KW_USING KW_TYPENAME <nested_name_spec> IDENT_TYPE ';'
+                    ;
+
+<alias_declaration> : KW_USING IDENT '=' <type_id> ';'
+                    ;
+
+<typedef_declaration> : KW_TYPEDEF <decl_specs> <init_declarator_list> ';'
+                      ;
+
+# --- declaration specifiers ----------------------------------------------
+
+<decl_specs> : <decl_spec>
+             | <decl_specs> <decl_spec>
+             ;
+
+<decl_spec> : <storage_class_spec>
+            | <type_spec>
+            | <function_spec>
+            | <cv_qualifier>
+            | KW_CONSTEXPR | KW_CONSTEVAL | KW_CONSTINIT
+            | KW_THREAD_LOCAL
+            | KW_FRIEND
+            ;
+
+<storage_class_spec> : KW_STATIC | KW_EXTERN | KW_REGISTER | KW_MUTABLE
+                     ;
+
+<function_spec> : KW_INLINE | KW_VIRTUAL | KW_EXPLICIT
+                ;
+
+<cv_qualifier> : KW_CONST | KW_VOLATILE
+               ;
+
+# Type specifier. Elaborated type specifiers
+# (`class Foo` / `enum Color` as a type reference) are
+# omitted from this rung — they collide with class-specifier
+# starts at the `{`-shifting state. Forward declarations of
+# classes (`class Foo;`) are accepted via the `<forward_decl>`
+# top-level rule, and type-name references in expression /
+# parameter / member type positions use the unadorned name
+# (host filter rewrites known types to `IDENT_TYPE`).
+<type_spec> : <simple_type_spec>
+            | <class_specifier>
+            | <enum_specifier>
+            ;
+
+<simple_type_spec> : KW_VOID | KW_BOOL | KW_CHAR | KW_CHAR8_T
+                   | KW_CHAR16_T | KW_CHAR32_T | KW_WCHAR_T
+                   | KW_SHORT | KW_INT | KW_LONG
+                   | KW_SIGNED | KW_UNSIGNED
+                   | KW_FLOAT | KW_DOUBLE
+                   | KW_AUTO
+                   | <decltype_spec>
+                   | <type_name>
+                   ;
+
+<decltype_spec> : KW_DECLTYPE '(' <expression> ')'
+                | KW_DECLTYPE '(' KW_AUTO ')'
+                ;
+
+# A type-name reference: simple IDENT_TYPE (from the host
+# filter) or a qualified name, with optional template args.
+# IDENT_TYPE is REQUIRED — the host's `cpp_filter` rewrites
+# class-names / typedef-names / alias-template-names to
+# IDENT_TYPE before the parser sees them. Without the filter,
+# only built-in types and qualified-name types where every
+# segment has been filter-classified work; bare class-name
+# declarations like `MyClass x;` fail (same as csharp.uplox
+# and java.uplox without their respective filters).
+<type_name> : IDENT_TYPE
+            | IDENT_TYPE LT_TEMPLATE <template_arg_list> GT_TEMPLATE
+            | IDENT_TYPE LT_TEMPLATE GT_TEMPLATE
+            | <nested_name_spec> IDENT_TYPE
+            | <nested_name_spec> IDENT_TYPE LT_TEMPLATE <template_arg_list> GT_TEMPLATE
+            | <nested_name_spec> IDENT_TYPE LT_TEMPLATE GT_TEMPLATE
+            ;
+
+<template_arg_list> : <template_arg>
+                    | <template_arg_list> ',' <template_arg>
+                    ;
+
+<template_arg> : <type_id>
+               | <conditional_expr>
+               ;
+
+# Nested-name specifier: `Foo::Bar::` chains used to qualify
+# names. Each segment is either IDENT_TYPE (filter-classified
+# type/namespace) or plain IDENT (when the filter doesn't
+# run). The AST builder distinguishes based on resolution.
+<nested_name_spec> : IDENT_TYPE DCOLON
+                   | IDENT DCOLON
+                   | DCOLON
+                   | <nested_name_spec> IDENT_TYPE DCOLON
+                   | <nested_name_spec> IDENT DCOLON
+                   ;
+
+<nested_name_spec_opt> : <nested_name_spec>
+                       |
+                       ;
+
+# Elaborated type specifier: `class Foo`, `struct Bar`,
+# `enum Color`, `typename T::type`. The class-key forms
+# require IDENT_TYPE (a name already known to be a class) —
+# the `class Foo` shape with a bare IDENT collides with
+# class definition (`class Foo { … }`) on the `{`-shifting
+# decision. In real C++ code, elaborated forms only appear
+# for already-declared types, so requiring IDENT_TYPE
+# matches the practical use.
+<elaborated_type_spec> : <class_key> IDENT_TYPE
+                       | KW_ENUM IDENT_TYPE
+                       | KW_TYPENAME <nested_name_spec> IDENT
+                       | KW_TYPENAME <nested_name_spec> IDENT_TYPE
+                       ;
+
+<class_key> : KW_CLASS | KW_STRUCT | KW_UNION
+            ;
+
+# --- init declarator list ------------------------------------------------
+
+<init_declarator_list> : <init_declarator>
+                       | <init_declarator_list> ',' <init_declarator>
+                       ;
+
+<init_declarator> : <declarator>
+                  | <declarator> <initializer>
+                  ;
+
+# --- declarators ---------------------------------------------------------
+
+<declarator> : <noptr_declarator>
+             | <ptr_operator> <declarator>
+             ;
+
+<ptr_operator> : '*'
+               | '*' <cv_qualifier_seq>
+               | '&'
+               | '&&'
+               ;
+
+<cv_qualifier_seq> : <cv_qualifier>
+                   | <cv_qualifier_seq> <cv_qualifier>
+                   ;
+
+<noptr_declarator> : <declarator_id>
+                   | <noptr_declarator> '[' <expression_opt> ']'
+                   | <noptr_declarator> '(' <parameter_declaration_clause> ')' <function_qualifiers>
+                   | '(' <declarator> ')'
+                   ;
+
+<function_qualifiers> : <function_qualifiers> <function_qualifier>
+                      |
+                      ;
+
+<function_qualifier> : KW_CONST | KW_VOLATILE
+                     | '&' | '&&'
+                     | <noexcept_specifier>
+                     | <trailing_return_type>
+                     | KW_OVERRIDE | KW_FINAL
+                     ;
+
+<noexcept_specifier> : KW_NOEXCEPT
+                     | KW_NOEXCEPT '(' <expression> ')'
+                     ;
+
+<trailing_return_type> : ARROW_PTR <type_id>
+                       ;
+
+<declarator_id> : <unqualified_id>
+                | <nested_name_spec> <unqualified_id>
+                ;
+
+# Unqualified-id: the LHS of a declarator or RHS of a member-
+# access expression. Restricted to plain IDENT plus the
+# operator-function forms — IDENT_TYPE / destructor forms
+# are omitted because they collide with `<type_name>`
+# reductions at the same state when IDENT_TYPE is reachable
+# from both type-context and id-expression-context. The
+# destructor form `~Class` is handled as a postfix-expression
+# suffix `'.' TILDE IDENT` (member access of a destructor)
+# in the AST builder; explicit destructor invocation is rare
+# in user code outside of templated cleanup utilities.
+<unqualified_id> : IDENT
+                 | KW_OPERATOR_KW <overloadable_operator>
+                 ;
+
+<overloadable_operator> : '+' | '-' | '*' | '/' | '%'
+                        | '^' | '&' | '|' | '~' | '!'
+                        | '=' | '<' | '>'
+                        | '+=' | '-=' | '*=' | '/=' | '%='
+                        | '^=' | '&=' | '|='
+                        | '<<' | '>>' | '<<=' | '>>='
+                        | '==' | '!=' | '<=' | '>=' | '<=>'
+                        | '&&' | '||'
+                        | '++' | '--'
+                        | ',' | '->' | '->*'
+                        | '(' ')' | '[' ']'
+                        | KW_NEW | KW_DELETE
+                        | KW_NEW '[' ']' | KW_DELETE '[' ']'
+                        | KW_CO_AWAIT
+                        ;
+
+# --- parameter declaration clause ----------------------------------------
+
+<parameter_declaration_clause> : <parameter_declaration_list>
+                               | <parameter_declaration_list> ',' ELLIPSIS
+                               | <parameter_declaration_list> ELLIPSIS
+                               | ELLIPSIS
+                               |
+                               ;
+
+<parameter_declaration_list> : <parameter_declaration>
+                             | <parameter_declaration_list> ',' <parameter_declaration>
+                             ;
+
+<parameter_declaration> : <decl_specs>
+                        | <decl_specs> <declarator>
+                        | <decl_specs> <declarator> '=' <conditional_expr>
+                        | <decl_specs> <abstract_declarator>
+                        ;
+
+# Simplified abstract declarator — covers pointer/reference,
+# array, and function-pointer forms. Complex nested forms
+# (`(*)[]`) require parenthesised abstract declarators which
+# blow up the LR table; use a typedef in real code.
+<abstract_declarator> : <ptr_operator>
+                      | <ptr_operator> <abstract_declarator>
+                      | <abstract_declarator> '[' <expression_opt> ']'
+                      ;
+
+# --- initializer ---------------------------------------------------------
+
+<initializer> : '=' <conditional_expr>
+              | '=' <braced_init_list>
+              | '(' <expression_list_opt> ')'
+              | <braced_init_list>
+              ;
+
+<braced_init_list> : '{' '}'
+                   | '{' <initializer_clause_list> '}'
+                   | '{' <initializer_clause_list> ',' '}'
+                   ;
+
+# Each element of an initializer list is wrapped in
+# `<initializer_clause>` to give the parser a distinct
+# non-terminal name that doesn't collide with `<expression>`
+# in argument-list contexts. The clause holds either an
+# assignment-expr or a nested braced-init-list.
+<initializer_clause_list> : <initializer_clause>
+                          | <initializer_clause_list> ',' <initializer_clause>
+                          ;
+
+<initializer_clause> : <assignment_expr>
+                     | <braced_init_list>
+                     ;
+
+<type_id> : <decl_specs>
+          | <decl_specs> <abstract_declarator>
+          ;
+
+# --- class specifier -----------------------------------------------------
+
+<class_specifier> : <class_head> '{' <class_member_specifications_opt> '}'
+                  ;
+
+<class_head> : <class_key>
+             | <class_key> IDENT <base_clause_opt>
+             | <class_key> IDENT_TYPE <base_clause_opt>
+             | <class_key> IDENT KW_FINAL <base_clause_opt>
+             | <class_key> IDENT_TYPE KW_FINAL <base_clause_opt>
+             ;
+
+<base_clause_opt> : ':' <base_specifier_list>
+                  |
+                  ;
+
+<base_specifier_list> : <base_specifier>
+                      | <base_specifier_list> ',' <base_specifier>
+                      ;
+
+<base_specifier> : <type_name>
+                 | <access_specifier> <type_name>
+                 | KW_VIRTUAL <type_name>
+                 | KW_VIRTUAL <access_specifier> <type_name>
+                 | <access_specifier> KW_VIRTUAL <type_name>
+                 ;
+
+<access_specifier> : KW_PUBLIC | KW_PRIVATE | KW_PROTECTED
+                   ;
+
+<class_member_specifications_opt> : <class_member_specifications>
+                                  |
+                                  ;
+
+<class_member_specifications> : <class_member_specification>
+                              | <class_member_specifications> <class_member_specification>
+                              ;
+
+<class_member_specification> : <member_declaration>
+                             | <access_specifier> ':'
+                             ;
+
+<member_declaration> : <decl_specs> <member_declarator_list> ';'
+                     | <decl_specs> ';'
+                     | <function_definition>
+                     | <using_declaration>
+                     | <alias_declaration>
+                     | <static_assert_decl>
+                     | <template_declaration>
+                     | ';'
+                     ;
+
+<member_declarator_list> : <member_declarator>
+                         | <member_declarator_list> ',' <member_declarator>
+                         ;
+
+# Member declarator. Pure-virtual `= 0` and `= default` /
+# `= delete` are folded into the general `= <expression>` /
+# `<function_definition>` paths — the keyword forms collide
+# with `<function_body>`'s `EQ KW_DEFAULT ';'` form when
+# both reach the same state. The AST builder recognises
+# `= 0` (pure virtual), `= default`, and `= delete` after
+# the declarator.
+<member_declarator> : <declarator>
+                    | <declarator> '=' <conditional_expr>
+                    | <declarator> '{' <initializer_clause_list> '}'
+                    ;
+
+# --- enum specifier ------------------------------------------------------
+
+<enum_specifier> : <enum_head> '{' <enumerator_list_opt> '}'
+                 ;
+
+<enum_head> : KW_ENUM <enum_key_opt> <enum_head_name_opt> <enum_base_opt>
+            ;
+
+<enum_key_opt> : KW_CLASS | KW_STRUCT
+               |
+               ;
+
+<enum_head_name_opt> : IDENT
+                     | IDENT_TYPE
+                     |
+                     ;
+
+<enum_base_opt> : ':' <decl_specs>
+                |
+                ;
+
+<enumerator_list_opt> : <enumerator_list>
+                      | <enumerator_list> ','
+                      |
+                      ;
+
+<enumerator_list> : <enumerator>
+                  | <enumerator_list> ',' <enumerator>
+                  ;
+
+<enumerator> : IDENT
+             | IDENT '=' <conditional_expr>
+             ;
+
+# --- function definition -------------------------------------------------
+
+# Function definition. The form WITHOUT `<decl_specs>` is
+# for constructors and destructors — they have no return type,
+# only a class-name (constructor) or `~class-name` (destructor)
+# declarator. The AST builder restricts these to member
+# function positions.
+<function_definition> : <decl_specs> <declarator> <function_body>
+                      | <decl_specs> <declarator> <ctor_initializer> <function_body>
+                      | <declarator> <function_body>
+                      | <declarator> <ctor_initializer> <function_body>
+                      ;
+
+<function_body> : <compound_statement>
+                | EQ KW_DEFAULT ';'
+                | EQ KW_DELETE ';'
+                ;
+
+<ctor_initializer> : ':' <mem_initializer_list>
+                   ;
+
+<mem_initializer_list> : <mem_initializer>
+                       | <mem_initializer_list> ',' <mem_initializer>
+                       ;
+
+<mem_initializer> : <mem_initializer_id> '(' <expression_list_opt> ')'
+                  | <mem_initializer_id> '{' <expression_list_opt> '}'
+                  ;
+
+<mem_initializer_id> : IDENT
+                     | IDENT_TYPE
+                     | <nested_name_spec> IDENT
+                     | <nested_name_spec> IDENT_TYPE
+                     ;
+
+# --- handlers ------------------------------------------------------------
+
+<handlers> : <handler>
+           | <handlers> <handler>
+           ;
+
+<handler> : KW_CATCH '(' <exception_declaration> ')' <compound_statement>
+          ;
+
+<exception_declaration> : <decl_specs>
+                        | <decl_specs> <declarator>
+                        | ELLIPSIS
+                        ;
+
+# --- templates -----------------------------------------------------------
+
+<template_declaration> : KW_TEMPLATE LT_TEMPLATE <template_parameter_list> GT_TEMPLATE <template_body>
+                       ;
+
+<template_parameter_list> : <template_parameter>
+                          | <template_parameter_list> ',' <template_parameter>
+                          ;
+
+<template_parameter> : <type_parameter>
+                     | <parameter_declaration>
+                     ;
+
+<type_parameter> : KW_TYPENAME
+                 | KW_TYPENAME IDENT
+                 | KW_TYPENAME IDENT '=' <type_id>
+                 | KW_CLASS
+                 | KW_CLASS IDENT
+                 | KW_CLASS IDENT '=' <type_id>
+                 ;
+
+<template_body> : <declaration>
+                | <function_definition>
+                | <template_declaration>
+                ;
+
+# --- statements ----------------------------------------------------------
+
+<compound_statement> : '{' <statements_opt> '}'
+                     ;
+
+<statements_opt> : <statements>
+                 |
+                 ;
+
+<statements> : <statement>
+             | <statements> <statement>
+             ;
+
+<statement> : <expression_statement>
+            | <declaration_statement>
+            | <compound_statement>
+            | <selection_statement>
+            | <iteration_statement>
+            | <jump_statement>
+            | <try_block>
+            | <labelled_statement>
+            ;
+
+<expression_statement> : <expression> ';'
+                       | ';'
+                       ;
+
+<declaration_statement> : <declaration>
+                        ;
+
+<selection_statement> : KW_IF '(' <expression> ')' <statement>
+                      | KW_IF '(' <expression> ')' <statement> KW_ELSE <statement>
+                      | KW_IF KW_CONSTEXPR '(' <expression> ')' <statement>
+                      | KW_IF KW_CONSTEXPR '(' <expression> ')' <statement> KW_ELSE <statement>
+                      | KW_SWITCH '(' <expression> ')' <statement>
+                      ;
+
+<iteration_statement> : KW_WHILE '(' <expression> ')' <statement>
+                      | KW_DO <statement> KW_WHILE '(' <expression> ')' ';'
+                      | KW_FOR '(' <for_init> <expression_opt> ';' <expression_opt> ')' <statement>
+                      | KW_FOR '(' <for_range_declaration> ':' <expression> ')' <statement>
+                      ;
+
+<for_init> : <expression> ';'
+           | <declaration>
+           | ';'
+           ;
+
+<for_range_declaration> : <decl_specs> <declarator>
+                        ;
+
+<jump_statement> : KW_BREAK ';'
+                 | KW_CONTINUE ';'
+                 | KW_RETURN <expression_opt> ';'
+                 | KW_RETURN <braced_init_list> ';'
+                 | KW_GOTO IDENT ';'
+                 | KW_CO_RETURN <expression_opt> ';'
+                 ;
+
+<try_block> : KW_TRY <compound_statement> <handlers>
+            ;
+
+<labelled_statement> : IDENT ':' <statement>
+                     | KW_CASE <conditional_expr> ':' <statement>
+                     | KW_DEFAULT ':' <statement>
+                     ;
+
+# --- expressions ---------------------------------------------------------
+
+<expression_opt> : <expression>
+                 |
+                 ;
+
+<expression_list_opt> : <expression_list>
+                      |
+                      ;
+
+<expression_list> : <conditional_expr>
+                  | <expression_list> ',' <conditional_expr>
+                  ;
+
+# Comma-expression (`(a, b)` evaluating to `b`) is OMITTED
+# from this grammar — the `<expression> ',' <assignment_expr>`
+# extension collides with comma-separated argument lists and
+# braced-init-list elements at every state where both share
+# `<assignment_expr>` as a base. Real C++ code uses comma-
+# expressions only in for-loop expression-statement
+# positions and macro-style sequencing; wrap in another
+# parenthesised expression if you need it, and use
+# explicit braces / lists instead at element boundaries.
+<expression> : <assignment_expr>
+             ;
+
+<assignment_expr> : <conditional_expr>
+                  | <throw_expr>
+                  | <logical_or_expr> <assignment_operator> <assignment_expr>
+                  ;
+
+<throw_expr> : KW_THROW
+             | KW_THROW <assignment_expr>
+             ;
+
+<assignment_operator> : '=' | '+=' | '-=' | '*=' | '/=' | '%='
+                      | '<<=' | '>>=' | '&=' | '^=' | '|='
+                      ;
+
+<conditional_expr> : <logical_or_expr>
+                   | <logical_or_expr> '?' <expression> ':' <assignment_expr>
+                   ;
+
+<logical_or_expr> : <logical_and_expr>
+                  | <logical_or_expr> '||' <logical_and_expr>
+                  ;
+
+<logical_and_expr> : <inclusive_or_expr>
+                   | <logical_and_expr> '&&' <inclusive_or_expr>
+                   ;
+
+<inclusive_or_expr> : <exclusive_or_expr>
+                    | <inclusive_or_expr> '|' <exclusive_or_expr>
+                    ;
+
+<exclusive_or_expr> : <and_expr>
+                    | <exclusive_or_expr> '^' <and_expr>
+                    ;
+
+<and_expr> : <equality_expr>
+           | <and_expr> '&' <equality_expr>
+           ;
+
+<equality_expr> : <relational_expr>
+                | <equality_expr> '==' <relational_expr>
+                | <equality_expr> '!=' <relational_expr>
+                ;
+
+<relational_expr> : <spaceship_expr>
+                  | <relational_expr> '<' <spaceship_expr>
+                  | <relational_expr> '>' <spaceship_expr>
+                  | <relational_expr> '<=' <spaceship_expr>
+                  | <relational_expr> '>=' <spaceship_expr>
+                  ;
+
+<spaceship_expr> : <shift_expr>
+                 | <spaceship_expr> '<=>' <shift_expr>
+                 ;
+
+<shift_expr> : <additive_expr>
+             | <shift_expr> '<<' <additive_expr>
+             | <shift_expr> '>>' <additive_expr>
+             ;
+
+<additive_expr> : <multiplicative_expr>
+                | <additive_expr> '+' <multiplicative_expr>
+                | <additive_expr> '-' <multiplicative_expr>
+                ;
+
+<multiplicative_expr> : <cast_expr>
+                      | <multiplicative_expr> '*' <cast_expr>
+                      | <multiplicative_expr> '/' <cast_expr>
+                      | <multiplicative_expr> '%' <cast_expr>
+                      ;
+
+<cast_expr> : <unary_expr>
+            | LPAREN_CAST <type_id> ')' <cast_expr>
+            ;
+
+<unary_expr> : <postfix_expr>
+             | '++' <cast_expr>
+             | '--' <cast_expr>
+             | '*' <cast_expr>
+             | '&' <cast_expr>
+             | '+' <cast_expr>
+             | '-' <cast_expr>
+             | '!' <cast_expr>
+             | '~' <cast_expr>
+             | KW_SIZEOF <unary_expr>
+             | KW_SIZEOF '(' <type_id> ')'
+             | KW_ALIGNOF '(' <type_id> ')'
+             | KW_NOEXCEPT '(' <expression> ')'
+             | <new_expr>
+             | <delete_expr>
+             | KW_CO_AWAIT <cast_expr>
+             ;
+
+<new_expr> : KW_NEW <type_id>
+           | KW_NEW <type_id> '(' <expression_list_opt> ')'
+           | KW_NEW <type_id> <braced_init_list>
+           | KW_NEW '(' <expression_list> ')' <type_id>
+           | KW_NEW '(' <expression_list> ')' <type_id> '(' <expression_list_opt> ')'
+           ;
+
+<delete_expr> : KW_DELETE <cast_expr>
+              | KW_DELETE '[' ']' <cast_expr>
+              ;
+
+<postfix_expr> : <primary_expr>
+               | <postfix_expr> '[' <expression> ']'
+               | <postfix_expr> '(' <expression_list_opt> ')'
+               | <postfix_expr> '.' <unqualified_id>
+               | <postfix_expr> ARROW_PTR <unqualified_id>
+               | <postfix_expr> '++'
+               | <postfix_expr> '--'
+               | <simple_type_spec> '(' <expression_list_opt> ')'
+               | KW_TYPEID '(' <expression> ')'
+               | KW_TYPEID '(' <type_id> ')'
+               | KW_STATIC_CAST LT_TEMPLATE <type_id> GT_TEMPLATE '(' <expression> ')'
+               | KW_DYNAMIC_CAST LT_TEMPLATE <type_id> GT_TEMPLATE '(' <expression> ')'
+               | KW_CONST_CAST LT_TEMPLATE <type_id> GT_TEMPLATE '(' <expression> ')'
+               | KW_REINTERPRET_CAST LT_TEMPLATE <type_id> GT_TEMPLATE '(' <expression> ')'
+               ;
+
+<primary_expr> : <literal>
+               | KW_THIS
+               | '(' <expression> ')'
+               | <id_expression>
+               | <lambda_expression>
+               ;
+
+<literal> : INT_LIT | FLOAT_LIT
+          | CHAR_LIT | STRING_LIT
+          | KW_TRUE | KW_FALSE | KW_NULLPTR
+          ;
+
+<id_expression> : <unqualified_id>
+                | <nested_name_spec> <unqualified_id>
+                ;
+
+# --- lambda expression ---------------------------------------------------
+
+<lambda_expression> : <lambda_introducer> <compound_statement>
+                    | <lambda_introducer> '(' <parameter_declaration_clause> ')' <function_qualifiers> <compound_statement>
+                    ;
+
+<lambda_introducer> : '[' ']'
+                    | '[' <lambda_capture_list> ']'
+                    | '[' '&' ']'
+                    | '[' '=' ']'
+                    | '[' '&' ',' <lambda_capture_list> ']'
+                    | '[' '=' ',' <lambda_capture_list> ']'
+                    ;
+
+<lambda_capture_list> : <lambda_capture>
+                      | <lambda_capture_list> ',' <lambda_capture>
+                      ;
+
+<lambda_capture> : IDENT
+                 | '&' IDENT
+                 | KW_THIS
+                 | '*' KW_THIS
+                 | IDENT '=' <conditional_expr>
+                 | '&' IDENT '=' <conditional_expr>
+                 ;
