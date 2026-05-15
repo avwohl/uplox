@@ -23,8 +23,13 @@
 #     promoting `val` / `var` parameters).
 #   * Statements: expression statement, declaration statement,
 #     `for / in`, `while`, `do / while`, `return`, `throw`,
-#     `break`, `continue`, basic labelled jumps
-#     (`break@label`, `return@label`).
+#     `break`, `continue`, labelled jumps
+#     (`break@label`, `return@label`), and labelled loops /
+#     lambdas (`loop@ for (...) { ... }`,
+#     `list.forEach lit@ { it.length }`). The label prefix
+#     is lexed as a single `LABEL_DEF` token to keep the
+#     `@`-suffix attached to the identifier — splitting it
+#     into IDENT + AT would collide with annotation prefixes.
 #   * Expressions: the Kotlin precedence ladder —
 #     disjunction (`||`), conjunction (`&&`), equality
 #     (`==` / `!=` / `===` / `!==`), comparison
@@ -66,10 +71,23 @@
 #     expression).
 #   * Destructuring in non-property positions
 #     (in `for ((a, b) in pairs)` etc.).
-#   * Labelled prefix expressions (`label@expr`).
+#   * Headerless lambdas (`{ it.length }`) with implicit
+#     `it` parameter, or bare `{}` as an empty lambda.
+#     Without an `LBRACE_LAMBDA` host filter, both collide
+#     with `<block>` at the `{`-shift state. The mandatory
+#     `params ->` (or bare `->`) header keeps the two
+#     interpretations distinct.
 #   * Soft keywords as identifiers (`data class data` works
 #     in real Kotlin but this grammar treats every modifier
-#     keyword as a reserved word).
+#     keyword as a reserved word — `data` and `value`
+#     specifically are accepted as plain IDENTs and the
+#     AST builder maps them to modifiers when at modifier
+#     position).
+#   * Newline-as-statement-terminator (Kotlin spec §1.4). This
+#     grammar requires explicit `;` — a `%layout`-style host
+#     filter (the same mechanism Python uses for INDENT /
+#     DEDENT / NEWLINE) could supply newline tokens for the
+#     statement separators if needed.
 #   * Context receivers, value classes beyond `@JvmInline`,
 #     K2-only features.
 #
@@ -122,6 +140,12 @@ NOT_NULL
 
 # Annotation start and modifier tokens at modifier-list close.
 AT
+
+# A labelled lambda after `foo(args)` is a trailing-lambda
+# extension of the call (`foo(args) lit@ { … }`), not the
+# start of a fresh labelled statement after the call. Shift
+# extends the call's trailing-lambda slot.
+LABEL_DEF
 KW_PRIVATE KW_PROTECTED KW_PUBLIC KW_INTERNAL
 KW_ABSTRACT KW_FINAL KW_OPEN KW_OVERRIDE
 KW_SEALED KW_INNER KW_INLINE
@@ -246,6 +270,13 @@ KW_WHERE      = 'where'
 
 IDENT         = /[A-Za-z_][A-Za-z0-9_]*/
 BACKTICK_IDENT = /`[^`\n]+`/
+
+# Label definition — `name@` with no intervening whitespace.
+# Lexed as a single token so the trailing `@` doesn't lex as
+# a separate AT (which would collide with annotation prefixes
+# and split-token-lookahead breakage). The longest-match rule
+# means `name@` is preferred over `name` IDENT + `@` AT.
+LABEL_DEF     = /[A-Za-z_][A-Za-z0-9_]*@/
 
 # --- operators (multi-char before single-char) ---------------------------
 ARROW         = '->'
@@ -672,11 +703,18 @@ IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 # `for (target in expression) body`. The target can be a
 # bare identifier, a typed identifier, or a destructuring
 # pattern `(a, b, …)` for iterating over pair / tuple
-# sequences.
-<for_statement> : KW_FOR '(' IDENT KW_IN <expression> ')' <control_body>
-                | KW_FOR '(' IDENT ':' <type> KW_IN <expression> ')' <control_body>
-                | KW_FOR '(' '(' <destructuring_entries> ')' KW_IN <expression> ')' <control_body>
+# sequences. Loops, lambdas, and any expression accept an
+# optional label prefix (`label@`); the label binds the
+# innermost-matching `break@label` / `continue@label` /
+# `return@label`.
+<for_statement> : <label_prefix_opt> KW_FOR '(' IDENT KW_IN <expression> ')' <control_body>
+                | <label_prefix_opt> KW_FOR '(' IDENT ':' <type> KW_IN <expression> ')' <control_body>
+                | <label_prefix_opt> KW_FOR '(' '(' <destructuring_entries> ')' KW_IN <expression> ')' <control_body>
                 ;
+
+<label_prefix_opt> : LABEL_DEF
+                   |
+                   ;
 
 <destructuring_entries> : <destructuring_entry>
                         | <destructuring_entries> ',' <destructuring_entry>
@@ -686,10 +724,10 @@ IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                       | IDENT ':' <type>
                       ;
 
-<while_statement> : KW_WHILE '(' <expression> ')' <control_body>
+<while_statement> : <label_prefix_opt> KW_WHILE '(' <expression> ')' <control_body>
                   ;
 
-<do_while_statement> : KW_DO <control_body> KW_WHILE '(' <expression> ')' ';'
+<do_while_statement> : <label_prefix_opt> KW_DO <control_body> KW_WHILE '(' <expression> ')' ';'
                      ;
 
 <control_body> : <block>
@@ -907,6 +945,10 @@ IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                  | '{' ARROW <statements> '}'
                  | '{' <lambda_params> ARROW '}'
                  | '{' <lambda_params> ARROW <statements> '}'
+                 | LABEL_DEF '{' ARROW '}'
+                 | LABEL_DEF '{' ARROW <statements> '}'
+                 | LABEL_DEF '{' <lambda_params> ARROW '}'
+                 | LABEL_DEF '{' <lambda_params> ARROW <statements> '}'
                  ;
 
 <lambda_params> : <lambda_param>
