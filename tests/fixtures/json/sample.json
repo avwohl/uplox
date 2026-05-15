@@ -1,0 +1,23 @@
+{
+    "name": "uplox",
+    "version": "0.1.0",
+    "features": ["lexer", "parser", "ast"],
+    "config": {
+        "lr": "lalr",
+        "states": 1594,
+        "valid": true,
+        "missing": null,
+        "limits": {
+            "memory_gb": 24.5,
+            "states": 60000
+        }
+    },
+    "items": [
+        {"id": 1, "active": true},
+        {"id": 2, "active": false},
+        {"id": 3, "active": null}
+    ],
+    "unicode": "héllo é \"quotes\"",
+    "scientific": 1.5e10,
+    "negative": -3.14
+}

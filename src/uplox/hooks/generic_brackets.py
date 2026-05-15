@@ -105,9 +105,13 @@ _GENERIC_FOLLOW_JAVA = frozenset({
     "$",
 })
 
+# Kotlin's `fun <T> name(...)` — generic params followed by the
+# function name (IDENT). Include IDENT in the follow set to
+# recognise this shape; same tradeoff as csharp / java.
 _GENERIC_FOLLOW_KOTLIN = frozenset({
     "LPAREN", "RPAREN", "RBRACK", "COLON", "SEMI", "COMMA", "DOT",
     "QUESTION", "EQEQ", "NEQ", "EQ", "ARROW", "SAFE_DOT", "DCOLON",
+    "IDENT",
     "$",
 })
 
