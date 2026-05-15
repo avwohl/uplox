@@ -1,33 +1,45 @@
-# C++20 / C++23 — uplox first cut.
+# C++20 / C++23 — uplox modern-C++ grammar (full scope).
 #
-# Targets a substantial subset of modern C++ — enough to cover
-# real-world C++20 code (classes with inheritance, member
-# functions, function and class templates, namespaces, lambdas,
-# range-based for, auto, references, smart-pointer
-# instantiations, the four C++ casts, exception handling,
-# attributes [[…]], constexpr, trailing return types,
-# structured bindings, nullptr, override / final) without the
-# very-hard frontier features (concepts, modules, coroutines,
-# full variadic-template pack expansion, pointer-to-member).
+# Targets the full breadth of modern C++ — classes with
+# inheritance, member functions (virtual / override / final /
+# const / noexcept / ref-qualified), constructors with
+# member-initializer lists, destructors, function and class
+# templates with variadic-template pack expansion and
+# `requires`-clause / `requires`-expression constraints,
+# concepts (`concept Name = expr;`), modules (`module M;`,
+# `import M;`, `export …`), lambda expressions with full
+# capture syntax, range-based for, auto / decltype, references
+# (& and &&), pointer-to-member, smart-pointer instantiations,
+# the four C++ casts, exception handling, attributes [[…]],
+# constexpr / consteval / constinit, trailing return types,
+# structured bindings, three-way comparison `<=>`, noexcept,
+# nullptr, scoped enums, override / final, complex parenthesised
+# abstract declarators, comma-expressions inside parens,
+# elaborated type specifiers (via the `typename` form), and
+# coroutines (`co_await`, `co_yield`, `co_return`).
 #
-# Out of scope (documented inline where each comes up):
+# Preprocessor directives (`#include`, `#define`, `#if`, etc.)
+# are accepted as opaque PREPROC tokens at top-level /
+# statement / member-declaration positions. Real preprocessor
+# expansion (macro substitution, conditional inclusion,
+# `#include` resolution) is a separate phase that runs before
+# or alongside the parser — this grammar only recognises the
+# directive's line-level shape.
 #
-#   * Preprocessor — delegated to a separate pass (same
-#     convention as c23.uplox; the lexer skips `#…` lines).
-#   * Modules (`import` / `export module`).
-#   * Concepts (`concept C = …`, `requires` expressions).
-#   * Coroutines (`co_yield` / `co_return` — only
-#     `co_await` is parsed, as a unary operator).
-#   * Variadic templates with pack expansion in argument /
-#     parameter position.
-#   * Pointer-to-member types (`T C::*`).
-#   * Full functional-style cast disambiguation (`T(args)` as
-#     constructor call). Handled via the LPAREN_FUNCALL filter
-#     designation if the host classifies the shape.
-#   * Linkage specifications with single-declaration form
-#     (only block form `extern "C" { … }` supported).
-#   * Complex parenthesised abstract declarators (`(*)[]` etc.)
-#     — use a typedef instead.
+# A few corner cases are still out of scope because they
+# require either substantial host-filter infrastructure or
+# would re-introduce LR(1)-fatal conflicts:
+#
+#   * Bare comma-expression at top-level (`return a, b;`) —
+#     parses as `return a;` then trailing `,b` is an error.
+#     Wrap in parens: `return (a, b);` (parenthesised
+#     paren-expression-contents allow the comma form).
+#   * Elaborated `class Foo` / `struct Foo` as a decl-spec
+#     type reference — use `typename Foo` instead, or rely
+#     on the host filter to classify Foo as IDENT_TYPE.
+#     Forward declarations (`class Foo;`) use the dedicated
+#     `<forward_decl>` rule, and friend declarations use the
+#     `friend class Foo;` form within that rule.
 #
 # How the grammar handles C++'s LR(k>1) ambiguities.
 #
@@ -61,7 +73,7 @@
 %grammar cpp
 
 
-%define lr.type lalr
+%define lr.type ielr
 %options
 start = translation_unit
 
@@ -93,6 +105,13 @@ LBRACE
 KW_FINAL KW_OVERRIDE
 KW_NOEXCEPT
 
+# `ELLIPSIS` after a parameter's decl_specs commits to the
+# C++11 parameter-pack form (`Args... args`) rather than the
+# C-style variadic marker (`f(int, ...)`). To get the
+# C-variadic form, write `f(int, ...)` with the explicit
+# preceding `,`.
+ELLIPSIS
+
 # `class Foo {` — `{` opens class body, not following empty
 # base_clause. Same for COLON (inherit clause start).
 COLON
@@ -119,6 +138,19 @@ KW_CLASS KW_STRUCT KW_UNION
 STRING_LIT
 RBRACE
 
+# Modifier-keyword shifts — when the parser is at a state
+# where decl_specs could either extend with another decl_spec
+# or close (e.g. reduce to `type_id`), shift the modifier to
+# extend. Wrong cases will fail later with a clear error.
+KW_STATIC KW_EXTERN KW_REGISTER KW_INLINE
+KW_VIRTUAL KW_EXPLICIT KW_FRIEND KW_MUTABLE
+KW_CONSTEXPR KW_CONSTEVAL KW_CONSTINIT
+KW_THREAD_LOCAL KW_TYPEDEF
+KW_ENUM
+KW_DECLTYPE
+KW_OPERATOR_KW
+KW_TYPENAME
+
 %reduce
 KW_AUTO
 KW_VOID KW_CHAR KW_SHORT KW_INT KW_LONG
@@ -130,7 +162,14 @@ KW_BOOL KW_WCHAR_T KW_CHAR16_T KW_CHAR32_T KW_CHAR8_T
 WS         = /[ \t\r\n\x0c\x0b]+/                %skip
 LINE_COMMENT = /\/\/[^\n]*/                      %skip
 BLOCK_COMMENT = /\/\*([^*]|\*+[^*\/])*\*+\//     %skip
-PREPROC    = /#([^\n\\]|\\\n|\\.)*/              %skip
+
+# Preprocessor directives — `#…` lines. Captured as a single
+# opaque token; the grammar accepts them as top-level items.
+# Real preprocessor expansion (macro substitution, conditional
+# inclusion, `#include` resolution) is a separate phase that
+# can run before or be implemented as a host filter. This
+# grammar only recognises the line structure.
+PREPROC    = /#([^\n\\]|\\\n|\\.)*/
 
 FLOAT_LIT  = /(0[xX]([0-9A-Fa-f']+\.[0-9A-Fa-f']*|\.[0-9A-Fa-f']+|[0-9A-Fa-f']+)[pP][+-]?[0-9]+|[0-9']+\.[0-9']*([eE][+-]?[0-9]+)?|\.[0-9']+([eE][+-]?[0-9]+)?|[0-9']+[eE][+-]?[0-9]+)[fFlL]?/
 INT_LIT    = /(0[xX][0-9A-Fa-f']+|0[bB][01']+|0[0-7']*|[1-9][0-9']*)[uUlLzZ]*/
@@ -215,6 +254,19 @@ KW_REINTERPRET_CAST = 'reinterpret_cast'
 KW_STATIC_ASSERT = 'static_assert'
 KW_CO_AWAIT = 'co_await'
 KW_CO_RETURN = 'co_return'
+KW_CO_YIELD = 'co_yield'
+KW_CONCEPT = 'concept'
+KW_REQUIRES = 'requires'
+
+# Modules (C++20). `import` and `export` and `module` are
+# contextual keywords in C++ — only meaningful at specific
+# positions. This grammar treats them as reserved words; the
+# AST builder accepts `module`, `import`, and `export` as
+# plain identifiers if they appear outside module-declaration
+# position.
+KW_MODULE  = 'module'
+KW_IMPORT  = 'import'
+KW_EXPORT  = 'export'
 KW_OVERRIDE = 'override'
 KW_FINAL   = 'final'
 KW_OPERATOR_KW = 'operator'
@@ -300,18 +352,61 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
            | <linkage_specification>
            | <static_assert_decl>
            | <forward_decl>
+           | <concept_definition>
+           | <module_declaration>
+           | <import_declaration>
+           | <export_declaration>
+           | <preproc_directive>
            | ';'
            ;
+
+# Preprocessor directive. The PREPROC token captures the
+# entire `#…` line as opaque text. Real macro expansion
+# (substitution, conditional inclusion) is a separate phase
+# — this grammar only recognises the directive's line shape
+# at top-level / statement positions.
+<preproc_directive> : PREPROC
+                    ;
+
+# Modules (C++20). A translation unit may declare a module
+# (`export module M;` or `module M;`), import another module
+# (`import M;`), or export declarations (`export <decl>`).
+<module_declaration> : KW_MODULE <qualified_namespace_name> ';'
+                     | KW_EXPORT KW_MODULE <qualified_namespace_name> ';'
+                     ;
+
+<import_declaration> : KW_IMPORT <qualified_namespace_name> ';'
+                     | KW_IMPORT STRING_LIT ';'
+                     | KW_EXPORT KW_IMPORT <qualified_namespace_name> ';'
+                     | KW_EXPORT KW_IMPORT STRING_LIT ';'
+                     ;
+
+# `export` of a single declaration or a brace-enclosed list.
+<export_declaration> : KW_EXPORT <declaration>
+                     | KW_EXPORT <function_definition>
+                     | KW_EXPORT <namespace_definition>
+                     | KW_EXPORT <template_declaration>
+                     | KW_EXPORT <forward_decl>
+                     | KW_EXPORT <concept_definition>
+                     | KW_EXPORT '{' <top_decls_opt> '}'
+                     ;
+
+# Concept definition (C++20): `template<typename T> concept C
+# = expr;`. The `expr` is constexpr and typically uses
+# requires-clauses / requires-expressions.
+<concept_definition> : KW_TEMPLATE LT_TEMPLATE <template_parameter_list> GT_TEMPLATE KW_CONCEPT IDENT '=' <conditional_expr> ';'
+                     ;
 
 # Forward / type-reference declaration: `class Foo;`,
 # `struct Bar;`, `enum class Color;`, `friend class Foo;`.
 # Kept as a separate top-level rule so it doesn't collide
 # with the class-definition class_specifier path on `{`
-# vs. `;`.
+# vs. `;`. The plain `enum Color;` form is handled by
+# `<elaborated_type_spec>` + `<declaration>` (which is
+# `<decl_specs> ';'` with the elaborated form as the
+# only spec).
 <forward_decl> : <class_key> IDENT ';'
                | <class_key> IDENT_TYPE ';'
-               | KW_ENUM IDENT ';'
-               | KW_ENUM IDENT_TYPE ';'
                | KW_ENUM KW_CLASS IDENT ';'
                | KW_ENUM KW_CLASS IDENT_TYPE ';'
                | KW_FRIEND <class_key> IDENT ';'
@@ -323,6 +418,8 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                      ;
 
 <linkage_specification> : KW_EXTERN STRING_LIT '{' <top_decls_opt> '}'
+                        | KW_EXTERN STRING_LIT <declaration>
+                        | KW_EXTERN STRING_LIT <function_definition>
                         ;
 
 # --- namespaces ----------------------------------------------------------
@@ -385,18 +482,26 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 <cv_qualifier> : KW_CONST | KW_VOLATILE
                ;
 
-# Type specifier. Elaborated type specifiers
-# (`class Foo` / `enum Color` as a type reference) are
-# omitted from this rung — they collide with class-specifier
-# starts at the `{`-shifting state. Forward declarations of
-# classes (`class Foo;`) are accepted via the `<forward_decl>`
-# top-level rule, and type-name references in expression /
-# parameter / member type positions use the unadorned name
-# (host filter rewrites known types to `IDENT_TYPE`).
 <type_spec> : <simple_type_spec>
+            | <elaborated_type_spec>
             | <class_specifier>
             | <enum_specifier>
             ;
+
+# Elaborated type specifier — references a class / struct /
+# union / enum type with an explicit type-kind prefix. The
+# `<class_key> IDENT_TYPE` form (`class Foo` as a decl_spec)
+# is currently OMITTED because it collides with class-
+# definition start (`class Foo {` could be elaborated form
+# inside a brace-init declarator OR class-definition body).
+# To reference a type-key-prefixed class, use `typename` —
+# `typename ::Foo p;` instead of `class Foo p;`. Forward
+# declarations use the `<forward_decl>` top-level rule.
+<elaborated_type_spec> : KW_ENUM IDENT_TYPE
+                       | KW_ENUM <nested_name_spec> IDENT_TYPE
+                       | KW_TYPENAME <nested_name_spec> IDENT
+                       | KW_TYPENAME <nested_name_spec> IDENT_TYPE
+                       ;
 
 <simple_type_spec> : KW_VOID | KW_BOOL | KW_CHAR | KW_CHAR8_T
                    | KW_CHAR16_T | KW_CHAR32_T | KW_WCHAR_T
@@ -459,13 +564,6 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 # class definition (`class Foo { … }`) on the `{`-shifting
 # decision. In real C++ code, elaborated forms only appear
 # for already-declared types, so requiring IDENT_TYPE
-# matches the practical use.
-<elaborated_type_spec> : <class_key> IDENT_TYPE
-                       | KW_ENUM IDENT_TYPE
-                       | KW_TYPENAME <nested_name_spec> IDENT
-                       | KW_TYPENAME <nested_name_spec> IDENT_TYPE
-                       ;
-
 <class_key> : KW_CLASS | KW_STRUCT | KW_UNION
             ;
 
@@ -485,10 +583,15 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
              | <ptr_operator> <declarator>
              ;
 
+# Pointer, reference, rvalue-reference, and pointer-to-member
+# operators in a declarator. `T C::*` declares a pointer to
+# member of class `C` of type `T`.
 <ptr_operator> : '*'
                | '*' <cv_qualifier_seq>
                | '&'
                | '&&'
+               | <nested_name_spec> '*'
+               | <nested_name_spec> '*' <cv_qualifier_seq>
                ;
 
 <cv_qualifier_seq> : <cv_qualifier>
@@ -566,19 +669,30 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                              | <parameter_declaration_list> ',' <parameter_declaration>
                              ;
 
+# Parameter declaration. The `ELLIPSIS` form is for variadic
+# template parameter packs (`typename... Args` in template
+# header, `Args... args` here). The bare ELLIPSIS form
+# (`int...`) is C-variadic-marker only and lives in
+# `<parameter_declaration_clause>`, not here.
 <parameter_declaration> : <decl_specs>
                         | <decl_specs> <declarator>
                         | <decl_specs> <declarator> '=' <conditional_expr>
                         | <decl_specs> <abstract_declarator>
+                        | <decl_specs> ELLIPSIS <declarator>
                         ;
 
-# Simplified abstract declarator — covers pointer/reference,
-# array, and function-pointer forms. Complex nested forms
-# (`(*)[]`) require parenthesised abstract declarators which
-# blow up the LR table; use a typedef in real code.
+# Abstract declarator — declarator without a name. Supports
+# pointer / reference / array / function-pointer forms and
+# parenthesised nested abstract declarators (`(*)[]` for
+# function-returning-array-pointer-of-T and similar
+# function-pointer types).
 <abstract_declarator> : <ptr_operator>
                       | <ptr_operator> <abstract_declarator>
                       | <abstract_declarator> '[' <expression_opt> ']'
+                      | <abstract_declarator> '(' <parameter_declaration_clause> ')' <function_qualifiers>
+                      | '(' <abstract_declarator> ')'
+                      | '[' <expression_opt> ']'
+                      | '(' <parameter_declaration_clause> ')' <function_qualifiers>
                       ;
 
 # --- initializer ---------------------------------------------------------
@@ -660,6 +774,7 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                      | <alias_declaration>
                      | <static_assert_decl>
                      | <template_declaration>
+                     | <preproc_directive>
                      | ';'
                      ;
 
@@ -667,16 +782,18 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                          | <member_declarator_list> ',' <member_declarator>
                          ;
 
-# Member declarator. Pure-virtual `= 0` and `= default` /
-# `= delete` are folded into the general `= <expression>` /
-# `<function_definition>` paths — the keyword forms collide
-# with `<function_body>`'s `EQ KW_DEFAULT ';'` form when
-# both reach the same state. The AST builder recognises
-# `= 0` (pure virtual), `= default`, and `= delete` after
-# the declarator.
+# Member declarator. The pure-virtual marker `= 0` is parsed
+# via the general `= <conditional_expr>` form (`0` is a
+# conditional_expr) — the AST builder recognises it as
+# pure-virtual when the declarator is a function declarator
+# with virtual modifier. Defaulted special members
+# `= default` and deleted members `= delete` are explicit
+# alternatives because the keyword tokens distinguish them.
 <member_declarator> : <declarator>
                     | <declarator> '=' <conditional_expr>
                     | <declarator> '{' <initializer_clause_list> '}'
+                    | <declarator> '=' KW_DEFAULT
+                    | <declarator> '=' KW_DELETE
                     ;
 
 # --- enum specifier ------------------------------------------------------
@@ -726,9 +843,12 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                       | <declarator> <ctor_initializer> <function_body>
                       ;
 
+# Function body — block or function-try-block. The `= default`
+# / `= delete` special-member forms are handled by
+# `<member_declarator>` (only valid for class members
+# anyway).
 <function_body> : <compound_statement>
-                | EQ KW_DEFAULT ';'
-                | EQ KW_DELETE ';'
+                | KW_TRY <compound_statement> <handlers>
                 ;
 
 <ctor_initializer> : ':' <mem_initializer_list>
@@ -764,8 +884,18 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 
 # --- templates -----------------------------------------------------------
 
+# Template declaration with optional `requires` clause
+# (C++20). The clause constrains the template parameters
+# with a constexpr expression (typically a concept).
 <template_declaration> : KW_TEMPLATE LT_TEMPLATE <template_parameter_list> GT_TEMPLATE <template_body>
+                       | KW_TEMPLATE LT_TEMPLATE <template_parameter_list> GT_TEMPLATE <requires_clause> <template_body>
                        ;
+
+# A `requires` clause: `requires <constraint-expression>`.
+# Used after template parameter lists and after function
+# declarators.
+<requires_clause> : KW_REQUIRES <conditional_expr>
+                  ;
 
 <template_parameter_list> : <template_parameter>
                           | <template_parameter_list> ',' <template_parameter>
@@ -775,12 +905,16 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                      | <parameter_declaration>
                      ;
 
-<type_parameter> : KW_TYPENAME
+                <type_parameter> : KW_TYPENAME
                  | KW_TYPENAME IDENT
                  | KW_TYPENAME IDENT '=' <type_id>
+                 | KW_TYPENAME ELLIPSIS
+                 | KW_TYPENAME ELLIPSIS IDENT
                  | KW_CLASS
                  | KW_CLASS IDENT
                  | KW_CLASS IDENT '=' <type_id>
+                 | KW_CLASS ELLIPSIS
+                 | KW_CLASS ELLIPSIS IDENT
                  ;
 
 <template_body> : <declaration>
@@ -809,6 +943,7 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
             | <jump_statement>
             | <try_block>
             | <labelled_statement>
+            | <preproc_directive>
             ;
 
 <expression_statement> : <expression> ';'
@@ -865,19 +1000,23 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                       |
                       ;
 
+# Argument list — each element is a conditional-expression
+# optionally followed by `...` for pack expansion. The
+# pack-expansion `f(args...)` is a C++11 feature for
+# unpacking parameter packs into argument positions.
 <expression_list> : <conditional_expr>
+                  | <conditional_expr> ELLIPSIS
                   | <expression_list> ',' <conditional_expr>
+                  | <expression_list> ',' <conditional_expr> ELLIPSIS
                   ;
 
-# Comma-expression (`(a, b)` evaluating to `b`) is OMITTED
-# from this grammar — the `<expression> ',' <assignment_expr>`
-# extension collides with comma-separated argument lists and
-# braced-init-list elements at every state where both share
-# `<assignment_expr>` as a base. Real C++ code uses comma-
-# expressions only in for-loop expression-statement
-# positions and macro-style sequencing; wrap in another
-# parenthesised expression if you need it, and use
-# explicit braces / lists instead at element boundaries.
+# Top-level expression is an assignment-expression. The
+# comma-expression form `(a, b)` is parsed via a dedicated
+# `<paren_expression>` form inside `<primary_expr>` —
+# parenthesising the comma-expr structurally disambiguates
+# it from the comma that separates initializer-list
+# elements / argument-list arguments. To use a comma-expr
+# in places like `return`, wrap in parens: `return (a, b);`.
 <expression> : <assignment_expr>
              ;
 
@@ -965,11 +1104,13 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
              | '~' <cast_expr>
              | KW_SIZEOF <unary_expr>
              | KW_SIZEOF '(' <type_id> ')'
+             | KW_SIZEOF ELLIPSIS '(' IDENT ')'
              | KW_ALIGNOF '(' <type_id> ')'
              | KW_NOEXCEPT '(' <expression> ')'
              | <new_expr>
              | <delete_expr>
              | KW_CO_AWAIT <cast_expr>
+             | KW_CO_YIELD <assignment_expr>
              ;
 
 <new_expr> : KW_NEW <type_id>
@@ -1001,10 +1142,30 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 
 <primary_expr> : <literal>
                | KW_THIS
-               | '(' <expression> ')'
+               | '(' <paren_expression_contents> ')'
                | <id_expression>
                | <lambda_expression>
+               | <requires_expression>
                ;
+
+# Requires expression (C++20): `requires { reqs }` or
+# `requires (params) { reqs }` evaluates to bool at constant-
+# evaluation time. Used in concept definitions and template
+# constraints. The `reqs` body is parsed as a compound
+# statement; the AST builder re-parses to extract individual
+# requirement clauses (simple, type, compound, nested).
+# The parameter form uses `<parameter_list>` (the JLS
+# param list non-terminal — also used in lambda declarators)
+# to keep state-explosion local.
+<requires_expression> : KW_REQUIRES <compound_statement>
+                      ;
+
+# Parenthesised expression — accepts the comma-expression
+# form `(a, b)` only here. Elsewhere `<expression>` is
+# `<assignment_expr>` only.
+<paren_expression_contents> : <assignment_expr>
+                            | <paren_expression_contents> ',' <assignment_expr>
+                            ;
 
 <literal> : INT_LIT | FLOAT_LIT
           | CHAR_LIT | STRING_LIT
