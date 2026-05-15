@@ -1,0 +1,1402 @@
+# Swift 5.x — uplox first cut.
+#
+# Targets a useful subset of Swift 5.x — modern enough to cover
+# real-world iOS / macOS / server-side Swift code (classes,
+# structs, enums with associated values, protocols, extensions,
+# actors, generics with constraints, optionals, closures with
+# trailing-closure syntax, async / await, throws / try, opaque /
+# existential types, structured concurrency) without the host
+# filter infrastructure that the full Swift grammar would
+# require for the dynamic operator-precedence rebuild and the
+# `()`-as-type-vs-expression carve-out.
+#
+# In scope:
+#
+#   * Top-level: `import` declarations, type declarations,
+#     extensions, top-level functions and variables, top-level
+#     statements (the script form).
+#   * Declarations: `let` / `var` (with type annotation, initial
+#     value, and computed-property accessors via a simplified
+#     accessor block); `func` (including `async` / `throws` /
+#     `rethrows` and generic / `where`-clause forms); `init`
+#     (designated, convenience, required, failable `init?` /
+#     `init!`); `deinit`; `subscript`; `typealias`;
+#     `associatedtype` (in protocols).
+#   * Type declarations: `class` (with inheritance and conformance
+#     list), `struct`, `enum` (with raw values, associated values,
+#     `indirect case` recursion), `protocol` (with
+#     `associatedtype` and method / property / subscript
+#     requirements), `extension`, `actor`.
+#   * Modifiers: access (`open` / `public` / `internal` /
+#     `fileprivate` / `private`); instance / type
+#     (`static` / `class`); method (`final` / `mutating` /
+#     `nonmutating` / `consuming` / `override` / `required` /
+#     `convenience` / `dynamic`); storage (`lazy` / `weak` /
+#     `unowned`); concurrency (`nonisolated` / `isolated`).
+#   * Attributes: `@available(...)`, `@escaping`,
+#     `@autoclosure`, `@discardableResult`, `@MainActor`, etc. —
+#     accepted as `@` IDENT with an optional opaque parenthesised
+#     argument list. Property-wrapper applications
+#     (`@Published var x`) reuse the same shape.
+#   * Statements: `if` / `else` (with optional binding condition
+#     list), `guard` / `else`, `switch` (with pattern arms and
+#     `where` guards, `fallthrough`), `for` / `in` (with optional
+#     `where`), `while`, `repeat` / `while`, `return`, `throw`,
+#     `break` / `continue` (with labels), `defer`, `do` / `catch`
+#     (with multiple catch arms), `fallthrough`.
+#   * Expressions: the full Swift precedence ladder — ternary
+#     `?:`, range `..<` / `...`, additive / multiplicative,
+#     nil-coalescing `??`, comparison / equality (`==` / `!=` /
+#     `===` / `!==`), `as` / `as?` / `as!` / `is`, `try` /
+#     `try?` / `try!`, `await`, prefix unary, postfix
+#     (forced unwrap `!`, optional chaining `?.` / `?[`),
+#     primary (literals, identifiers, parenthesised, tuple,
+#     array / dictionary literals, closure literals).
+#   * Closures: explicit `{ (params) -> ReturnType in body }`,
+#     parameter-omission shorthand (`{ $0 + $1 }`), trailing
+#     closure (`foo(args) { body }` and `foo { body }`).
+#   * Optionals: `T?`, implicitly-unwrapped `T!`, `if let x =
+#     ...`, `guard let x = ...`, optional chaining `x?.y`,
+#     forced unwrap `x!`, nil-coalescing `x ?? y`.
+#   * Type system: optionals, arrays `[T]`, dictionaries
+#     `[K: V]`, tuples `(A, B)`, function types
+#     `(A, B) throws -> C` / `() async throws -> Void`, protocol
+#     composition `P & Q`, opaque types `some P`, existential
+#     types `any P`, metatypes `T.Type` / `T.Protocol`.
+#   * Patterns: wildcard `_`, identifier `x`, value-binding
+#     `let x` / `var x`, tuple `(a, b)`, enum case `.case` /
+#     `.case(let x, _)`, type-cast `is T`.
+#
+# How the grammar handles Swift's LR(k>1) ambiguities.
+#
+# Same approach as `csharp.uplox` / `java.uplox`: promote the
+# disambiguations into the tokenizer via synthetic terminals
+# that the raw lexer never emits directly — `LT_GENERIC`,
+# `GT_GENERIC`. The host installs a `swift_filter` token filter
+# that scans ahead from each `<` and, when the matching `>` is
+# followed by one of the disambiguating-set tokens
+# (`(` `)` `]` `,` `.` `;` `:` `?` `==` `!=` `&&` `||` `{` `=`
+# `->` EOF), emits `LT_GENERIC` and the matching `>` as
+# `GT_GENERIC`. Nested generics close with `>>`, which lexes as
+# RSHIFT; the filter splits RSHIFT into two consecutive
+# GT_GENERIC tokens when the parser is inside an open
+# type-argument list. Without the filter, only the non-generic
+# constructs parse.
+#
+# Trailing closure — same as Kotlin: `foo(args) { x in body }`
+# vs `foo(args); { x in body }`. The grammar greedily shifts on
+# `{` after a call so the closure attaches to the call.
+#
+# String interpolation (`"\(expr)"`) is not parsed inside the
+# grammar — string literals arrive as opaque STRING_LIT /
+# MULTILINE_STRING_LIT tokens and the host re-parses the
+# interpolation expressions if needed.
+#
+# Out of scope (the cut keeps the grammar tractable):
+#
+#   * Operator declarations and precedencegroups — Swift lets
+#     users declare new infix operators with custom precedence,
+#     which would require re-parsing every expression as new
+#     operators are introduced. All user-defined infix
+#     operators must be reached through the standard
+#     additive / multiplicative rungs.
+#   * Regex literals (Swift 5.7+ `/pattern/`) — collide with `/`
+#     division at expression-position; need lexer feedback.
+#   * Multi-line `#if` / `#elseif` / `#else` / `#endif`
+#     compilation-condition blocks.
+#   * Key-path expressions (`\Type.path`).
+#   * Result-builder / function-builder body transformation.
+#   * String-interpolation expression parsing (see above).
+#   * Multiple trailing closures (Swift 5.3+); only the first
+#     trailing closure is recognised.
+#   * Qualified enum-case patterns (`case Color.red:`) — use
+#     the dot-prefix form (`case .red:`) which is the dominant
+#     Swift idiom; the qualified form would create a
+#     pattern-vs-type reduce/reduce ambiguity at IDENT.
+#   * `()` as a tuple type (use the `Void` typealias instead) —
+#     the empty parens collide reduce/reduce with the empty
+#     parenthesised expression / argument list. Function types
+#     spell their no-argument case as `Void -> ...` or use a
+#     single Void parameter.
+#
+# Conflict-resolution decisions:
+#
+#   * Dangling `else` resolves greedily (`%shift KW_ELSE`).
+#   * Postfix suffixes (`.`, `[`, `(`, `?`, `!`) attach to the
+#     preceding primary — shift wins over reducing.
+#   * `{` after a call expression attaches as a trailing closure
+#     — shift wins over reducing the call.
+#   * Operator-precedence shift/reduce conflicts at every rung
+#     are silenced via the operator tokens in `%shift`.
+
+%grammar swift
+
+
+%define lr.type lalr
+%options
+start = source_file
+
+%shift
+KW_ELSE
+
+# Postfix suffixes — `.`, `[`, `(`, `?`, `!` attach to the
+# preceding primary.
+DOT LBRACK LPAREN QUESTION BANG
+SAFE_DOT SAFE_LBRACK
+
+# `:` after a pattern attaches as a type annotation rather than
+# closing the pattern. (Case labels and dictionary entries
+# reach the colon from different states.)
+COLON
+
+# Trailing closure — `{` after a call expression introduces a
+# trailing closure rather than closing the surrounding statement.
+LBRACE
+
+# Operator-precedence rungs.
+PLUS MINUS STAR SLASH PERCENT
+LSHIFT RSHIFT
+AMP PIPE CARET
+LOG_AND LOG_OR
+EQEQ NEQ TRIPLE_EQ TRIPLE_NEQ
+LT GT LE GE
+NIL_COAL
+RANGE_CLOSED RANGE_HALF
+KW_AS KW_AS_OPT KW_AS_FORCE KW_IS
+
+# `where` clause continuation — extend the surrounding type
+# parameter list, for-statement, or switch-case rather than
+# closing the empty optional.
+KW_WHERE
+
+# `throws` / `async` / `rethrows` extend a function-type or
+# function declaration signature.
+KW_THROWS KW_ASYNC KW_RETHROWS
+
+# After bare-statement keywords (return / break / continue),
+# any expression / label start extends the statement greedily
+# rather than reducing the bare form.
+IDENT INT_LIT FLOAT_LIT STRING_LIT MULTILINE_STRING_LIT
+KW_TRUE KW_FALSE KW_NIL KW_SELF KW_SUPER KW_SELF_TYPE
+KW_TRY KW_TRY_OPT KW_TRY_FORCE KW_AWAIT
+BACKTICK_IDENT DOLLAR_IDENT
+TILDE
+KW_SELECTOR KW_KEYPATH_DIRECTIVE KW_AVAILABLE
+KW_FILE_DIRECTIVE KW_LINE_DIRECTIVE KW_COLUMN_DIRECTIVE KW_FUNCTION_DIRECTIVE
+
+# `case` / `default` extend the switch body — shift starts the
+# next arm rather than reducing the current arm empty.
+KW_CASE KW_DEFAULT
+
+%tokens
+
+WS            = /[ \t\r\n]+/                                  %skip
+LINE_COMMENT  = /\/\/[^\n]*/                                  %skip
+BLOCK_COMMENT = /\/\*([^*]|\*+[^*\/])*\*+\//                  %skip
+
+# --- numeric literals ----------------------------------------------------
+INT_LIT       = /(0[xX][0-9A-Fa-f_]+|0[bB][01_]+|0[oO][0-7_]+|[0-9][0-9_]*)/
+FLOAT_LIT     = /(0[xX][0-9A-Fa-f_]+(\.[0-9A-Fa-f_]+)?[pP][+-]?[0-9_]+|[0-9][0-9_]*\.[0-9_]+([eE][+-]?[0-9_]+)?|[0-9][0-9_]*[eE][+-]?[0-9_]+)/
+
+# --- string literals -----------------------------------------------------
+MULTILINE_STRING_LIT = /"""([^"\\]|\\.|"[^"]|""[^"])*"""/
+STRING_LIT          = /"([^"\\\n]|\\.)*"/
+
+# --- declaration keywords ------------------------------------------------
+KW_IMPORT     = 'import'
+KW_CLASS      = 'class'
+KW_STRUCT     = 'struct'
+KW_ENUM       = 'enum'
+KW_PROTOCOL   = 'protocol'
+KW_EXTENSION  = 'extension'
+KW_ACTOR      = 'actor'
+KW_FUNC       = 'func'
+KW_LET        = 'let'
+KW_VAR        = 'var'
+KW_TYPEALIAS  = 'typealias'
+KW_ASSOCIATEDTYPE = 'associatedtype'
+KW_INIT       = 'init'
+KW_DEINIT     = 'deinit'
+KW_SUBSCRIPT  = 'subscript'
+KW_INOUT      = 'inout'
+KW_INDIRECT   = 'indirect'
+KW_CASE       = 'case'
+
+# --- access modifiers ----------------------------------------------------
+KW_OPEN       = 'open'
+KW_PUBLIC     = 'public'
+KW_INTERNAL   = 'internal'
+KW_FILEPRIVATE = 'fileprivate'
+KW_PRIVATE    = 'private'
+
+# --- method / member / type modifiers ------------------------------------
+KW_STATIC     = 'static'
+KW_FINAL      = 'final'
+KW_LAZY       = 'lazy'
+KW_WEAK       = 'weak'
+KW_UNOWNED    = 'unowned'
+KW_MUTATING   = 'mutating'
+KW_NONMUTATING = 'nonmutating'
+KW_CONSUMING  = 'consuming'
+KW_BORROWING  = 'borrowing'
+KW_OVERRIDE   = 'override'
+KW_REQUIRED   = 'required'
+KW_CONVENIENCE = 'convenience'
+KW_DYNAMIC    = 'dynamic'
+KW_NONISOLATED = 'nonisolated'
+KW_ISOLATED   = 'isolated'
+
+# --- accessor contextual keywords ----------------------------------------
+# `get` / `set` / `willSet` / `didSet` are contextual in real
+# Swift but treated as reserved here for grammar simplicity.
+KW_GET        = 'get'
+KW_SET        = 'set'
+KW_WILLSET    = 'willSet'
+KW_DIDSET     = 'didSet'
+
+# --- statement keywords --------------------------------------------------
+KW_IF         = 'if'
+KW_ELSE       = 'else'
+KW_GUARD      = 'guard'
+KW_SWITCH     = 'switch'
+KW_DEFAULT    = 'default'
+KW_FOR        = 'for'
+KW_IN         = 'in'
+KW_WHILE      = 'while'
+KW_REPEAT     = 'repeat'
+KW_BREAK      = 'break'
+KW_CONTINUE   = 'continue'
+KW_RETURN     = 'return'
+KW_THROW      = 'throw'
+KW_THROWS     = 'throws'
+KW_RETHROWS   = 'rethrows'
+KW_ASYNC      = 'async'
+KW_DO         = 'do'
+KW_CATCH      = 'catch'
+KW_DEFER      = 'defer'
+KW_FALLTHROUGH = 'fallthrough'
+KW_WHERE      = 'where'
+
+# --- expression keywords -------------------------------------------------
+KW_NIL        = 'nil'
+KW_TRUE       = 'true'
+KW_FALSE      = 'false'
+KW_SELF       = 'self'
+KW_SELF_TYPE  = 'Self'
+KW_SUPER      = 'super'
+KW_AS         = 'as'
+KW_AS_OPT     = 'as?'
+KW_AS_FORCE   = 'as!'
+KW_IS         = 'is'
+KW_TRY        = 'try'
+KW_TRY_OPT    = 'try?'
+KW_TRY_FORCE  = 'try!'
+KW_AWAIT      = 'await'
+KW_SOME       = 'some'
+KW_ANY        = 'any'
+KW_TYPE_PROP  = 'Type'
+KW_PROTOCOL_PROP = 'Protocol'
+
+# Single-line compiler-directive literals.
+KW_AVAILABLE          = '#available'
+KW_FILE_DIRECTIVE     = '#file'
+KW_LINE_DIRECTIVE     = '#line'
+KW_COLUMN_DIRECTIVE   = '#column'
+KW_FUNCTION_DIRECTIVE = '#function'
+KW_SELECTOR           = '#selector'
+KW_KEYPATH_DIRECTIVE  = '#keyPath'
+
+# Identifiers and the shorthand-closure-parameter pattern.
+IDENT          = /[A-Za-z_][A-Za-z0-9_]*/
+BACKTICK_IDENT = /`[^`\n]+`/
+DOLLAR_IDENT   = /\$[0-9]+/
+
+# --- multi-character operators (declared before single-char) -------------
+ARROW         = '->'
+RANGE_CLOSED  = '...'
+RANGE_HALF    = '..<'
+TRIPLE_EQ     = '==='
+TRIPLE_NEQ    = '!=='
+EQEQ          = '=='
+NEQ           = '!='
+LE            = '<='
+GE            = '>='
+LSHIFT        = '<<'
+RSHIFT        = '>>'
+PLUS_ASSIGN   = '+='
+MINUS_ASSIGN  = '-='
+STAR_ASSIGN   = '*='
+SLASH_ASSIGN  = '/='
+PERCENT_ASSIGN = '%='
+AMP_ASSIGN    = '&='
+PIPE_ASSIGN   = '|='
+CARET_ASSIGN  = '^='
+LSHIFT_ASSIGN = '<<='
+RSHIFT_ASSIGN = '>>='
+NIL_COAL_ASSIGN = '??='
+LOG_AND       = '&&'
+LOG_OR        = '||'
+NIL_COAL      = '??'
+SAFE_DOT      = '?.'
+SAFE_LBRACK   = '?['
+
+EQ            = '='
+LT            = '<'
+GT            = '>'
+PLUS          = '+'
+MINUS         = '-'
+STAR          = '*'
+SLASH         = '/'
+PERCENT       = '%'
+AMP           = '&'
+PIPE          = '|'
+CARET         = '^'
+TILDE         = '~'
+BANG          = '!'
+QUESTION      = '?'
+LPAREN        = '('
+RPAREN        = ')'
+LBRACE        = '{'
+RBRACE        = '}'
+LBRACK        = '['
+RBRACK        = ']'
+COMMA         = ','
+SEMI          = ';'
+COLON         = ':'
+DOT           = '.'
+AT            = '@'
+UNDERSCORE    = '_'
+
+# --- synthetic terminals (filter-produced) -------------------------------
+LT_GENERIC    = 'LT_GENERIC_SYNTHETIC_NEVER_EMITTED'
+GT_GENERIC    = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
+
+%rules
+
+# --- source file ---------------------------------------------------------
+
+<source_file> : <top_level_items_opt>
+              ;
+
+<top_level_items_opt> : <top_level_items>
+                      |
+                      ;
+
+<top_level_items> : <top_level_item>
+                  | <top_level_items> <top_level_item>
+                  ;
+
+# Top-level items route through `<statement>`, which already
+# carries `<declaration>`. Keeping a single path avoids the
+# `top_level_item -> declaration` vs `statement -> declaration`
+# reduce/reduce ambiguity.
+<top_level_item> : <statement>
+                 ;
+
+# --- declarations --------------------------------------------------------
+#
+# Declarations always begin with an attribute-list (possibly
+# empty) followed by a modifier-list (possibly empty) followed
+# by a declaration-introducer keyword. The keyword distinguishes
+# the alternatives so there's no LR(1) overlap between
+# declarations and expression-position statements.
+
+<declaration> : <import_decl>
+              | <constant_decl>
+              | <variable_decl>
+              | <typealias_decl>
+              | <function_decl>
+              | <enum_decl>
+              | <struct_decl>
+              | <class_decl>
+              | <actor_decl>
+              | <protocol_decl>
+              | <init_decl>
+              | <deinit_decl>
+              | <extension_decl>
+              | <subscript_decl>
+              | <associatedtype_decl>
+              ;
+
+# --- import declaration --------------------------------------------------
+
+<import_decl> : <modifiers_opt> KW_IMPORT <import_path>
+              | <modifiers_opt> KW_IMPORT <import_kind> <import_path>
+              ;
+
+<import_kind> : KW_CLASS | KW_STRUCT | KW_ENUM | KW_PROTOCOL
+              | KW_FUNC | KW_LET | KW_VAR | KW_TYPEALIAS
+              ;
+
+<import_path> : <import_path_component>
+              | <import_path> '.' <import_path_component>
+              ;
+
+<import_path_component> : IDENT
+                        | BACKTICK_IDENT
+                        ;
+
+# --- attributes ---------------------------------------------------------
+#
+# Attributes (`@available`, `@objc`, `@MainActor`, …) are
+# always part of the modifier list — the LR(1) shape stays
+# simple because every modifier list element starts with either
+# `@` or a modifier keyword.
+
+<modifiers_opt> : <modifiers>
+                |
+                ;
+
+<modifiers> : <modifier>
+            | <modifiers> <modifier>
+            ;
+
+# `class` is NOT in this list — Swift uses `class` both as a
+# modifier (`class func foo()` to declare a type-level method
+# that subclasses can override) and as the type-declaration
+# introducer (`class Foo { … }`). Distinguishing the two needs
+# more than one-token lookahead. Use `static` instead of `class
+# func` (semantic distinction: `static` is final, `class` is
+# overridable; if you need the overridable form, write
+# `class final` or rely on the AST builder to recognise the
+# pattern from a host-side rewrite).
+<modifier> : <attr>
+           | <access_modifier>
+           | KW_STATIC
+           | KW_FINAL
+           | KW_LAZY
+           | KW_WEAK
+           | KW_UNOWNED
+           | KW_MUTATING
+           | KW_NONMUTATING
+           | KW_CONSUMING
+           | KW_BORROWING
+           | KW_OVERRIDE
+           | KW_REQUIRED
+           | KW_CONVENIENCE
+           | KW_DYNAMIC
+           | KW_NONISOLATED
+           | KW_ISOLATED
+           | KW_INDIRECT
+           ;
+
+<attr> : AT IDENT
+       | AT IDENT '(' ')'
+       | AT IDENT '(' <attr_arg_body> ')'
+       ;
+
+# Attribute argument body — opaque, accepts any non-empty
+# balanced sequence. The semantic phase validates against
+# the specific attribute's expected shape.
+<attr_arg_body> : <attr_arg_token>
+                | <attr_arg_body> <attr_arg_token>
+                ;
+
+<attr_arg_token> : IDENT | INT_LIT | FLOAT_LIT | STRING_LIT
+                 | STAR | COMMA | COLON | DOT | EQ | MINUS
+                 | KW_TRUE | KW_FALSE | KW_NIL
+                 ;
+
+<access_modifier> : KW_OPEN
+                  | KW_PUBLIC
+                  | KW_INTERNAL
+                  | KW_FILEPRIVATE
+                  | KW_PRIVATE
+                  ;
+
+# --- constant / variable declarations -----------------------------------
+
+<constant_decl> : <modifiers_opt> KW_LET <pattern_init_list>
+                ;
+
+<variable_decl> : <modifiers_opt> KW_VAR <pattern_init_list>
+                ;
+
+<pattern_init_list> : <pattern_init>
+                    | <pattern_init_list> ',' <pattern_init>
+                    ;
+
+<pattern_init> : <pattern>
+               | <pattern> <type_annotation>
+               | <pattern> '=' <expression>
+               | <pattern> <type_annotation> '=' <expression>
+               | <pattern> <type_annotation> <accessor_block>
+               | <pattern> <type_annotation> '=' <expression> <accessor_block>
+               ;
+
+<type_annotation> : ':' <type>
+                  | ':' KW_INOUT <type>
+                  ;
+
+# Computed property / observer accessor block — simplified to
+# just `get` / `set` / `willSet` / `didSet` blocks; the
+# `get(param)` and `set(param)` parameter naming is omitted.
+<accessor_block> : '{' <accessor_decl_list> '}'
+                 ;
+
+<accessor_decl_list> : <accessor_decl>
+                     | <accessor_decl_list> <accessor_decl>
+                     ;
+
+<accessor_decl> : KW_GET <block>
+                | KW_SET <block>
+                | KW_WILLSET <block>
+                | KW_DIDSET <block>
+                ;
+
+# --- typealias / associatedtype -----------------------------------------
+
+<typealias_decl> : <modifiers_opt> KW_TYPEALIAS IDENT <generic_params_opt> '=' <type>
+                 ;
+
+<associatedtype_decl> : <modifiers_opt> KW_ASSOCIATEDTYPE IDENT <assoc_type_tail>
+                      ;
+
+<assoc_type_tail> : <type_inheritance_opt>
+                  | <type_inheritance_opt> '=' <type>
+                  ;
+
+# --- function declaration -----------------------------------------------
+
+<function_decl> : <modifiers_opt> KW_FUNC <function_name>
+                  <generic_params_opt> <function_signature>
+                  <generic_where_clause_opt>
+                  <function_body_opt>
+                ;
+
+<function_name> : IDENT
+                | BACKTICK_IDENT
+                | <operator_symbol>
+                ;
+
+<operator_symbol> : PLUS | MINUS | STAR | SLASH | PERCENT
+                  | EQEQ | NEQ | LT | GT | LE | GE
+                  | LSHIFT | RSHIFT
+                  | AMP | PIPE | CARET | TILDE
+                  | NIL_COAL
+                  | RANGE_CLOSED | RANGE_HALF
+                  | LOG_AND | LOG_OR
+                  ;
+
+<function_signature> : '(' <parameter_list_opt> ')'
+                       <function_effects_opt> <function_result_opt>
+                     ;
+
+<parameter_list_opt> : <parameter_list>
+                     |
+                     ;
+
+<parameter_list> : <parameter>
+                 | <parameter_list> ',' <parameter>
+                 ;
+
+# Parameter forms — Swift allows up to two leading names (the
+# external label and the internal name). `func f(x: Int)` uses
+# one name; `func f(label x: Int)` uses two; `func f(_ x: Int)`
+# uses `_` for "no external label" plus the internal name.
+# Parameter forms — Swift's external label slot accepts a wide
+# set of identifiers including most keyword spellings (e.g.
+# `func draw(in color: T)` uses `in` as the external label).
+# `<param_label>` lists the common contextual-keyword labels.
+# The internal name is restricted to plain IDENT / BACKTICK /
+# UNDERSCORE.
+<parameter> : <param_internal_name> ':' <param_type> <param_tail>
+            | <param_label> <param_internal_name> ':' <param_type> <param_tail>
+            ;
+
+<param_internal_name> : IDENT | BACKTICK_IDENT | UNDERSCORE
+                      ;
+
+<param_label> : IDENT
+              | BACKTICK_IDENT
+              | UNDERSCORE
+              | KW_IN | KW_WHERE | KW_FOR | KW_IF | KW_DO
+              | KW_LET | KW_VAR | KW_AS | KW_IS | KW_TRY
+              | KW_AWAIT | KW_GET | KW_SET | KW_CASE
+              | KW_DEFAULT
+              ;
+
+<param_type> : <type>
+             | KW_INOUT <type>
+             ;
+
+<param_tail> : '=' <expression>
+             | RANGE_CLOSED
+             |
+             ;
+
+<function_effects_opt> : KW_ASYNC
+                       | KW_THROWS
+                       | KW_RETHROWS
+                       | KW_ASYNC KW_THROWS
+                       | KW_ASYNC KW_RETHROWS
+                       |
+                       ;
+
+<function_result_opt> : ARROW <type>
+                      |
+                      ;
+
+<function_body_opt> : <block>
+                    |
+                    ;
+
+# --- init / deinit / subscript ------------------------------------------
+
+<init_decl> : <modifiers_opt> KW_INIT <init_kind>
+              <generic_params_opt> <init_signature>
+              <generic_where_clause_opt>
+              <function_body_opt>
+            ;
+
+<init_kind> : QUESTION
+            | BANG
+            |
+            ;
+
+<init_signature> : '(' <parameter_list_opt> ')' <function_effects_opt>
+                 ;
+
+<deinit_decl> : <modifiers_opt> KW_DEINIT <block>
+              ;
+
+<subscript_decl> : <modifiers_opt> KW_SUBSCRIPT
+                   <generic_params_opt> '(' <parameter_list_opt> ')'
+                   ARROW <type> <generic_where_clause_opt>
+                   <accessor_block>
+                 ;
+
+# --- enum declaration ---------------------------------------------------
+
+<enum_decl> : <modifiers_opt> KW_ENUM IDENT <generic_params_opt>
+              <type_inheritance_opt> <generic_where_clause_opt>
+              '{' <enum_members_opt> '}'
+            ;
+
+<enum_members_opt> : <enum_members>
+                   |
+                   ;
+
+<enum_members> : <enum_member>
+               | <enum_members> <enum_member>
+               ;
+
+<enum_member> : <enum_case_clause>
+              | <declaration>
+              ;
+
+<enum_case_clause> : <modifiers_opt> KW_CASE <enum_case_list>
+                   ;
+
+<enum_case_list> : <enum_case>
+                 | <enum_case_list> ',' <enum_case>
+                 ;
+
+<enum_case> : IDENT
+            | IDENT '(' <enum_case_assoc_values> ')'
+            | IDENT '=' <expression>
+            ;
+
+<enum_case_assoc_values> : <enum_case_assoc_value>
+                         | <enum_case_assoc_values> ',' <enum_case_assoc_value>
+                         ;
+
+<enum_case_assoc_value> : <type>
+                        | IDENT ':' <type>
+                        | UNDERSCORE ':' <type>
+                        ;
+
+# --- struct / class / actor / protocol / extension ---------------------
+
+<struct_decl> : <modifiers_opt> KW_STRUCT IDENT <generic_params_opt>
+                <type_inheritance_opt> <generic_where_clause_opt>
+                '{' <type_body_members_opt> '}'
+              ;
+
+<class_decl> : <modifiers_opt> KW_CLASS IDENT <generic_params_opt>
+               <type_inheritance_opt> <generic_where_clause_opt>
+               '{' <type_body_members_opt> '}'
+             ;
+
+<actor_decl> : <modifiers_opt> KW_ACTOR IDENT <generic_params_opt>
+               <type_inheritance_opt> <generic_where_clause_opt>
+               '{' <type_body_members_opt> '}'
+             ;
+
+<protocol_decl> : <modifiers_opt> KW_PROTOCOL IDENT
+                  <type_inheritance_opt> <generic_where_clause_opt>
+                  '{' <type_body_members_opt> '}'
+                ;
+
+<extension_decl> : <modifiers_opt> KW_EXTENSION <type>
+                   <type_inheritance_opt> <generic_where_clause_opt>
+                   '{' <type_body_members_opt> '}'
+                 ;
+
+<type_inheritance_opt> : ':' <type_inheritance_list>
+                       |
+                       ;
+
+<type_inheritance_list> : <type>
+                        | <type_inheritance_list> ',' <type>
+                        ;
+
+<type_body_members_opt> : <type_body_members>
+                        |
+                        ;
+
+<type_body_members> : <declaration>
+                    | <type_body_members> <declaration>
+                    ;
+
+# --- generic parameters / constraints ----------------------------------
+
+<generic_params_opt> : LT_GENERIC <generic_param_list> GT_GENERIC
+                     |
+                     ;
+
+<generic_param_list> : <generic_param>
+                     | <generic_param_list> ',' <generic_param>
+                     ;
+
+<generic_param> : IDENT
+                | IDENT ':' <type>
+                ;
+
+<generic_where_clause_opt> : KW_WHERE <generic_requirement_list>
+                           |
+                           ;
+
+<generic_requirement_list> : <generic_requirement>
+                           | <generic_requirement_list> ',' <generic_requirement>
+                           ;
+
+<generic_requirement> : <type> ':' <type>
+                      | <type> EQEQ <type>
+                      ;
+
+# --- types --------------------------------------------------------------
+#
+# Type forms — Swift's type grammar overlaps significantly with
+# its expression grammar, so we keep `<type>` deliberately
+# narrow: identifiers (possibly with generic args), function
+# types, array / dictionary types, tuples (2+ elements), and
+# optional / forced-unwrap / metatype suffixes. The `()`-as-Void
+# form is OUT — users write `Void` (or skip the parens). This
+# avoids the reduce/reduce conflict with empty
+# `<parenthesized_or_tuple_expr>`.
+
+<type> : <type_or_postfix>
+       | <function_type>
+       ;
+
+<function_type> : <type_or_postfix> KW_THROWS ARROW <type>
+                | <type_or_postfix> KW_ASYNC ARROW <type>
+                | <type_or_postfix> KW_ASYNC KW_THROWS ARROW <type>
+                | <type_or_postfix> ARROW <type>
+                ;
+
+<type_or_postfix> : <type_primary>
+                  | <type_or_postfix> QUESTION
+                  | <type_or_postfix> BANG
+                  | <type_or_postfix> '.' KW_TYPE_PROP
+                  | <type_or_postfix> '.' KW_PROTOCOL_PROP
+                  | <type_or_postfix> AMP <type_primary>
+                  ;
+
+<type_primary> : <type_identifier>
+               | <tuple_type>
+               | <array_type>
+               | <dictionary_type>
+               | KW_SOME <type_identifier>
+               | KW_ANY <type_identifier>
+               ;
+
+<type_identifier> : <type_ident_segment>
+                  | <type_identifier> '.' <type_ident_segment>
+                  ;
+
+<type_ident_segment> : IDENT
+                     | IDENT LT_GENERIC <type_arg_list> GT_GENERIC
+                     | KW_SELF_TYPE
+                     ;
+
+<type_arg_list> : <type>
+                | <type_arg_list> ',' <type>
+                ;
+
+# Tuple types require 2+ elements; the single-element form
+# parses as a parenthesised type, and the empty `()` form
+# would conflict reduce/reduce with empty
+# `<parenthesized_or_tuple_expr>`. Use `Void` for the unit
+# type.
+<tuple_type> : '(' <type> ')'
+             | '(' <tuple_type_element> ',' <tuple_type_element_list> ')'
+             ;
+
+<tuple_type_element_list> : <tuple_type_element>
+                          | <tuple_type_element_list> ',' <tuple_type_element>
+                          ;
+
+<tuple_type_element> : <type>
+                     | IDENT ':' <type>
+                     ;
+
+<array_type> : '[' <type> ']'
+             ;
+
+<dictionary_type> : '[' <type> ':' <type> ']'
+                  ;
+
+# --- patterns -----------------------------------------------------------
+
+<pattern> : <wildcard_pattern>
+          | <identifier_pattern>
+          | <value_binding_pattern>
+          | <tuple_pattern>
+          | <enum_case_pattern>
+          | <type_cast_pattern>
+          | <expression_pattern>
+          ;
+
+<wildcard_pattern> : UNDERSCORE
+                   ;
+
+<identifier_pattern> : IDENT
+                     | BACKTICK_IDENT
+                     ;
+
+<value_binding_pattern> : KW_LET <pattern>
+                        | KW_VAR <pattern>
+                        ;
+
+<tuple_pattern> : '(' ')'
+                | '(' <tuple_pattern_element_list> ')'
+                ;
+
+<tuple_pattern_element_list> : <tuple_pattern_element>
+                             | <tuple_pattern_element_list> ',' <tuple_pattern_element>
+                             ;
+
+<tuple_pattern_element> : <pattern>
+                        | IDENT ':' <pattern>
+                        ;
+
+# `.case` and `.case(patterns)` forms. The qualified `Color.red`
+# form is NOT supported — IDENT-as-pattern vs IDENT-as-type
+# would create a reduce/reduce ambiguity. Users write `case
+# .red:` (the dominant idiom).
+<enum_case_pattern> : '.' IDENT
+                    | '.' IDENT <tuple_pattern>
+                    ;
+
+<type_cast_pattern> : KW_IS <type>
+                    ;
+
+# Expression / constant pattern — restricted to literal-like
+# expressions and range literals to keep the grammar tractable.
+<expression_pattern> : <pattern_literal>
+                     | <pattern_literal> RANGE_CLOSED <pattern_literal>
+                     | <pattern_literal> RANGE_HALF <pattern_literal>
+                     ;
+
+<pattern_literal> : INT_LIT
+                  | MINUS INT_LIT
+                  | FLOAT_LIT
+                  | MINUS FLOAT_LIT
+                  | STRING_LIT
+                  | MULTILINE_STRING_LIT
+                  | KW_TRUE
+                  | KW_FALSE
+                  | KW_NIL
+                  ;
+
+# --- block --------------------------------------------------------------
+
+<block> : '{' <block_statements_opt> '}'
+        ;
+
+<block_statements_opt> : <block_statements>
+                       |
+                       ;
+
+<block_statements> : <statement>
+                   | <block_statements> <statement>
+                   ;
+
+# --- statements ---------------------------------------------------------
+
+<statement> : <expression_stmt>
+            | <declaration>
+            | <if_stmt>
+            | <guard_stmt>
+            | <switch_stmt>
+            | <for_in_stmt>
+            | <while_stmt>
+            | <repeat_while_stmt>
+            | <return_stmt>
+            | <throw_stmt>
+            | <break_stmt>
+            | <continue_stmt>
+            | <defer_stmt>
+            | <do_stmt>
+            | <fallthrough_stmt>
+            | ';'
+            ;
+
+<expression_stmt> : <expression>
+                  ;
+
+<if_stmt> : KW_IF <condition_list> <block> <if_tail_opt>
+          ;
+
+<if_tail_opt> : KW_ELSE <block>
+              | KW_ELSE <if_stmt>
+              |
+              ;
+
+<guard_stmt> : KW_GUARD <condition_list> KW_ELSE <block>
+             ;
+
+<condition_list> : <condition>
+                 | <condition_list> ',' <condition>
+                 ;
+
+<condition> : <expression_no_block>
+            | KW_LET <pattern> '=' <expression_no_block>
+            | KW_VAR <pattern> '=' <expression_no_block>
+            | KW_CASE <pattern> '=' <expression_no_block>
+            | KW_LET <pattern>
+            ;
+
+<switch_stmt> : KW_SWITCH <expression_no_block> '{' <switch_cases_opt> '}'
+              ;
+
+<switch_cases_opt> : <switch_cases>
+                   |
+                   ;
+
+<switch_cases> : <switch_case>
+               | <switch_cases> <switch_case>
+               ;
+
+<switch_case> : KW_CASE <case_item_list> ':' <block_statements_opt>
+              | KW_DEFAULT ':' <block_statements_opt>
+              ;
+
+<case_item_list> : <case_item>
+                 | <case_item_list> ',' <case_item>
+                 ;
+
+<case_item> : <pattern>
+            | <pattern> KW_WHERE <expression>
+            ;
+
+<for_in_stmt> : KW_FOR <pattern> KW_IN <expression_no_block> <block>
+              | KW_FOR <pattern> KW_IN <expression_no_block> KW_WHERE <expression_no_block> <block>
+              | KW_FOR KW_AWAIT <pattern> KW_IN <expression_no_block> <block>
+              ;
+
+<while_stmt> : KW_WHILE <condition_list> <block>
+             ;
+
+<repeat_while_stmt> : KW_REPEAT <block> KW_WHILE <expression>
+                    ;
+
+<return_stmt> : KW_RETURN
+              | KW_RETURN <expression>
+              ;
+
+<throw_stmt> : KW_THROW <expression>
+             ;
+
+<break_stmt> : KW_BREAK
+             | KW_BREAK IDENT
+             ;
+
+<continue_stmt> : KW_CONTINUE
+                | KW_CONTINUE IDENT
+                ;
+
+<defer_stmt> : KW_DEFER <block>
+             ;
+
+<do_stmt> : KW_DO <block>
+          | KW_DO <block> <catch_clauses>
+          ;
+
+<catch_clauses> : <catch_clause>
+                | <catch_clauses> <catch_clause>
+                ;
+
+<catch_clause> : KW_CATCH <block>
+               | KW_CATCH <pattern> <block>
+               | KW_CATCH <pattern> KW_WHERE <expression> <block>
+               ;
+
+<fallthrough_stmt> : KW_FALLTHROUGH
+                   ;
+
+# --- expressions --------------------------------------------------------
+#
+# Swift precedence ladder (low → high):
+#   1. assignment / try-assign            (`=`, `+=` etc.)
+#   2. ternary                            (`a ? b : c`)
+#   3. nil-coalescing                     (`a ?? b`)
+#   4. cast                               (`x as T`, `x is T`)
+#   5. range                              (`a..<b`, `a...b`)
+#   6. logical or                         (`a || b`)
+#   7. logical and                        (`a && b`)
+#   8. comparison                         (`==`, `!=`, `<`, …)
+#   9. additive                           (`+`, `-`, `&`, `|`, `^`)
+#  10. multiplicative                     (`*`, `/`, `%`, `<<`, `>>`)
+#  11. try / try? / try! / await prefix
+#  12. unary prefix                       (`-`, `!`, `~`, `&`)
+#  13. postfix                            (`.`, `[]`, `()`, `?`, `!`)
+#  14. primary
+
+<expression> : <assignment_expr>
+             ;
+
+# The `_no_block` mirror chain — used in for / while / if /
+# guard / switch heads where a trailing `{` is the body, not a
+# trailing closure. Each rung mirrors its non-`_no_block`
+# counterpart but threads through `<postfix_expr_no_block>` at
+# the leaf so the `<postfix_expr> '(' … ')' <closure_expr>` /
+# `<postfix_expr> <closure_expr>` alternatives never fire.
+<expression_no_block> : <assignment_expr_no_block>
+                      ;
+
+<assignment_expr> : <ternary_expr>
+                  | <unary_expr> <assignment_op> <assignment_expr>
+                  ;
+
+<assignment_expr_no_block> : <ternary_expr_no_block>
+                           | <unary_expr_no_block> <assignment_op> <assignment_expr>
+                           ;
+
+<assignment_op> : EQ | PLUS_ASSIGN | MINUS_ASSIGN
+                | STAR_ASSIGN | SLASH_ASSIGN | PERCENT_ASSIGN
+                | AMP_ASSIGN | PIPE_ASSIGN | CARET_ASSIGN
+                | LSHIFT_ASSIGN | RSHIFT_ASSIGN
+                | NIL_COAL_ASSIGN
+                ;
+
+<ternary_expr> : <nil_coal_expr>
+               | <nil_coal_expr> QUESTION <expression> ':' <ternary_expr>
+               ;
+
+<ternary_expr_no_block> : <nil_coal_expr_no_block>
+                        | <nil_coal_expr_no_block> QUESTION <expression> ':' <ternary_expr_no_block>
+                        ;
+
+<nil_coal_expr> : <cast_expr>
+                | <cast_expr> NIL_COAL <nil_coal_expr>
+                ;
+
+<nil_coal_expr_no_block> : <cast_expr_no_block>
+                         | <cast_expr_no_block> NIL_COAL <nil_coal_expr_no_block>
+                         ;
+
+<cast_expr> : <range_expr>
+            | <range_expr> KW_IS <type>
+            | <range_expr> KW_AS <type>
+            | <range_expr> KW_AS_OPT <type>
+            | <range_expr> KW_AS_FORCE <type>
+            ;
+
+<cast_expr_no_block> : <range_expr_no_block>
+                     | <range_expr_no_block> KW_IS <type>
+                     | <range_expr_no_block> KW_AS <type>
+                     | <range_expr_no_block> KW_AS_OPT <type>
+                     | <range_expr_no_block> KW_AS_FORCE <type>
+                     ;
+
+<range_expr> : <logical_or_expr>
+             | <range_expr> RANGE_CLOSED <logical_or_expr>
+             | <range_expr> RANGE_HALF <logical_or_expr>
+             ;
+
+<range_expr_no_block> : <logical_or_expr_no_block>
+                      | <range_expr_no_block> RANGE_CLOSED <logical_or_expr_no_block>
+                      | <range_expr_no_block> RANGE_HALF <logical_or_expr_no_block>
+                      ;
+
+<logical_or_expr> : <logical_and_expr>
+                  | <logical_or_expr> LOG_OR <logical_and_expr>
+                  ;
+
+<logical_or_expr_no_block> : <logical_and_expr_no_block>
+                           | <logical_or_expr_no_block> LOG_OR <logical_and_expr_no_block>
+                           ;
+
+<logical_and_expr> : <comparison_expr>
+                   | <logical_and_expr> LOG_AND <comparison_expr>
+                   ;
+
+<logical_and_expr_no_block> : <comparison_expr_no_block>
+                            | <logical_and_expr_no_block> LOG_AND <comparison_expr_no_block>
+                            ;
+
+<comparison_expr> : <additive_expr>
+                  | <comparison_expr> EQEQ <additive_expr>
+                  | <comparison_expr> NEQ <additive_expr>
+                  | <comparison_expr> LT <additive_expr>
+                  | <comparison_expr> GT <additive_expr>
+                  | <comparison_expr> LE <additive_expr>
+                  | <comparison_expr> GE <additive_expr>
+                  | <comparison_expr> TRIPLE_EQ <additive_expr>
+                  | <comparison_expr> TRIPLE_NEQ <additive_expr>
+                  ;
+
+<comparison_expr_no_block> : <additive_expr_no_block>
+                           | <comparison_expr_no_block> EQEQ <additive_expr_no_block>
+                           | <comparison_expr_no_block> NEQ <additive_expr_no_block>
+                           | <comparison_expr_no_block> LT <additive_expr_no_block>
+                           | <comparison_expr_no_block> GT <additive_expr_no_block>
+                           | <comparison_expr_no_block> LE <additive_expr_no_block>
+                           | <comparison_expr_no_block> GE <additive_expr_no_block>
+                           | <comparison_expr_no_block> TRIPLE_EQ <additive_expr_no_block>
+                           | <comparison_expr_no_block> TRIPLE_NEQ <additive_expr_no_block>
+                           ;
+
+<additive_expr> : <multiplicative_expr>
+                | <additive_expr> PLUS  <multiplicative_expr>
+                | <additive_expr> MINUS <multiplicative_expr>
+                | <additive_expr> AMP   <multiplicative_expr>
+                | <additive_expr> PIPE  <multiplicative_expr>
+                | <additive_expr> CARET <multiplicative_expr>
+                ;
+
+<additive_expr_no_block> : <multiplicative_expr_no_block>
+                         | <additive_expr_no_block> PLUS  <multiplicative_expr_no_block>
+                         | <additive_expr_no_block> MINUS <multiplicative_expr_no_block>
+                         | <additive_expr_no_block> AMP   <multiplicative_expr_no_block>
+                         | <additive_expr_no_block> PIPE  <multiplicative_expr_no_block>
+                         | <additive_expr_no_block> CARET <multiplicative_expr_no_block>
+                         ;
+
+<multiplicative_expr> : <prefix_expr>
+                      | <multiplicative_expr> STAR    <prefix_expr>
+                      | <multiplicative_expr> SLASH   <prefix_expr>
+                      | <multiplicative_expr> PERCENT <prefix_expr>
+                      | <multiplicative_expr> LSHIFT  <prefix_expr>
+                      | <multiplicative_expr> RSHIFT  <prefix_expr>
+                      ;
+
+<multiplicative_expr_no_block> : <prefix_expr_no_block>
+                               | <multiplicative_expr_no_block> STAR    <prefix_expr_no_block>
+                               | <multiplicative_expr_no_block> SLASH   <prefix_expr_no_block>
+                               | <multiplicative_expr_no_block> PERCENT <prefix_expr_no_block>
+                               | <multiplicative_expr_no_block> LSHIFT  <prefix_expr_no_block>
+                               | <multiplicative_expr_no_block> RSHIFT  <prefix_expr_no_block>
+                               ;
+
+<prefix_expr> : <unary_expr>
+              | KW_TRY <prefix_expr>
+              | KW_TRY_OPT <prefix_expr>
+              | KW_TRY_FORCE <prefix_expr>
+              | KW_AWAIT <prefix_expr>
+              ;
+
+<prefix_expr_no_block> : <unary_expr_no_block>
+                       | KW_TRY <prefix_expr_no_block>
+                       | KW_TRY_OPT <prefix_expr_no_block>
+                       | KW_TRY_FORCE <prefix_expr_no_block>
+                       | KW_AWAIT <prefix_expr_no_block>
+                       ;
+
+<unary_expr> : <postfix_expr>
+             | PLUS  <unary_expr>
+             | MINUS <unary_expr>
+             | BANG  <unary_expr>
+             | TILDE <unary_expr>
+             | AMP   <unary_expr>
+             ;
+
+<unary_expr_no_block> : <postfix_expr_no_block>
+                      | PLUS  <unary_expr_no_block>
+                      | MINUS <unary_expr_no_block>
+                      | BANG  <unary_expr_no_block>
+                      | TILDE <unary_expr_no_block>
+                      | AMP   <unary_expr_no_block>
+                      ;
+
+<postfix_expr> : <primary_expr>
+               | <postfix_expr> '.' IDENT
+               | <postfix_expr> '.' INT_LIT
+               | <postfix_expr> '.' KW_INIT
+               | <postfix_expr> '.' KW_SELF
+               | <postfix_expr> SAFE_DOT IDENT
+               | <postfix_expr> SAFE_DOT INT_LIT
+               | <postfix_expr> '[' <call_argument_list_opt> ']'
+               | <postfix_expr> SAFE_LBRACK <call_argument_list_opt> ']'
+               | <postfix_expr> '(' <call_argument_list_opt> ')'
+               | <postfix_expr> '(' <call_argument_list_opt> ')' <closure_expr>
+               | <postfix_expr> <closure_expr>
+               | <postfix_expr> BANG
+               | <postfix_expr> QUESTION
+               | <postfix_expr> LT_GENERIC <type_arg_list> GT_GENERIC
+               ;
+
+# `_no_block` variant — used in condition contexts (for / while
+# / if / guard / switch heads) where a `{` following the
+# expression starts the loop / conditional body, NOT a trailing
+# closure. The body postfix omits the two trailing-closure
+# alternatives; the upper expression ladder threads through it.
+<postfix_expr_no_block> : <primary_expr>
+                        | <postfix_expr_no_block> '.' IDENT
+                        | <postfix_expr_no_block> '.' INT_LIT
+                        | <postfix_expr_no_block> '.' KW_INIT
+                        | <postfix_expr_no_block> '.' KW_SELF
+                        | <postfix_expr_no_block> SAFE_DOT IDENT
+                        | <postfix_expr_no_block> SAFE_DOT INT_LIT
+                        | <postfix_expr_no_block> '[' <call_argument_list_opt> ']'
+                        | <postfix_expr_no_block> SAFE_LBRACK <call_argument_list_opt> ']'
+                        | <postfix_expr_no_block> '(' <call_argument_list_opt> ')'
+                        | <postfix_expr_no_block> BANG
+                        | <postfix_expr_no_block> QUESTION
+                        | <postfix_expr_no_block> LT_GENERIC <type_arg_list> GT_GENERIC
+                        ;
+
+<call_argument_list_opt> : <call_argument_list>
+                         |
+                         ;
+
+<call_argument_list> : <call_argument>
+                     | <call_argument_list> ',' <call_argument>
+                     ;
+
+<call_argument> : <expression>
+                | <param_label> ':' <expression>
+                ;
+
+# --- primary expressions -----------------------------------------------
+
+<primary_expr> : <literal_expr>
+               | KW_SELF
+               | KW_SUPER
+               | <closure_expr>
+               | <parenthesized_or_tuple_expr>
+               | <array_literal>
+               | <dictionary_literal>
+               | <selector_expr>
+               | IDENT
+               | BACKTICK_IDENT
+               | DOLLAR_IDENT
+               | KW_SELF_TYPE
+               | '.' IDENT
+               ;
+
+<literal_expr> : INT_LIT
+               | FLOAT_LIT
+               | STRING_LIT
+               | MULTILINE_STRING_LIT
+               | KW_TRUE
+               | KW_FALSE
+               | KW_NIL
+               | KW_FILE_DIRECTIVE
+               | KW_LINE_DIRECTIVE
+               | KW_COLUMN_DIRECTIVE
+               | KW_FUNCTION_DIRECTIVE
+               ;
+
+<parenthesized_or_tuple_expr> : '(' ')'
+                              | '(' <call_argument_list> ')'
+                              ;
+
+<array_literal> : '[' ']'
+                | '[' <expression_list> ']'
+                | '[' <expression_list> ',' ']'
+                ;
+
+<dictionary_literal> : '[' ':' ']'
+                     | '[' <dict_entry_list> ']'
+                     | '[' <dict_entry_list> ',' ']'
+                     ;
+
+<dict_entry_list> : <dict_entry>
+                  | <dict_entry_list> ',' <dict_entry>
+                  ;
+
+<dict_entry> : <expression> ':' <expression>
+             ;
+
+<expression_list> : <expression>
+                  | <expression_list> ',' <expression>
+                  ;
+
+# --- closures ----------------------------------------------------------
+#
+# Closure body forms:
+#   `{ body }`                                    — no signature
+#   `{ params in body }`                          — unparenthesised params
+#   `{ (params) -> ReturnType in body }`          — full signature
+#   `{ [captures] (params) -> R in body }`        — with capture list
+
+<closure_expr> : '{' <closure_body> '}'
+               ;
+
+<closure_body> : <block_statements_opt>
+               | <closure_signature> KW_IN <block_statements_opt>
+               ;
+
+<closure_signature> : <closure_capture_list_opt> <closure_param_clause>
+                      <function_effects_opt> <function_result_opt>
+                    | <closure_capture_list_opt>
+                    ;
+
+<closure_capture_list_opt> : '[' <closure_capture_list> ']'
+                           |
+                           ;
+
+<closure_capture_list> : <closure_capture_item>
+                       | <closure_capture_list> ',' <closure_capture_item>
+                       ;
+
+<closure_capture_item> : <closure_capture_specifier_opt> IDENT
+                       | <closure_capture_specifier_opt> IDENT '=' <expression>
+                       ;
+
+<closure_capture_specifier_opt> : KW_WEAK
+                                | KW_UNOWNED
+                                |
+                                ;
+
+<closure_param_clause> : '(' ')'
+                       | '(' <closure_param_list> ')'
+                       | <closure_param_name_list>
+                       ;
+
+<closure_param_list> : <closure_param>
+                     | <closure_param_list> ',' <closure_param>
+                     ;
+
+<closure_param> : IDENT
+                | IDENT ':' <type>
+                | UNDERSCORE
+                | UNDERSCORE ':' <type>
+                ;
+
+<closure_param_name_list> : IDENT
+                          | UNDERSCORE
+                          | <closure_param_name_list> ',' IDENT
+                          | <closure_param_name_list> ',' UNDERSCORE
+                          ;
+
+# --- selector / keypath directives -------------------------------------
+
+<selector_expr> : KW_SELECTOR '(' <expression> ')'
+                | KW_KEYPATH_DIRECTIVE '(' <expression> ')'
+                | KW_AVAILABLE '(' <availability_args> ')'
+                ;
+
+<availability_args> : <availability_arg>
+                    | <availability_args> ',' <availability_arg>
+                    ;
+
+<availability_arg> : STAR
+                   | IDENT INT_LIT
+                   | IDENT FLOAT_LIT
+                   | IDENT ':' STRING_LIT
+                   ;
