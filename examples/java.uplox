@@ -1,0 +1,1387 @@
+# Java 17 — uplox first cut.
+#
+# Targets the language at Java 17 LTS — modern enough to cover
+# real-world code (records, sealed classes, switch expressions
+# with arrow patterns, pattern matching for `instanceof`, text
+# blocks, `var`, enhanced enums, generics with wildcards, lambdas
+# and method references) without yet adopting the preview features
+# in Java 18 - 21 (string templates, unnamed classes, record
+# patterns inside switch).
+#
+# Built around the JLS §3 - §15 layout:
+#
+#   * Compilation units: package declaration, import declarations
+#     (plain, static, on-demand), and one or more type declarations.
+#   * Type declarations: `class`, `interface`, `enum`, `record`,
+#     `@interface` (annotation type), all with the standard
+#     modifier set (public, private, protected, static, abstract,
+#     final, sealed, non-sealed, strictfp), generic type parameters
+#     with `extends` bounds, `extends` / `implements` / `permits`
+#     clauses, and inner / nested types.
+#   * Members: fields, methods, constructors, static initialisers,
+#     instance initialisers, nested types. Record components are
+#     declared in the header.
+#   * Statements: block, local declarations (`var` and explicitly-
+#     typed), expression statements, `if / else`, `switch`
+#     (statement and expression forms), `while`, `do / while`,
+#     `for` (classic and enhanced), `break`, `continue`, `return`,
+#     `throw`, `try / catch / finally`, `try-with-resources`,
+#     `synchronized`, labelled statements, `yield` (in switch
+#     expression body), `assert`.
+#   * Expressions: the full JLS §15 precedence ladder —
+#     assignment, ternary, lambda, logical `||` / `&&`, bitwise
+#     `|` / `^` / `&`, equality `==` / `!=`, relational
+#     `< <= > >=` plus `instanceof`, shifts (`<<` / `>>` / `>>>`),
+#     additive, multiplicative, unary (`!` `~` `+` `-` `++` `--`),
+#     cast, postfix (`++` / `--`), primary (`new`, method
+#     invocation, field access, array access, class literal,
+#     method reference, this / super, literals).
+#   * Types: primitive types (byte, short, int, long, float,
+#     double, char, boolean), `void`, qualified class types,
+#     generic types (`List<T>`, `Map<K, V>`), nested generics
+#     (`Outer<T>.Inner<U>`), array types (`T[]`, `T[][]`),
+#     wildcard types (`?`, `? extends T`, `? super T`), type
+#     variables, `var` (local-variable type inference).
+#   * Patterns (Java 16+): type pattern (`instanceof Foo f`),
+#     used in `instanceof` and switch.
+#   * Annotations: `@Foo`, `@Foo(value)`, `@Foo(k = v, ...)`,
+#     in modifier, type, and parameter positions.
+#   * Method references: `Type::method`, `Type::new`,
+#     `super::method`, `instance::method`.
+#
+# How the grammar handles Java's known LR(k>1) ambiguities.
+#
+# Like C#, Java was designed for hand-written recursive-descent
+# parsing, and strict LR(1) parsers can't handle it without help.
+# Three ambiguity classes:
+#
+#   1. `a < b > c` — `<...>` could be a generic type argument
+#      list (`a<b>c`) or a chained comparison.
+#   2. `(T) x` versus `(expr)` — opening `(` could begin a cast
+#      or a parenthesised expression.
+#   3. `(x, y) -> …` versus `(x, y)` — `(...)` could be a lambda
+#      parameter list or a parenthesised expression (Java has no
+#      tuples, so the only other interpretation is a single
+#      parenthesised comma-expression — which Java doesn't have
+#      either except as part of a for-update — but the parser
+#      can't see that far ahead).
+#
+# Same approach as `csharp.uplox`: promote the disambiguation
+# into the tokenizer via synthetic terminals that the raw lexer
+# never emits directly — `LT_GENERIC`, `GT_GENERIC`,
+# `LPAREN_LAMBDA`, `LPAREN_CAST`. Hosts install a `java_filter`
+# token filter that scans ahead from each `<`, `(`, rewrites the
+# terminal kind per JLS §3.10 / §15 disambiguation rules:
+#
+#   * `<` becomes `LT_GENERIC` if the matching `>` (counted as
+#     a balanced-bracket scan) is followed by one of JLS's
+#     disambiguating-set tokens:
+#       `(` `)` `]` `}` `:` `;` `,` `.` `?` `==` `!=`
+#       `|` `^` `&&` `||` `&` `[` `is` `as` `{` `->` EOF
+#     and the matching `>` is then emitted as `GT_GENERIC`. The
+#     filter also splits `>>` and `>>>` into multiple
+#     `GT_GENERIC` tokens when the parser is inside an open
+#     type-argument list (the `Foo<Bar<Baz>>` case).
+#   * `(` becomes `LPAREN_LAMBDA` if the matching `)` is
+#     followed immediately by `->`, after a quick scan that
+#     confirms the contents parse as a lambda parameter list
+#     (IDENT [, IDENT]* — or `<type> IDENT [, …]` — with
+#     optional `final` and `@Annotation` modifiers).
+#   * `(` becomes `LPAREN_CAST` if the contents scan as a
+#     complete type (with optional `& Bound` intersection
+#     types) and the token after the matching `)` is in the
+#     "CanFollowCast" set: identifier, primitive keyword, `this`,
+#     `super`, `new`, literal, `(`, `~`, `!`, prefix `++` /
+#     `--`. Cast onto a lambda (`(Predicate<T>) x -> …`) is
+#     handled by the same scan — the token after `)` may be an
+#     IDENT that begins a lambda.
+#
+# Hosts that don't supply a `java_filter` get the raw tokens. The
+# grammar's expression productions still parse most code; only
+# the three ambiguous patterns above need the filter.
+#
+# Conflict-resolution decisions:
+#
+#   * Dangling `else` resolves greedily (`%shift KW_ELSE`).
+#   * `[` after a primary — array access starts; shift wins over
+#     reducing the primary.
+#   * `(` after a primary — method invocation starts; shift wins.
+#   * `++` / `--` after an expression — postfix increment;
+#     shift wins over reducing.
+
+%grammar java
+
+
+%define lr.type lalr
+%options
+start = compilation_unit
+
+%shift
+# Dangling-else: greedy attachment to the nearest `if`.
+KW_ELSE
+
+# Postfix suffixes — `[`, `(`, `++`, `--`, `::` — attach to the
+# preceding primary expression rather than reducing the
+# primary up the expression chain.
+LBRACK
+LPAREN
+INC
+DEC
+DCOLON
+
+# Operator-precedence conflicts: at every precedence rung the
+# parser sees, when a higher-precedence operator's lookahead
+# appears after the current rung's reduction, shift wins
+# (extend the operator chain at the higher precedence) rather
+# than reduce (close the chain prematurely). LALR over-merging
+# creates spurious shift/reduce conflicts on these that the
+# defaults below silence — none of them is genuinely
+# ambiguous in JLS terms.
+PLUS MINUS STAR SLASH PERCENT
+LSHIFT RSHIFT URSHIFT
+LT GT LE GE
+EQEQ NEQ
+AMP CARET PIPE
+LOG_AND LOG_OR
+QUESTION
+EQ
+KW_INSTANCEOF
+
+# Annotation start — at modifier-list / package-declaration /
+# parameter-list positions, `@` extends the modifier list
+# rather than closing the empty / non-empty modifier set.
+AT
+
+# (Primitive type keywords moved to `%reduce` below — at a
+# modifier-list close, reducing `<modifiers_opt> -> ε` first
+# is what makes `int x = 0;` parse as a local declaration
+# instead of `int.class` expression-statement.)
+
+# Other follow-set tokens at empty-reduction positions —
+# shift continues building the surrounding construct rather
+# than closing it on an empty body / list.
+LBRACE
+ARROW
+KW_CASE KW_DEFAULT
+
+
+
+%tokens
+
+WS            = /[ \t\r\n]+/                                %skip
+LINE_COMMENT  = /\/\/[^\n]*/                                %skip
+BLOCK_COMMENT = /\/\*([^*]|\*+[^*\/])*\*+\//                %skip
+
+# Numeric literals. Integer suffixes: l / L. Floating suffixes:
+# f / F / d / D. Hex (`0x…`), octal (`0…`), and binary (`0b…`)
+# forms supported, with `_` digit separators.
+INT_LIT       = /(0[xX][0-9A-Fa-f_]+|0[bB][01_]+|0[0-7_]+|[0-9][0-9_]*)[lL]?/
+FLOAT_LIT     = /([0-9][0-9_]*\.[0-9_]*([eE][+-]?[0-9_]+)?|\.[0-9_]+([eE][+-]?[0-9_]+)?|[0-9][0-9_]*[eE][+-]?[0-9_]+)[fFdD]?/
+FLOAT_INT_LIT = /[0-9][0-9_]*[fFdD]/
+
+CHAR_LIT      = /'([^'\\\n]|\\.)+'/
+STRING_LIT    = /"([^"\\\n]|\\.)*"/
+
+# Text blocks (Java 15+) — triple-quoted strings; the regex
+# matches `"""` then any text not containing `"""` then `"""`.
+# Using a balanced-token kind keeps the regex straightforward.
+TEXT_BLOCK    = /"""([^"]|"[^"]|""[^"])*"""/
+
+# --- declaration / module keywords ---------------------------------------
+KW_PACKAGE    = 'package'
+KW_IMPORT     = 'import'
+KW_MODULE     = 'module'
+KW_REQUIRES   = 'requires'
+KW_EXPORTS    = 'exports'
+KW_OPENS      = 'opens'
+KW_USES       = 'uses'
+KW_PROVIDES   = 'provides'
+KW_TO         = 'to'
+KW_WITH       = 'with'
+KW_TRANSITIVE = 'transitive'
+KW_OPEN       = 'open'
+
+# --- type-kind keywords --------------------------------------------------
+KW_CLASS      = 'class'
+KW_INTERFACE  = 'interface'
+KW_ENUM       = 'enum'
+KW_RECORD     = 'record'
+
+# --- modifier keywords ---------------------------------------------------
+KW_PUBLIC     = 'public'
+KW_PRIVATE    = 'private'
+KW_PROTECTED  = 'protected'
+KW_STATIC     = 'static'
+KW_ABSTRACT   = 'abstract'
+KW_FINAL      = 'final'
+KW_NATIVE     = 'native'
+KW_SYNCHRONIZED = 'synchronized'
+KW_TRANSIENT  = 'transient'
+KW_VOLATILE   = 'volatile'
+KW_STRICTFP   = 'strictfp'
+KW_DEFAULT    = 'default'
+KW_SEALED     = 'sealed'
+KW_NON_SEALED = 'non-sealed'
+
+# --- inheritance keywords ------------------------------------------------
+KW_EXTENDS    = 'extends'
+KW_IMPLEMENTS = 'implements'
+KW_PERMITS    = 'permits'
+KW_THROWS     = 'throws'
+
+# --- primitive type keywords ---------------------------------------------
+KW_VOID       = 'void'
+KW_BOOLEAN    = 'boolean'
+KW_BYTE       = 'byte'
+KW_SHORT      = 'short'
+KW_INT        = 'int'
+KW_LONG       = 'long'
+KW_CHAR       = 'char'
+KW_FLOAT      = 'float'
+KW_DOUBLE     = 'double'
+
+# --- expression / literal keywords ---------------------------------------
+KW_TRUE       = 'true'
+KW_FALSE      = 'false'
+KW_NULL       = 'null'
+KW_THIS       = 'this'
+KW_SUPER      = 'super'
+KW_NEW        = 'new'
+KW_INSTANCEOF = 'instanceof'
+KW_VAR        = 'var'
+KW_YIELD      = 'yield'
+
+# --- statement keywords --------------------------------------------------
+KW_IF         = 'if'
+KW_ELSE       = 'else'
+KW_WHILE      = 'while'
+KW_DO         = 'do'
+KW_FOR        = 'for'
+KW_SWITCH     = 'switch'
+KW_CASE       = 'case'
+KW_BREAK      = 'break'
+KW_CONTINUE   = 'continue'
+KW_RETURN     = 'return'
+KW_THROW      = 'throw'
+KW_TRY        = 'try'
+KW_CATCH      = 'catch'
+KW_FINALLY    = 'finally'
+KW_ASSERT     = 'assert'
+
+# Identifier — declared after all keyword tokens so longest-match
+# ties favour the keyword.
+IDENT         = /[A-Za-z_$][A-Za-z0-9_$]*/
+
+# --- multi-character operators (declared before single-char) -------------
+ARROW         = '->'
+DCOLON        = '::'
+ELLIPSIS      = '...'
+PLUS_ASSIGN   = '+='
+MINUS_ASSIGN  = '-='
+STAR_ASSIGN   = '*='
+SLASH_ASSIGN  = '/='
+PERCENT_ASSIGN = '%='
+AMP_ASSIGN    = '&='
+PIPE_ASSIGN   = '|='
+CARET_ASSIGN  = '^='
+LSHIFT_ASSIGN = '<<='
+RSHIFT_ASSIGN = '>>='
+URSHIFT_ASSIGN = '>>>='
+EQEQ          = '=='
+NEQ           = '!='
+LE            = '<='
+GE            = '>='
+LSHIFT        = '<<'
+# `>>` and `>>>` lex as RSHIFT / URSHIFT in shift / shift-assign
+# contexts; the filter splits them into consecutive `GT_GENERIC`
+# tokens when the parser is inside an open type-argument list,
+# the same trick the Mono mcs tokenizer uses for nested generics.
+URSHIFT       = '>>>'
+RSHIFT        = '>>'
+LOG_AND       = '&&'
+LOG_OR        = '||'
+INC           = '++'
+DEC           = '--'
+
+EQ            = '='
+LT            = '<'
+GT            = '>'
+PLUS          = '+'
+MINUS         = '-'
+STAR          = '*'
+SLASH         = '/'
+PERCENT       = '%'
+AMP           = '&'
+PIPE          = '|'
+CARET         = '^'
+TILDE         = '~'
+BANG          = '!'
+QUESTION      = '?'
+LPAREN        = '('
+RPAREN        = ')'
+LBRACE        = '{'
+RBRACE        = '}'
+LBRACK        = '['
+RBRACK        = ']'
+COMMA         = ','
+SEMI          = ';'
+COLON         = ':'
+DOT           = '.'
+AT            = '@'
+
+# --- synthetic terminals (filter-produced) -------------------------------
+#
+# The raw lexer never emits these — they're declared AFTER all
+# the corresponding real tokens so the lexer's longest-match
+# tie-breaking always picks the real token. The host's
+# `java_filter` token filter rewrites LT → LT_GENERIC, GT →
+# GT_GENERIC, LPAREN → LPAREN_LAMBDA / LPAREN_CAST per the JLS
+# disambiguation rules described in the header. Same pattern
+# that `csharp.uplox` and `c_subset.uplox` use.
+LT_GENERIC    = 'LT_GENERIC_SYNTHETIC_NEVER_EMITTED'
+GT_GENERIC    = 'GT_GENERIC_SYNTHETIC_NEVER_EMITTED'
+LPAREN_LAMBDA = 'LPAREN_LAMBDA_SYNTHETIC_NEVER_EMITTED'
+LPAREN_CAST   = 'LPAREN_CAST_SYNTHETIC_NEVER_EMITTED'
+
+# `IDENT_TYPE` — the filter-rewritten IDENT that the host emits
+# when an identifier appears at the head of a local-declaration
+# or member-declaration shape (i.e. when a `Type IDENT [= …]`
+# pattern is detected by scanning ahead from a statement-start
+# IDENT). Used in `<annotated_segment>` and below in place of
+# the bare IDENT — splitting the type-context IDENT from the
+# expression-context IDENT is what lets the grammar
+# distinguish `Foo x = …;` (declaration) from `foo;`
+# (expression statement) at block-statement positions.
+IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
+
+%rules
+
+# --- compilation unit ----------------------------------------------------
+
+<compilation_unit> : <package_decl_opt> <import_decls_opt> <type_decls_opt>
+                   ;
+
+<package_decl_opt> : <package_decl>
+                   |
+                   ;
+
+<package_decl> : <annotations_opt> KW_PACKAGE <qualified_name> ';'
+               ;
+
+<import_decls_opt> : <import_decls>
+                   |
+                   ;
+
+<import_decls> : <import_decl>
+               | <import_decls> <import_decl>
+               ;
+
+# Import shapes: plain, static, on-demand `*`, static on-demand.
+<import_decl> : KW_IMPORT <qualified_name> ';'
+              | KW_IMPORT <qualified_name> '.' '*' ';'
+              | KW_IMPORT KW_STATIC <qualified_name> ';'
+              | KW_IMPORT KW_STATIC <qualified_name> '.' '*' ';'
+              ;
+
+<qualified_name> : IDENT
+                 | <qualified_name> '.' IDENT
+                 ;
+
+<type_decls_opt> : <type_decls>
+                 |
+                 ;
+
+<type_decls> : <type_decl>
+             | <type_decls> <type_decl>
+             ;
+
+# --- type declarations ---------------------------------------------------
+
+<type_decl> : <class_decl>
+            | <interface_decl>
+            | <enum_decl>
+            | <record_decl>
+            | <annotation_type_decl>
+            | ';'
+            ;
+
+<class_decl> : <modifiers_opt> KW_CLASS IDENT <type_params_opt>
+               <class_extends_opt> <class_implements_opt>
+               <class_permits_opt> <class_body>
+             ;
+
+<interface_decl> : <modifiers_opt> KW_INTERFACE IDENT <type_params_opt>
+                   <interface_extends_opt> <class_permits_opt>
+                   <class_body>
+                 ;
+
+<enum_decl> : <modifiers_opt> KW_ENUM IDENT
+              <class_implements_opt> <enum_body>
+            ;
+
+<record_decl> : <modifiers_opt> KW_RECORD IDENT <type_params_opt>
+                '(' <record_components_opt> ')'
+                <class_implements_opt> <class_body>
+              ;
+
+<annotation_type_decl> : <modifiers_opt> AT KW_INTERFACE IDENT <class_body>
+                       ;
+
+# Modifiers — Java allows any order and the AST builder rejects
+# duplicates. Annotations interleave with keyword modifiers.
+<modifiers_opt> : <modifiers>
+                |
+                ;
+
+<modifiers> : <modifier>
+            | <modifiers> <modifier>
+            ;
+
+# A modifier is either a keyword modifier or an annotation.
+# `KW_DEFAULT` is omitted here even though Java treats it as
+# an interface-method modifier — keeping it in the generic
+# modifier non-terminal collides with the switch-label
+# `default` arrow form. The `<method_decl>` rule handles
+# interface default methods through a separate alternative.
+<modifier> : KW_PUBLIC | KW_PRIVATE | KW_PROTECTED
+           | KW_STATIC | KW_ABSTRACT | KW_FINAL
+           | KW_NATIVE | KW_SYNCHRONIZED | KW_TRANSIENT
+           | KW_VOLATILE | KW_STRICTFP
+           | KW_SEALED | KW_NON_SEALED
+           | <annotation>
+           ;
+
+# --- generics / type parameters ------------------------------------------
+
+<type_params_opt> : LT_GENERIC <type_param_list> GT_GENERIC
+                  |
+                  ;
+
+<type_param_list> : <type_param>
+                  | <type_param_list> ',' <type_param>
+                  ;
+
+# A type parameter is `T`, `T extends Bound`, or `T extends
+# Bound1 & Bound2 & …`. Annotations may precede.
+<type_param> : <annotations_opt> IDENT <type_param_bound_opt>
+             ;
+
+<type_param_bound_opt> : KW_EXTENDS <reference_type> <additional_bounds_opt>
+                       |
+                       ;
+
+<additional_bounds_opt> : <additional_bounds_opt> '&' <reference_type>
+                        |
+                        ;
+
+# Inheritance clauses.
+<class_extends_opt> : KW_EXTENDS <reference_type>
+                    |
+                    ;
+
+<class_implements_opt> : KW_IMPLEMENTS <reference_type_list>
+                       |
+                       ;
+
+<interface_extends_opt> : KW_EXTENDS <reference_type_list>
+                        |
+                        ;
+
+<class_permits_opt> : KW_PERMITS <reference_type_list>
+                    |
+                    ;
+
+<reference_type_list> : <reference_type>
+                      | <reference_type_list> ',' <reference_type>
+                      ;
+
+# --- class / interface body ----------------------------------------------
+
+<class_body> : '{' <class_members_opt> '}'
+             ;
+
+<class_members_opt> : <class_members>
+                    |
+                    ;
+
+<class_members> : <class_member>
+                | <class_members> <class_member>
+                ;
+
+# Class members: fields, methods, constructors, initialisers,
+# nested types, empty `;`.
+#
+# Field and method declarations share the leading
+# `<modifiers_opt> [<type_params>] <method_result_or_type>
+# IDENT` prefix, and the tail (`(` for method, `=` / `;` /
+# `,` / `[` for field) picks the branch. Splitting field and
+# method into separate productions at the top level would
+# create an LR(1) reduce/reduce on the `<type>` → field
+# `<variable_declarators>` path vs. the `<type>` →
+# `<method_result>` → method name path — the parser can't
+# tell from one IDENT whether it's a variable name or a
+# method name without seeing what follows.
+<class_member> : <field_or_method>
+               | <void_method_decl>
+               | <generic_method_decl>
+               | <constructor_decl>
+               | <static_initializer>
+               | <instance_initializer>
+               | <type_decl>
+               ;
+
+<static_initializer> : KW_STATIC <block>
+                     ;
+
+<instance_initializer> : <block>
+                       ;
+
+# Field or non-generic non-void method: shared prefix
+# `<modifiers_opt> <type> IDENT`, tail picks branch.
+<field_or_method> : <modifiers_opt> <type> IDENT <field_or_method_tail>
+                  ;
+
+# Tail forms — `(` opens a method body, everything else is a
+# field-declarator continuation that ends in `;`. The field
+# tail factors out the first-declarator-after-IDENT shape
+# (already past the name) followed by optional more
+# declarators.
+<field_or_method_tail> : '(' <parameter_list_opt> ')' <method_dims_opt> <throws_clause_opt> <method_body>
+                       | <first_decl_rest> ';'
+                       | <first_decl_rest> ',' <variable_declarators> ';'
+                       ;
+
+# After the first declarator's IDENT (already consumed), we
+# may have `[]` dims, an `=` initialiser, both, or neither.
+<first_decl_rest> :
+                  | <first_decl_dims>
+                  | '=' <variable_initializer>
+                  | <first_decl_dims> '=' <variable_initializer>
+                  ;
+
+<first_decl_dims> : '[' ']'
+                  | <first_decl_dims> '[' ']'
+                  ;
+
+<variable_declarators> : <variable_declarator>
+                       | <variable_declarators> ',' <variable_declarator>
+                       ;
+
+<variable_declarator> : <variable_declarator_id>
+                      | <variable_declarator_id> '=' <variable_initializer>
+                      ;
+
+# A declarator name is an IDENT, with optional `[]` brackets for
+# legacy C-style array declaration (`int x[]` ≡ `int[] x`).
+<variable_declarator_id> : IDENT
+                         | <variable_declarator_id> '[' ']'
+                         ;
+
+<variable_initializer> : <expression>
+                       | <array_initializer>
+                       ;
+
+# `void` methods — no field interpretation since `void` can't
+# be a field type. Keeps the leading-`void` parse separate
+# from the field/method shared prefix.
+<void_method_decl> : <modifiers_opt> KW_VOID IDENT '(' <parameter_list_opt> ')'
+                     <method_dims_opt> <throws_clause_opt> <method_body>
+                   ;
+
+# Generic methods always have `<type_params>` before the
+# return type — can't be a field, so no ambiguity.
+<generic_method_decl> : <modifiers_opt> <type_params> <method_result>
+                        IDENT '(' <parameter_list_opt> ')'
+                        <method_dims_opt> <throws_clause_opt> <method_body>
+                      ;
+
+<type_params> : LT_GENERIC <type_param_list> GT_GENERIC
+              ;
+
+<method_result> : <type>
+                | KW_VOID
+                ;
+
+# Legacy C-style brackets on the method head: `int foo()[]`
+# means `int[] foo()`. Kept for compatibility with pre-Java-8
+# code that uses the form.
+<method_dims_opt> : <method_dims>
+                  |
+                  ;
+
+<method_dims> : '[' ']'
+              | <method_dims> '[' ']'
+              ;
+
+<throws_clause_opt> : KW_THROWS <reference_type_list>
+                    |
+                    ;
+
+# Method body: either a block, a `;` (abstract / interface /
+# native), or `default <expression> ;` (annotation type element).
+<method_body> : <block>
+              | ';'
+              | KW_DEFAULT <element_value> ';'
+              ;
+
+<constructor_decl> : <modifiers_opt> <type_params_opt> IDENT
+                     '(' <parameter_list_opt> ')'
+                     <throws_clause_opt> <block>
+                   ;
+
+# --- parameter lists -----------------------------------------------------
+
+<parameter_list_opt> : <parameter_list>
+                     |
+                     ;
+
+# A parameter list ends either with a normal parameter or with
+# a varargs parameter (`Type... name`). The varargs form may
+# appear at most once and only at the end — encoded in the
+# split-tail structure.
+<parameter_list> : <parameter_seq>
+                 | <parameter_seq> ',' <varargs_parameter>
+                 | <varargs_parameter>
+                 ;
+
+<parameter_seq> : <parameter>
+                | <parameter_seq> ',' <parameter>
+                ;
+
+<parameter> : <modifiers_opt> <type> <variable_declarator_id>
+            ;
+
+<varargs_parameter> : <modifiers_opt> <type> <annotations_opt>
+                      ELLIPSIS <variable_declarator_id>
+                    ;
+
+# Parameter / local-declaration modifier slot is filled by the
+# same `<modifiers_opt>` non-terminal as class / method
+# modifiers. JLS limits parameters to `final` and annotations,
+# but the grammar accepts the broader shape and the AST builder
+# rejects mis-placed modifiers like `public`. Sharing the non-
+# terminal eliminates the reduce/reduce conflict that parallel
+# `<modifier>` / `<param_modifier>` reductions would produce
+# on `KW_FINAL` and `<annotation>`.
+
+# --- record components ---------------------------------------------------
+
+<record_components_opt> : <record_component_list>
+                        |
+                        ;
+
+<record_component_list> : <record_component>
+                        | <record_component_list> ',' <record_component>
+                        ;
+
+# Record components share the parameter shape (type-annotated
+# IDENT). Java 17 doesn't allow varargs in record headers.
+<record_component> : <annotations_opt> <type> IDENT
+                   ;
+
+# --- enum body -----------------------------------------------------------
+
+<enum_body> : '{' <enum_constants_opt> <enum_body_decls_opt> '}'
+            ;
+
+<enum_constants_opt> : <enum_constant_list>
+                     | <enum_constant_list> ','
+                     |
+                     ;
+
+<enum_constant_list> : <enum_constant>
+                     | <enum_constant_list> ',' <enum_constant>
+                     ;
+
+# An enum constant is `[annotations] IDENT [args] [class_body]`.
+# The optional class body makes the constant a singleton subclass
+# of the enum type (the `Planet.EARTH { … }` pattern).
+<enum_constant> : <annotations_opt> IDENT <enum_constant_args_opt>
+                  <enum_constant_body_opt>
+                ;
+
+<enum_constant_args_opt> : '(' <argument_list_opt> ')'
+                         |
+                         ;
+
+<enum_constant_body_opt> : <class_body>
+                         |
+                         ;
+
+# The enum body's tail (after the constant list) is the body
+# declarations — methods, fields, etc., introduced by `;`.
+<enum_body_decls_opt> : ';' <class_members_opt>
+                      |
+                      ;
+
+# --- annotations ---------------------------------------------------------
+
+<annotations_opt> : <annotations>
+                  |
+                  ;
+
+<annotations> : <annotation>
+              | <annotations> <annotation>
+              ;
+
+# Annotation forms: marker (`@Foo`), single-element (`@Foo(value)`),
+# normal (`@Foo(k1 = v1, k2 = v2)`).
+<annotation> : AT <qualified_name>
+             | AT <qualified_name> '(' ')'
+             | AT <qualified_name> '(' <element_value_pairs> ')'
+             | AT <qualified_name> '(' <element_value> ')'
+             ;
+
+<element_value_pairs> : <element_value_pair>
+                      | <element_value_pairs> ',' <element_value_pair>
+                      ;
+
+<element_value_pair> : IDENT '=' <element_value>
+                     ;
+
+# An annotation value is either an expression, a nested
+# annotation, or an array of values (`{a, b, c}`).
+<element_value> : <expression>
+                | <annotation>
+                | <element_value_array>
+                ;
+
+<element_value_array> : '{' '}'
+                      | '{' <element_value_list> '}'
+                      | '{' <element_value_list> ',' '}'
+                      ;
+
+<element_value_list> : <element_value>
+                     | <element_value_list> ',' <element_value>
+                     ;
+
+# --- types ---------------------------------------------------------------
+
+<type> : <primitive_type>
+       | <reference_type>
+       ;
+
+<primitive_type> : KW_BOOLEAN | KW_BYTE | KW_SHORT | KW_INT
+                 | KW_LONG | KW_CHAR | KW_FLOAT | KW_DOUBLE
+                 ;
+
+# Reference types: class / interface, possibly generic, possibly
+# qualified, possibly with array brackets. The `var` keyword for
+# local-variable type inference is a separate non-terminal used
+# only in local-declaration position.
+<reference_type> : <class_type>
+                 | <array_type>
+                 ;
+
+<array_type> : <primitive_type> <array_dims>
+             | <class_type> <array_dims>
+             ;
+
+<array_dims> : '[' ']'
+             | <array_dims> '[' ']'
+             ;
+
+# Class type: qualified name with optional type arguments at
+# each segment (`Outer<T>.Inner<U>`).
+<class_type> : <annotated_segment>
+             | <class_type> '.' <dotted_segment>
+             ;
+
+# Class types are a head-segment + zero or more dotted suffix
+# segments. The head uses `IDENT_TYPE` — the filter-rewritten
+# IDENT that the host emits when an identifier sits in
+# declaration / type-position. Subsequent dotted segments use
+# bare IDENT (no ambiguity once we're inside a type chain).
+# The IDENT_TYPE / IDENT split is what lets the grammar
+# separate `Foo x = …;` (declaration) from `foo;` (expression-
+# statement) at block-statement positions — both would
+# otherwise produce a reduce/reduce between
+# `<annotated_segment> -> IDENT` and `<atom> -> IDENT`.
+<annotated_segment> : IDENT_TYPE
+                    | IDENT_TYPE <type_args>
+                    ;
+
+<dotted_segment> : IDENT
+                 | IDENT <type_args>
+                 ;
+
+<type_args> : LT_GENERIC <type_arg_list> GT_GENERIC
+            | LT_GENERIC GT_GENERIC
+            ;
+
+<type_arg_list> : <type_arg>
+                | <type_arg_list> ',' <type_arg>
+                ;
+
+# Type argument: a concrete type or a wildcard with optional
+# bound (`? extends T` / `? super T`).
+<type_arg> : <reference_type>
+           | <wildcard>
+           ;
+
+<wildcard> : <annotations_opt> '?'
+           | <annotations_opt> '?' KW_EXTENDS <reference_type>
+           | <annotations_opt> '?' KW_SUPER <reference_type>
+           ;
+
+# --- block / statements --------------------------------------------------
+
+<block> : '{' <block_statements_opt> '}'
+        ;
+
+<block_statements_opt> : <block_statements>
+                       |
+                       ;
+
+<block_statements> : <block_statement>
+                   | <block_statements> <block_statement>
+                   ;
+
+<block_statement> : <local_variable_decl_stmt>
+                  | <local_class_decl_stmt>
+                  | <statement>
+                  ;
+
+# Local variable declaration — `Type IDENT [= init] [, …] ;`
+# or `var IDENT = init [, …] ;`. The `var` form requires an
+# initializer per JLS §14.4.1.
+<local_variable_decl_stmt> : <local_variable_decl> ';'
+                           ;
+
+<local_variable_decl> : <modifiers_opt> <type> IDENT <local_decl_tail>
+                      | <modifiers_opt> KW_VAR IDENT <local_var_tail>
+                      ;
+
+# Tail of a local declarator (after the first IDENT): optional
+# `[]` dims, optional `= initializer`, optional more
+# declarators. Structured like `<field_or_method_tail>` so the
+# `<type> IDENT` prefix is shared between local-decl and
+# field-decl parses — that keeps the parser from having two
+# different `<modifiers_opt> <type> IDENT` paths that would
+# merge into the same LR state.
+<local_decl_tail> : <first_decl_rest>
+                  | <first_decl_rest> ',' <variable_declarators>
+                  ;
+
+<local_var_tail> : '=' <variable_initializer>
+                 | '=' <variable_initializer> ',' <variable_declarators>
+                 ;
+
+# Nested classes / interfaces / enums / records / annotations
+# can appear as statements inside a method body.
+<local_class_decl_stmt> : <class_decl>
+                        | <interface_decl>
+                        | <enum_decl>
+                        | <record_decl>
+                        ;
+
+# Statement — the union of all simple statements that don't
+# introduce a declaration. Labelled statements are handled in
+# a separate non-terminal so the label IDENT can be distinguished
+# from an expression-statement IDENT by lookahead on `:`.
+<statement> : <block>
+            | <empty_statement>
+            | <expression_statement>
+            | <if_statement>
+            | <while_statement>
+            | <do_statement>
+            | <for_statement>
+            | <enhanced_for_statement>
+            | <break_statement>
+            | <continue_statement>
+            | <return_statement>
+            | <throw_statement>
+            | <try_statement>
+            | <synchronized_statement>
+            | <labelled_statement>
+            | <yield_statement>
+            | <assert_statement>
+            ;
+
+<empty_statement> : ';'
+                  ;
+
+<expression_statement> : <statement_expression> ';'
+                       ;
+
+# A statement-expression is any expression — the AST builder
+# rejects pure-value forms (e.g. `1 + 1;`) that JLS bans. The
+# grammar accepts the full expression chain (which reaches
+# `<switch_construct>` via `<atom>` for the switch-expression
+# form), so `result = switch(x){…};` parses as a single
+# expression-statement.
+<statement_expression> : <expression>
+                       ;
+
+<if_statement> : KW_IF '(' <expression> ')' <statement>
+               | KW_IF '(' <expression> ')' <statement> KW_ELSE <statement>
+               ;
+
+<while_statement> : KW_WHILE '(' <expression> ')' <statement>
+                  ;
+
+<do_statement> : KW_DO <statement> KW_WHILE '(' <expression> ')' ';'
+               ;
+
+<for_statement> : KW_FOR '(' <for_init_opt> ';' <expression_opt> ';' <for_update_opt> ')' <statement>
+                ;
+
+<for_init_opt> : <local_variable_decl>
+               | <statement_expression_list>
+               |
+               ;
+
+<for_update_opt> : <statement_expression_list>
+                 |
+                 ;
+
+<statement_expression_list> : <statement_expression>
+                            | <statement_expression_list> ',' <statement_expression>
+                            ;
+
+<expression_opt> : <expression>
+                 |
+                 ;
+
+# Enhanced for: `for (Type IDENT : iterable) stmt` or
+# `for (var IDENT : iterable) stmt`. Required form per JLS §14.14.2.
+<enhanced_for_statement> : KW_FOR '(' <modifiers_opt> <type> <variable_declarator_id> ':' <expression> ')' <statement>
+                         | KW_FOR '(' <modifiers_opt> KW_VAR IDENT ':' <expression> ')' <statement>
+                         ;
+
+# Switch — Java has two forms: classic case-statement-list and
+# the modern arrow form (`case L -> stmt;`). Java 14+ allows
+# both classic and arrow cases inside a single switch (mixing
+# is rejected by the AST builder per JLS §14.11.1).
+#
+# Statement vs. expression switch — same syntactic shape, only
+# the surrounding context distinguishes the two. The grammar
+# uses a single `<switch_construct>` non-terminal and both
+# `<statement>` and `<atom>` route to it directly (no
+# intermediate `<switch_statement>` / `<switch_expression>`
+# wrappers — those would cause reduce/reduce on every
+# follow-set token because the parser couldn't tell which
+# wrapper to commit to). The state stack picks the right goto
+# (statement-position vs. expression-position) after the
+# `<switch_construct>` is reduced.
+<switch_construct> : KW_SWITCH '(' <expression> ')' '{' <switch_blocks_opt> '}'
+                   ;
+
+<switch_blocks_opt> : <switch_blocks>
+                    |
+                    ;
+
+<switch_blocks> : <switch_block>
+                | <switch_blocks> <switch_block>
+                ;
+
+<switch_block> : <switch_labels> <block_statements_opt>
+               | <switch_labels> ARROW <switch_arrow_body>
+               ;
+
+<switch_labels> : <switch_label>
+                | <switch_labels> <switch_label>
+                ;
+
+<switch_label> : KW_CASE <case_label_value_list> ':'
+               | KW_DEFAULT ':'
+               | KW_CASE <case_label_value_list>
+               | KW_DEFAULT
+               ;
+
+# Java 14+ allows multiple case labels: `case 1, 2, 3 -> …;`.
+<case_label_value_list> : <case_label_value>
+                        | <case_label_value_list> ',' <case_label_value>
+                        ;
+
+# A case label value is an expression OR a type pattern
+# (`case Integer i ->`).
+<case_label_value> : <expression>
+                   | <type_pattern>
+                   ;
+
+# Type pattern: `Type IDENT`. Used in `instanceof` and switch.
+<type_pattern> : <reference_type> IDENT
+               ;
+
+# The body of an arrow-form switch case: a single expression-
+# statement, a block, or a throw-statement (per JLS §14.11.3).
+<switch_arrow_body> : <expression_statement>
+                    | <block>
+                    | <throw_statement>
+                    ;
+
+<break_statement> : KW_BREAK ';'
+                  | KW_BREAK IDENT ';'
+                  ;
+
+<continue_statement> : KW_CONTINUE ';'
+                     | KW_CONTINUE IDENT ';'
+                     ;
+
+<return_statement> : KW_RETURN ';'
+                   | KW_RETURN <expression> ';'
+                   ;
+
+<throw_statement> : KW_THROW <expression> ';'
+                  ;
+
+# Try statement: try-block + (catch+ finally? | finally) OR
+# try-with-resources + catch* + finally?. The resource list
+# uses local-variable-decl shape.
+<try_statement> : KW_TRY <block> <catch_clauses>
+                | KW_TRY <block> <catch_clauses_opt> <finally_clause>
+                | KW_TRY <resource_spec> <block> <catch_clauses_opt> <finally_clause_opt>
+                ;
+
+<catch_clauses_opt> : <catch_clauses>
+                    |
+                    ;
+
+<catch_clauses> : <catch_clause>
+                | <catch_clauses> <catch_clause>
+                ;
+
+# Catch clause supports multi-catch types (`catch (A | B e)`).
+<catch_clause> : KW_CATCH '(' <catch_param> ')' <block>
+               ;
+
+<catch_param> : <modifiers_opt> <catch_type> IDENT
+              ;
+
+<catch_type> : <reference_type>
+             | <catch_type> '|' <reference_type>
+             ;
+
+<finally_clause_opt> : <finally_clause>
+                     |
+                     ;
+
+<finally_clause> : KW_FINALLY <block>
+                 ;
+
+# Try-with-resources: `try (Type r = expr; …) { … }`. The
+# resource list ends optionally with a trailing `;`.
+<resource_spec> : '(' <resource_list> ')'
+                | '(' <resource_list> ';' ')'
+                ;
+
+<resource_list> : <resource>
+                | <resource_list> ';' <resource>
+                ;
+
+# A resource is either a typed local declaration or a bare
+# expression (Java 9+ "effectively final" resource form).
+<resource> : <modifiers_opt> <type> <variable_declarator_id> '=' <expression>
+           | <modifiers_opt> KW_VAR IDENT '=' <expression>
+           | <expression>
+           ;
+
+<synchronized_statement> : KW_SYNCHRONIZED '(' <expression> ')' <block>
+                         ;
+
+<labelled_statement> : IDENT ':' <statement>
+                     ;
+
+# `yield` is used inside switch expression arrow bodies. JLS
+# §14.21 makes it contextual (a regular IDENT outside switch
+# expressions). For grammar simplicity we accept it everywhere
+# and rely on the AST builder for scope-sensitive validation.
+<yield_statement> : KW_YIELD <expression> ';'
+                  ;
+
+<assert_statement> : KW_ASSERT <expression> ';'
+                   | KW_ASSERT <expression> ':' <expression> ';'
+                   ;
+
+# --- expressions ---------------------------------------------------------
+#
+# JLS §15 precedence ladder, low to high. Each rung is left-
+# recursive on its operator unless explicitly right-associative
+# (assignment, ternary). Lambdas and method references sit
+# above ternary at the assignment level.
+
+<expression> : <assignment_expr>
+             ;
+
+<assignment_expr> : <conditional_expr>
+                  | <lambda_expr>
+                  | <lhs_expr> <assignment_op> <assignment_expr>
+                  ;
+
+<assignment_op> : '=' | '+=' | '-=' | '*=' | '/=' | '%='
+                | '&=' | '|=' | '^=' | '<<=' | '>>=' | '>>>='
+                ;
+
+# An assignment LHS is restricted to lvalue-shaped expressions
+# (IDENT, field access, array element, parenthesised lvalue).
+# The grammar accepts the broader `<lhs_unary_expr>` shape and
+# the AST builder rejects non-lvalues.
+<lhs_expr> : <lhs_unary_expr>
+           ;
+
+<lhs_unary_expr> : <postfix_expr>
+                 ;
+
+# Lambdas. Four parameter-shape options:
+#   x -> body                  bare identifier
+#   () -> body                 empty parens
+#   (x, y) -> body             multi-implicit params
+#   (Type x, Type y) -> body   explicitly typed params
+# Body is either a single expression or a block.
+<lambda_expr> : IDENT ARROW <lambda_body>
+              | LPAREN_LAMBDA ')' ARROW <lambda_body>
+              | LPAREN_LAMBDA <lambda_param_list> ')' ARROW <lambda_body>
+              ;
+
+<lambda_param_list> : <lambda_param>
+                    | <lambda_param_list> ',' <lambda_param>
+                    ;
+
+# A lambda param is either a bare IDENT (inferred type), a
+# `var IDENT`, or a fully-typed parameter shape.
+<lambda_param> : IDENT
+               | KW_VAR IDENT
+               | <modifiers_opt> <type> <variable_declarator_id>
+               ;
+
+<lambda_body> : <expression>
+              | <block>
+              ;
+
+# Conditional ternary. Right-associative.
+<conditional_expr> : <logical_or_expr>
+                   | <logical_or_expr> '?' <expression> ':' <conditional_expr>
+                   | <logical_or_expr> '?' <expression> ':' <lambda_expr>
+                   ;
+
+<logical_or_expr> : <logical_and_expr>
+                  | <logical_or_expr> '||' <logical_and_expr>
+                  ;
+
+<logical_and_expr> : <bitor_expr>
+                   | <logical_and_expr> '&&' <bitor_expr>
+                   ;
+
+<bitor_expr> : <bitxor_expr>
+             | <bitor_expr> '|' <bitxor_expr>
+             ;
+
+<bitxor_expr> : <bitand_expr>
+              | <bitxor_expr> '^' <bitand_expr>
+              ;
+
+<bitand_expr> : <equality_expr>
+              | <bitand_expr> '&' <equality_expr>
+              ;
+
+<equality_expr> : <relational_expr>
+                | <equality_expr> '==' <relational_expr>
+                | <equality_expr> '!=' <relational_expr>
+                ;
+
+# Relational + instanceof. `instanceof` accepts a reference
+# type. The Java 16+ type-pattern form (`x instanceof Foo
+# bar`) introduces a shift/reduce conflict on IDENT after
+# `instanceof <reference_type>` — the parser can't tell
+# without lookahead whether the trailing IDENT binds a pattern
+# variable or starts the next statement. This grammar accepts
+# only the plain form; pattern matching support requires
+# either the host-side lexer-feedback (a synthetic
+# `IDENT_PATTERN` after `instanceof <type>`) or a structural
+# rewrite that subsumes the conflicting paths.
+<relational_expr> : <shift_expr>
+                  | <relational_expr> '<' <shift_expr>
+                  | <relational_expr> '>' <shift_expr>
+                  | <relational_expr> '<=' <shift_expr>
+                  | <relational_expr> '>=' <shift_expr>
+                  | <relational_expr> KW_INSTANCEOF <reference_type>
+                  ;
+
+<shift_expr> : <additive_expr>
+             | <shift_expr> '<<' <additive_expr>
+             | <shift_expr> '>>' <additive_expr>
+             | <shift_expr> '>>>' <additive_expr>
+             ;
+
+<additive_expr> : <multiplicative_expr>
+                | <additive_expr> '+' <multiplicative_expr>
+                | <additive_expr> '-' <multiplicative_expr>
+                ;
+
+<multiplicative_expr> : <unary_expr>
+                      | <multiplicative_expr> '*' <unary_expr>
+                      | <multiplicative_expr> '/' <unary_expr>
+                      | <multiplicative_expr> '%' <unary_expr>
+                      ;
+
+<unary_expr> : <preincrement_expr>
+             | <predecrement_expr>
+             | '+' <unary_expr>
+             | '-' <unary_expr>
+             | <unary_expr_not_plus_minus>
+             ;
+
+<preincrement_expr> : '++' <unary_expr>
+                    ;
+
+<predecrement_expr> : '--' <unary_expr>
+                    ;
+
+<unary_expr_not_plus_minus> : <postfix_expr>
+                            | '~' <unary_expr>
+                            | '!' <unary_expr>
+                            | <cast_expr>
+                            ;
+
+# Cast expression. `LPAREN_CAST` is the filter-rewritten `(`
+# that signals "the contents are a type". JLS distinguishes:
+#
+#   * Primitive cast: `(int) <unary>` — operand is any unary.
+#   * Reference cast: `(T) <unary_not_plus_minus>` — operand
+#     can't start with `+` / `-` (those would be ambiguous
+#     with `(T) + x` reading as `(T) + x` = parenthesised
+#     subtraction).
+#   * Lambda cast: `(T) lambda` — assigns lambda to a
+#     functional-interface type.
+#
+# The grammar uses a single shared cast production and routes
+# the operand through `<cast_operand>` (a sub-non-terminal
+# that's `<unary_expr>` or `<lambda_expr>`). The previous
+# split between `<type>` and `<reference_type>` in two
+# alternatives caused a reduce/reduce between `<type> ->
+# <reference_type>` and `<additional_bounds_opt> -> ε` at
+# the close-paren state.
+<cast_expr> : LPAREN_CAST <type> <additional_bounds_opt> ')' <cast_operand>
+            ;
+
+<cast_operand> : <unary_expr>
+               | <lambda_expr>
+               ;
+
+# Postfix expression. Method invocation, field access, array
+# access, and post-increment / decrement attach as suffixes.
+<postfix_expr> : <primary_expr>
+               | <postfix_expr> '++'
+               | <postfix_expr> '--'
+               ;
+
+# Primary expression — atoms plus their suffix chain. The
+# grammar inlines the JLS distinction between "no new array"
+# and "new array" forms via a single `<primary_expr>` because
+# every position that JLS uses for "no new array" also accepts
+# the array-creation expression in this grammar (the AST
+# builder rejects mis-uses).
+<primary_expr> : <atom>
+               | <primary_expr> '.' IDENT
+               | <primary_expr> '.' KW_THIS
+               | <primary_expr> '.' KW_CLASS
+               | <primary_expr> <array_dims> '.' KW_CLASS
+               | <primary_expr> '.' KW_NEW <unqualified_class_instance_creation>
+               | <primary_expr> '.' LT_GENERIC <type_arg_list> GT_GENERIC IDENT
+               | <primary_expr> '[' <expression> ']'
+               | <primary_expr> '(' <argument_list_opt> ')'
+               | <primary_expr> '.' IDENT '(' <argument_list_opt> ')'
+               | <primary_expr> '.' KW_SUPER '.' IDENT
+               | <primary_expr> '.' KW_SUPER '.' IDENT '(' <argument_list_opt> ')'
+               | <primary_expr> DCOLON <method_reference_target>
+               | <primary_expr> DCOLON LT_GENERIC <type_arg_list> GT_GENERIC <method_reference_target>
+               ;
+
+<atom> : <literal>
+       | KW_THIS
+       | KW_SUPER '.' IDENT
+       | KW_SUPER '.' IDENT '(' <argument_list_opt> ')'
+       | KW_SUPER DCOLON <method_reference_target>
+       | IDENT
+       | IDENT '(' <argument_list_opt> ')'
+       | '(' <expression> ')'
+       | <class_instance_creation>
+       | <array_creation>
+       | <switch_construct>
+       ;
+
+
+# Class instance creation: `new T(args) [body]`. `unqualified_…`
+# is used by `expr.new T(args)`. JLS allows type-args on either
+# the `new` (constructor type-args) or the type itself; the two
+# `<class_instance_creation>` alternatives split the with-and-
+# without-type-args forms rather than going through a
+# `<type_args_opt>` non-terminal (the ε production of which
+# would clash with other ε reductions at this state).
+<class_instance_creation> : KW_NEW <class_type>
+                            '(' <argument_list_opt> ')' <class_body_opt>
+                          | KW_NEW <type_args> <class_type>
+                            '(' <argument_list_opt> ')' <class_body_opt>
+                          ;
+
+<unqualified_class_instance_creation> : <class_type>
+                                        '(' <argument_list_opt> ')' <class_body_opt>
+                                      | <type_args> <class_type>
+                                        '(' <argument_list_opt> ')' <class_body_opt>
+                                      ;
+
+# Class-or-interface type used as instantiation target — same
+# shape as `<class_type>`, so use `<class_type>` directly to
+# avoid the reduce/reduce on the shared `<annotated_segment>`
+# entry that two parallel productions create.
+
+<class_body_opt> : <class_body>
+                 |
+                 ;
+
+# Array creation: `new T[10]` / `new T[10][20]` / `new T[]{…}` /
+# `new T[][]{{…}}`. Dimensions can mix sized and unsized as
+# long as sized precede unsized (JLS §15.10.1).
+<array_creation> : KW_NEW <primitive_type> <dim_exprs> <array_dims_opt>
+                 | KW_NEW <class_type> <dim_exprs> <array_dims_opt>
+                 | KW_NEW <primitive_type> <array_dims> <array_initializer>
+                 | KW_NEW <class_type> <array_dims> <array_initializer>
+                 ;
+
+<dim_exprs> : <dim_expr>
+            | <dim_exprs> <dim_expr>
+            ;
+
+<dim_expr> : '[' <expression> ']'
+           ;
+
+<array_dims_opt> : <array_dims>
+                 |
+                 ;
+
+# Array initializer: `{ e1, e2, …, en }` with optional trailing
+# comma. Elements are themselves variable_initializers, so
+# nested array literals work (`{{1,2},{3,4}}`).
+<array_initializer> : '{' '}'
+                    | '{' <variable_initializer_list> '}'
+                    | '{' <variable_initializer_list> ',' '}'
+                    ;
+
+<variable_initializer_list> : <variable_initializer>
+                            | <variable_initializer_list> ',' <variable_initializer>
+                            ;
+
+# Switch expressions (Java 14+) reach `<switch_construct>`
+# directly from `<atom>` — see the `<switch_construct>` rule
+# below for the rationale. Bodies inside arrow cases that
+# aren't a single expression use `yield expr;` (a yield-
+# statement) to produce the case value.
+
+# Method reference target: IDENT or `new` (constructor ref).
+<method_reference_target> : IDENT
+                          | KW_NEW
+                          ;
+
+<literal> : INT_LIT | FLOAT_LIT | FLOAT_INT_LIT
+          | CHAR_LIT | STRING_LIT | TEXT_BLOCK
+          | KW_TRUE | KW_FALSE | KW_NULL
+          ;
+
+<argument_list_opt> : <argument_list>
+                    |
+                    ;
+
+<argument_list> : <expression>
+                | <argument_list> ',' <expression>
+                ;
