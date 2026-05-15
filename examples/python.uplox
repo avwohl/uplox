@@ -503,15 +503,30 @@ NEWLINE = /\x03/
 
 <finally_clause> : KW_FINALLY ':' <block> ;
 
-# `with` accepts a comma-separated item list. The Python 3.10+
-# parenthesised form (`with (a, b): …`) collides with a
-# parenthesised tuple expression at LR(1) — both shapes have an
-# `<expression>` reduction available on `,` and `)` lookahead.
-# The pre-3.10 unparenthesised form covers the common case;
-# parenthesised forms can use the line-continuation backslash
-# instead (`with a, \\\n     b: …`).
+# `with` accepts a comma-separated item list. Python 3.10+
+# added the parenthesised form (`with (a, b): …`) — supported
+# here via a dedicated rule that uses `<with_paren_item_list>`
+# (each item REQUIRES an `as` clause) to keep the with-item
+# productions distinct from the parenthesised expression
+# productions; otherwise `with_item -> expression` and
+# `expr_or_starred -> expression` would collide on COMMA
+# inside parens.
 <with_stmt> : KW_WITH <with_item_list> ':' <block>
+            | KW_WITH '(' <with_paren_item_list> ')' ':' <block>
+            | KW_WITH '(' <with_paren_item_list> ',' ')' ':' <block>
             ;
+
+# Parenthesised-with items each require an `as` clause — the
+# bare-expression form collides with parenthesised tuple
+# parsing at LR(1). Multi-context-manager `with` blocks
+# almost always bind via `as`, so this is a minor
+# restriction in practice.
+<with_paren_item_list> : <with_paren_item>
+                       | <with_paren_item_list> ',' <with_paren_item>
+                       ;
+
+<with_paren_item> : <expression> KW_AS <target>
+                  ;
 
 <with_item_list> : <with_item>
                  | <with_item_list> ',' <with_item>

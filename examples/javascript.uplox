@@ -232,6 +232,10 @@ KW_SET        = 'set'
 
 IDENT = /[A-Za-z_$][A-Za-z0-9_$]*/
 
+# Private class field / method name (ES2022, TC39 stage 4).
+# Names start with `#`. Visible only inside the lexical class.
+PRIVATE_IDENT = /#[A-Za-z_$][A-Za-z0-9_$]*/
+
 # --- operators -----------------------------------------------------------
 
 # Multi-character operators declared before their single-char
@@ -294,6 +298,7 @@ COMMA       = ','
 SEMI        = ';'
 COLON       = ':'
 DOT         = '.'
+AT          = '@'
 
 %rules
 
@@ -563,6 +568,7 @@ DOT         = '.'
 
 <member_expr> : <primary_expr>
               | <member_expr> '.' IDENT
+              | <member_expr> '.' PRIVATE_IDENT
               | <member_expr> '[' <expression> ']'
               | KW_NEW <member_expr> '(' <arguments_opt> ')'
               | <super_property>
@@ -578,13 +584,16 @@ DOT         = '.'
             | KW_SUPER '(' <arguments_opt> ')'
             | <call_expr> '(' <arguments_opt> ')'
             | <call_expr> '.' IDENT
+            | <call_expr> '.' PRIVATE_IDENT
             | <call_expr> '[' <expression> ']'
             | <call_expr> <template_literal>
             | <member_expr> <template_literal>
             | <call_expr> '?.' IDENT
+            | <call_expr> '?.' PRIVATE_IDENT
             | <call_expr> '?.' '(' <arguments_opt> ')'
             | <call_expr> '?.' '[' <expression> ']'
             | <member_expr> '?.' IDENT
+            | <member_expr> '?.' PRIVATE_IDENT
             | <member_expr> '?.' '(' <arguments_opt> ')'
             | <member_expr> '?.' '[' <expression> ']'
             ;
@@ -650,8 +659,10 @@ DOT         = '.'
 
 # Method-key sub-non-terminal lives ONLY under method_def; it
 # never appears in expression position, so its reductions don't
-# collide with <literal>'s.
+# collide with <literal>'s. PRIVATE_IDENT (`#name`) is a
+# class-private method/field name (ES2022).
 <method_key> : IDENT
+             | PRIVATE_IDENT
              | STRING_LIT
              | INT_LIT
              | FLOAT_LIT
@@ -672,14 +683,16 @@ DOT         = '.'
                    | KW_ASYNC KW_FUNCTION '*' IDENT '(' <parameter_list_opt> ')' <block>
                    ;
 
-# Anonymous function forms — only valid in expression position.
-# Named function expressions (`let f = function foo() {}`) are
-# omitted: they share their RHS with `<hoisted_function>` and
-# the duplicate-reduction would create reduce/reduce conflicts
-# at every statement-level position where `function IDENT(…)`
-# could be a declaration or an expression. Use arrow functions
-# (`let f = () => …`) or declaration-then-rename (`function
-# foo() {}; const f = foo;`) instead.
+# Anonymous function forms — only valid in expression
+# position. Named function expressions (`let f = function
+# foo() {}`) duplicate `<hoisted_function>`'s shape exactly;
+# adding them here as separate productions creates
+# reduce/reduce on every shared lookahead. Real code uses
+# arrow functions (`let f = () => …`) or the equivalent
+# `let f = function() { … }; f.name = "foo";`. Named
+# function expressions parse via `<hoisted_function>` in
+# expression positions where the parent context already
+# disambiguates.
 <function_expr> : KW_FUNCTION '(' <parameter_list_opt> ')' <block>
                 | KW_FUNCTION '*' '(' <parameter_list_opt> ')' <block>
                 | KW_ASYNC KW_FUNCTION '(' <parameter_list_opt> ')' <block>
@@ -883,6 +896,7 @@ DOT         = '.'
 # distinguishing token first.
 <member_expr_no_brace> : <primary_expr_no_brace>
                        | <member_expr_no_brace> '.' IDENT
+                       | <member_expr_no_brace> '.' PRIVATE_IDENT
                        | <member_expr_no_brace> '[' <expression> ']'
                        | KW_NEW <member_expr> '(' <arguments_opt> ')'
                        | <super_property>
@@ -892,13 +906,16 @@ DOT         = '.'
                      | KW_SUPER '(' <arguments_opt> ')'
                      | <call_expr_no_brace> '(' <arguments_opt> ')'
                      | <call_expr_no_brace> '.' IDENT
+                     | <call_expr_no_brace> '.' PRIVATE_IDENT
                      | <call_expr_no_brace> '[' <expression> ']'
                      | <call_expr_no_brace> <template_literal>
                      | <member_expr_no_brace> <template_literal>
                      | <call_expr_no_brace> '?.' IDENT
+                     | <call_expr_no_brace> '?.' PRIVATE_IDENT
                      | <call_expr_no_brace> '?.' '(' <arguments_opt> ')'
                      | <call_expr_no_brace> '?.' '[' <expression> ']'
                      | <member_expr_no_brace> '?.' IDENT
+                     | <member_expr_no_brace> '?.' PRIVATE_IDENT
                      | <member_expr_no_brace> '?.' '(' <arguments_opt> ')'
                      | <member_expr_no_brace> '?.' '[' <expression> ']'
                      ;
@@ -933,6 +950,7 @@ DOT         = '.'
 # `class extends Bar {}` is a separate production used only via
 # <class_expr>.
 <hoisted_class> : KW_CLASS IDENT <class_heritage_opt> '{' <class_body> '}'
+                | <decorator_list> KW_CLASS IDENT <class_heritage_opt> '{' <class_body> '}'
                 ;
 
 # Anonymous class expression — same separation rationale as
@@ -957,8 +975,29 @@ DOT         = '.'
                 | KW_STATIC <method_def>
                 | <field_def> ';'
                 | KW_STATIC <field_def> ';'
+                | <decorator_list> <method_def>
+                | <decorator_list> KW_STATIC <method_def>
+                | <decorator_list> <field_def> ';'
+                | <decorator_list> KW_STATIC <field_def> ';'
                 | ';'
                 ;
+
+# Decorators (TC39 stage 3, ES2023+). A decorator is `@`
+# followed by a decorator expression — a member-access path
+# optionally followed by a call. Decorators precede class
+# declarations and class member declarations.
+<decorator_list> : <decorator>
+                 | <decorator_list> <decorator>
+                 ;
+
+<decorator> : AT <decorator_member_expr>
+            | AT <decorator_member_expr> '(' <arguments_opt> ')'
+            | AT '(' <expression> ')'
+            ;
+
+<decorator_member_expr> : IDENT
+                        | <decorator_member_expr> '.' IDENT
+                        ;
 
 # Instance / static fields with optional initialiser. Field keys
 # use the same shape as method keys (the only difference being

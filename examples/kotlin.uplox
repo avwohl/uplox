@@ -173,6 +173,9 @@ KW_VAR        = 'var'
 KW_TYPEALIAS  = 'typealias'
 KW_INIT       = 'init'
 KW_COMPANION  = 'companion'
+KW_CONSTRUCTOR = 'constructor'
+KW_GET        = 'get'
+KW_SET        = 'set'
 
 # --- modifier keywords ---------------------------------------------------
 KW_PUBLIC     = 'public'
@@ -443,11 +446,33 @@ IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                | <object_decl>
                | <init_block>
                | <typealias_decl>
+               | <secondary_constructor>
+               | <companion_object>
                | ';'
                ;
 
 <init_block> : KW_INIT <block>
              ;
+
+# Secondary constructor — `constructor(params) [: this/super(args)]
+# block`. Uses the `<modifiers_opt>` non-terminal so visibility
+# modifiers work (`private constructor(...)`).
+<secondary_constructor> : <modifiers_opt> KW_CONSTRUCTOR '(' <class_param_list_opt> ')' <constructor_delegation_opt> <block>
+                        | <modifiers_opt> KW_CONSTRUCTOR '(' <class_param_list_opt> ')' <constructor_delegation_opt>
+                        ;
+
+<constructor_delegation_opt> : ':' KW_THIS '(' <argument_list_opt> ')'
+                             | ':' KW_SUPER '(' <argument_list_opt> ')'
+                             |
+                             ;
+
+# Companion object — `companion object [Name] [: SuperTypes] [body]`.
+# At most one per class; the AST builder enforces uniqueness.
+<companion_object> : <modifiers_opt> KW_COMPANION KW_OBJECT <class_body_opt>
+                   | <modifiers_opt> KW_COMPANION KW_OBJECT IDENT <class_body_opt>
+                   | <modifiers_opt> KW_COMPANION KW_OBJECT ':' <delegation_spec_list> <class_body_opt>
+                   | <modifiers_opt> KW_COMPANION KW_OBJECT IDENT ':' <delegation_spec_list> <class_body_opt>
+                   ;
 
 # --- function declaration ------------------------------------------------
 
@@ -492,6 +517,11 @@ IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 # reason as `<fun_decl>` above — `<user_type> '.'` and
 # nothing both reach IDENT, and ε-reducing the receiver-opt
 # clashes with shift-IDENT.
+# Property declaration. Three trailing forms after the
+# initializer:
+#   ';'                — bare property
+#   <property_accessors> ';'   — custom getter / setter
+#   ';' (after initializer only)
 <property_decl> : <modifiers_opt> <val_or_var>
                   IDENT
                   <property_type_opt>
@@ -502,7 +532,35 @@ IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                   <property_type_opt>
                   <property_initializer_opt>
                   ';'
+                | <modifiers_opt> <val_or_var>
+                  IDENT
+                  <property_type_opt>
+                  <property_initializer_opt>
+                  <property_accessors>
+                | <modifiers_opt> <val_or_var>
+                  <user_type> '.' IDENT
+                  <property_type_opt>
+                  <property_initializer_opt>
+                  <property_accessors>
                 ;
+
+# Custom getter / setter for a property. Each accessor is
+# optional; if both present, get-then-set or set-then-get
+# both allowed.
+<property_accessors> : <property_getter>
+                     | <property_setter>
+                     | <property_getter> <property_setter>
+                     | <property_setter> <property_getter>
+                     ;
+
+<property_getter> : <modifiers_opt> KW_GET '(' ')' <fun_return_type_opt> <fun_body_opt>
+                  | <modifiers_opt> KW_GET
+                  ;
+
+<property_setter> : <modifiers_opt> KW_SET '(' IDENT ')' <fun_body_opt>
+                  | <modifiers_opt> KW_SET '(' IDENT ':' <type> ')' <fun_body_opt>
+                  | <modifiers_opt> KW_SET
+                  ;
 
 <val_or_var> : KW_VAL
              | KW_VAR
@@ -611,9 +669,22 @@ IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                         | <typealias_decl>
                         ;
 
+# `for (target in expression) body`. The target can be a
+# bare identifier, a typed identifier, or a destructuring
+# pattern `(a, b, …)` for iterating over pair / tuple
+# sequences.
 <for_statement> : KW_FOR '(' IDENT KW_IN <expression> ')' <control_body>
                 | KW_FOR '(' IDENT ':' <type> KW_IN <expression> ')' <control_body>
+                | KW_FOR '(' '(' <destructuring_entries> ')' KW_IN <expression> ')' <control_body>
                 ;
+
+<destructuring_entries> : <destructuring_entry>
+                        | <destructuring_entries> ',' <destructuring_entry>
+                        ;
+
+<destructuring_entry> : IDENT
+                      | IDENT ':' <type>
+                      ;
 
 <while_statement> : KW_WHILE '(' <expression> ')' <control_body>
                   ;
@@ -723,11 +794,15 @@ IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                      | <postfix_expression> '::' KW_CLASS
                      | <postfix_expression> '[' <argument_list> ']'
                      | <postfix_expression> '(' <argument_list_opt> ')'
+                     | <postfix_expression> '(' <argument_list_opt> ')' <lambda_literal>
+                     | <postfix_expression> <lambda_literal>
                      ;
 
 # --- primary expressions / atoms -----------------------------------------
 
 <atom> : <literal>
+       | <anonymous_function>
+       | <object_expression>
        | IDENT
        | BACKTICK_IDENT
        | KW_THIS
@@ -748,6 +823,24 @@ IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 <callable_reference> : DCOLON IDENT
                      | DCOLON KW_CLASS
                      ;
+
+# Anonymous function — `fun (params) [: ReturnType] body`.
+# A function expression with no receiver and no name. Body
+# is a block or `= expression`.
+<anonymous_function> : KW_FUN '(' ')' <fun_return_type_opt> <fun_body_opt>
+                     | KW_FUN '(' <fun_param_list> ')' <fun_return_type_opt> <fun_body_opt>
+                     ;
+
+# Object expression — `object [: SuperType[, …]] { body }`.
+# Used as an expression to create an anonymous singleton.
+# Distinguished from object declaration by the lack of an
+# IDENT name.
+<object_expression> : KW_OBJECT <object_delegation_opt> <class_body>
+                    ;
+
+<object_delegation_opt> : ':' <delegation_spec_list>
+                        |
+                        ;
 
 # `if` is an expression with mandatory else for value-returning
 # use; the AST builder enforces the else-required case in

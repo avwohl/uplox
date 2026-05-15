@@ -164,6 +164,12 @@ LBRACE
 ARROW
 KW_CASE KW_DEFAULT
 
+# `import` at top-of-file — shift extends the import list
+# rather than closing an empty package-declaration slot
+# (compilation_unit's two alternative parses both have
+# import_decls_opt; shift commits to the import).
+KW_IMPORT
+
 
 
 %tokens
@@ -354,11 +360,66 @@ LPAREN_CAST   = 'LPAREN_CAST_SYNTHETIC_NEVER_EMITTED'
 # (expression statement) at block-statement positions.
 IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 
+# `IDENT_PATTERN` — the filter-rewritten IDENT that the host
+# emits when an identifier appears as the bind-variable of a
+# type pattern after `instanceof <reference_type>` (Java 16+).
+# Splitting it from the regular IDENT lets the LR parser
+# accept `x instanceof Foo bar` without the trailing IDENT
+# colliding with the start of the next statement.
+IDENT_PATTERN = 'IDENT_PATTERN_SYNTHETIC_NEVER_EMITTED'
+
 %rules
 
 # --- compilation unit ----------------------------------------------------
 
+# A Java compilation unit is either an ordinary unit
+# (package + imports + types) or a modular unit
+# (module declaration, since Java 9). The module form has
+# its own directive set.
 <compilation_unit> : <package_decl_opt> <import_decls_opt> <type_decls_opt>
+                   | <import_decls_opt> <module_declaration>
+                   ;
+
+# Module declaration (Java 9+). `module-info.java` files
+# contain a single module declaration with `requires`,
+# `exports`, `opens`, `uses`, and `provides` directives.
+# `open module` means all packages are open for reflective
+# access.
+<module_declaration> : <annotations_opt> KW_MODULE <qualified_name> '{' <module_directives_opt> '}'
+                     | <annotations_opt> KW_OPEN KW_MODULE <qualified_name> '{' <module_directives_opt> '}'
+                     ;
+
+<module_directives_opt> : <module_directives>
+                        |
+                        ;
+
+<module_directives> : <module_directive>
+                    | <module_directives> <module_directive>
+                    ;
+
+# Module directives: `requires`, `exports`, `opens`, `uses`,
+# `provides`.
+<module_directive> : KW_REQUIRES <requires_modifiers_opt> <qualified_name> ';'
+                   | KW_EXPORTS <qualified_name> ';'
+                   | KW_EXPORTS <qualified_name> KW_TO <module_name_list> ';'
+                   | KW_OPENS <qualified_name> ';'
+                   | KW_OPENS <qualified_name> KW_TO <module_name_list> ';'
+                   | KW_USES <qualified_name> ';'
+                   | KW_PROVIDES <qualified_name> KW_WITH <module_name_list> ';'
+                   ;
+
+<requires_modifiers_opt> : <requires_modifiers>
+                         |
+                         ;
+
+<requires_modifiers> : KW_TRANSITIVE
+                     | KW_STATIC
+                     | <requires_modifiers> KW_TRANSITIVE
+                     | <requires_modifiers> KW_STATIC
+                     ;
+
+<module_name_list> : <qualified_name>
+                   | <module_name_list> ',' <qualified_name>
                    ;
 
 <package_decl_opt> : <package_decl>
@@ -397,6 +458,15 @@ IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 
 # --- type declarations ---------------------------------------------------
 
+# A top-level type declaration. Unnamed classes / top-level
+# methods (JEP 445, preview in Java 21+) would add
+# `<field_or_method>` and similar directly here, but the
+# field/method productions share their prefix
+# (`<modifiers_opt> <type> IDENT`) with `<class_decl>` /
+# `<interface_decl>` headers and create reduce/reduce
+# conflicts when reachable from both top-level and class-
+# member contexts. The unnamed-class feature is preview-only;
+# wrap top-level methods in a `class Main { … }` for now.
 <type_decl> : <class_decl>
             | <interface_decl>
             | <enum_decl>
@@ -1181,22 +1251,36 @@ IDENT_TYPE    = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                 ;
 
 # Relational + instanceof. `instanceof` accepts a reference
-# type. The Java 16+ type-pattern form (`x instanceof Foo
-# bar`) introduces a shift/reduce conflict on IDENT after
-# `instanceof <reference_type>` — the parser can't tell
-# without lookahead whether the trailing IDENT binds a pattern
-# variable or starts the next statement. This grammar accepts
-# only the plain form; pattern matching support requires
-# either the host-side lexer-feedback (a synthetic
-# `IDENT_PATTERN` after `instanceof <type>`) or a structural
-# rewrite that subsumes the conflicting paths.
+# type optionally followed by a type-pattern variable
+# (Java 16+: `x instanceof Foo bar`) or a record pattern
+# (Java 21+: `x instanceof Point(int x, int y)`). The
+# trailing pattern variable uses `IDENT_PATTERN` — a
+# synthetic terminal that the host's `java_filter` rewrites
+# IDENT to when the parser is in instanceof-pattern position.
+# Without the filter, only the plain form parses.
 <relational_expr> : <shift_expr>
                   | <relational_expr> '<' <shift_expr>
                   | <relational_expr> '>' <shift_expr>
                   | <relational_expr> '<=' <shift_expr>
                   | <relational_expr> '>=' <shift_expr>
                   | <relational_expr> KW_INSTANCEOF <reference_type>
+                  | <relational_expr> KW_INSTANCEOF <reference_type> IDENT_PATTERN
+                  | <relational_expr> KW_INSTANCEOF <reference_type> '(' <record_pattern_list> ')'
+                  | <relational_expr> KW_INSTANCEOF <reference_type> '(' <record_pattern_list> ')' IDENT_PATTERN
                   ;
+
+# Record pattern components — each is a nested pattern,
+# either a type pattern with binding (`int x`, `var x`,
+# `Foo bar`) or a nested record pattern.
+<record_pattern_list> : <record_pattern_component>
+                      | <record_pattern_list> ',' <record_pattern_component>
+                      ;
+
+<record_pattern_component> : <type> IDENT
+                           | KW_VAR IDENT
+                           | <reference_type> '(' <record_pattern_list> ')'
+                           | <reference_type> '(' <record_pattern_list> ')' IDENT
+                           ;
 
 <shift_expr> : <additive_expr>
              | <shift_expr> '<<' <additive_expr>

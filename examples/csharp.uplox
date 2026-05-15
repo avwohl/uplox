@@ -168,6 +168,21 @@ EQ
 LBRACE
 QUESTION
 
+# `namespace` at top of file — shift commits to the brace
+# or file-scoped form rather than closing an empty
+# namespace_member_decls.
+KW_NAMESPACE
+
+# Top-level statement starts — shift to begin a top-level
+# statement rather than closing the namespace/stmt-list
+# selection. The C# 9 top-level-statement form starts with
+# any statement; KW_NEW, KW_REF, KW_USING are the keywords
+# whose shift would otherwise collide with empty-list
+# reductions.
+KW_NEW
+KW_REF
+KW_USING
+
 %reduce
 # After a switch section's statement list, `default` / `case`
 # starts the next section's labels, not part of the current
@@ -204,6 +219,7 @@ KW_GLOBAL     = 'global'
 # --- type-kind keywords --------------------------------------------------
 KW_CLASS      = 'class'
 KW_STRUCT     = 'struct'
+KW_RECORD     = 'record'
 KW_INTERFACE  = 'interface'
 KW_ENUM       = 'enum'
 KW_DELEGATE   = 'delegate'
@@ -266,6 +282,8 @@ KW_DOUBLE     = 'double'
 KW_DECIMAL    = 'decimal'
 KW_STRING     = 'string'
 KW_OBJECT     = 'object'
+KW_NINT       = 'nint'
+KW_NUINT      = 'nuint'
 
 # --- statement keywords --------------------------------------------------
 KW_IF         = 'if'
@@ -404,8 +422,24 @@ LPAREN_TUPLE  = /\(/
 # started" reduce/reduce ambiguity that a strict ordering would
 # create. The semantic phase enforces that `extern alias` lines
 # precede `using` lines.
+# Top-level statements (C# 9). A program file may contain
+# statements at the top level (the implicit `Main` form). The
+# stmt-list form is disjoint from the namespace_member_decls
+# form to keep the parser commitment local; mixing top-level
+# statements with subsequent type declarations is left to the
+# implicit-Program form via local-function declarations
+# inside the stmt-list rather than as a trailing
+# member-decl section.
 <compilation_unit> : <header_directives> <global_attrs_opt> <namespace_member_decls>
+                   | <header_directives> <global_attrs_opt> <file_scoped_namespace>
+                   | <header_directives> <global_attrs_opt> <stmt_list>
                    ;
+
+# File-scoped namespace (C# 10). `namespace Foo;` followed by
+# the file's declarations. Only one per file, must be the
+# first namespace.
+<file_scoped_namespace> : KW_NAMESPACE <qualified_ident> ';' <header_directives> <namespace_member_decls>
+                        ;
 
 <header_directives> : <header_directives> <header_directive>
                     |
@@ -436,6 +470,13 @@ LPAREN_TUPLE  = /\(/
                         | <type_decl>
                         ;
 
+# Namespace declaration — brace-enclosed (classic) or file-
+# scoped (C# 10). The file-scoped form has no closing `}`,
+# extending to EOF. It's declared as a separate top-level
+# form (`<file_scoped_namespace>` in `<compilation_unit>`)
+# rather than as a `<namespace_decl>` alternative, because
+# the open-ended member list would otherwise collide with
+# the surrounding `<namespace_member_decls>` continuation.
 <namespace_decl> : KW_NAMESPACE <qualified_ident> '{' <header_directives> <namespace_member_decls> '}' <semi_opt>
                  ;
 
@@ -513,12 +554,35 @@ LPAREN_TUPLE  = /\(/
             | <attrs_opt> <modifiers_opt> <interface_decl>
             | <attrs_opt> <modifiers_opt> <enum_decl>
             | <attrs_opt> <modifiers_opt> <delegate_decl>
+            | <attrs_opt> <modifiers_opt> <record_decl>
             ;
 
 <class_decl> : KW_CLASS IDENT <type_params_opt> <base_list_opt> <constraints_opt> '{' <class_member_decls> '}' <semi_opt>
              ;
 
 <struct_decl> : KW_STRUCT IDENT <type_params_opt> <base_list_opt> <constraints_opt> '{' <class_member_decls> '}' <semi_opt>
+              ;
+
+# Record declaration (C# 9): `record [class|struct] Name(P p,
+# Q q) [: base][where clauses][{ body }]`. The header
+# parameter list promotes parameters to properties; the body
+# is optional (just `;` for a bare record).
+<record_decl> : KW_RECORD <record_kind_opt> IDENT <type_params_opt>
+                <record_parameters_opt>
+                <base_list_opt> <constraints_opt>
+                <record_body>
+              ;
+
+<record_kind_opt> : KW_CLASS | KW_STRUCT
+                  |
+                  ;
+
+<record_parameters_opt> : '(' <param_list_opt> ')'
+                        |
+                        ;
+
+<record_body> : '{' <class_member_decls> '}' <semi_opt>
+              | ';'
               ;
 
 <interface_decl> : KW_INTERFACE IDENT <type_params_opt> <base_list_opt> <constraints_opt> '{' <class_member_decls> '}' <semi_opt>
@@ -783,6 +847,7 @@ LPAREN_TUPLE  = /\(/
                   | KW_SHORT | KW_USHORT | KW_INT | KW_UINT
                   | KW_LONG | KW_ULONG | KW_CHAR | KW_FLOAT
                   | KW_DOUBLE | KW_DECIMAL | KW_STRING | KW_OBJECT
+                  | KW_NINT | KW_NUINT
                   ;
 
 # Tuple types use LPAREN_TUPLE — the filter-emitted marker that

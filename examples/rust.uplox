@@ -224,6 +224,7 @@ KW_TRAIT      = 'trait'
 KW_IMPL       = 'impl'
 KW_TYPE       = 'type'
 KW_UNION      = 'union'
+KW_MACRO_RULES = 'macro_rules'
 
 # --- modifier / qualifier keywords ----------------------------------------
 KW_CONST      = 'const'
@@ -441,6 +442,7 @@ MACRO_BODY_TT = /[a-z]/
             | <enum_item>
             | <union_item>
             | <trait_item>
+            | <trait_alias>
             | <impl_item>
             | <use_item>
             | <mod_item>
@@ -450,7 +452,23 @@ MACRO_BODY_TT = /[a-z]/
             | <extern_block>
             | <extern_crate>
             | <macro_invocation_item>
+            | <macro_rules_definition>
             ;
+
+# Trait alias (RFC 1733, stable). `trait Foo<T> = Bar<T> +
+# Baz` defines a shorthand for a set of trait bounds.
+<trait_alias> : <trait_qualifiers> KW_TRAIT IDENT <generics_opt> '=' <type_bound_list> <where_clause_opt> ';'
+              ;
+
+# `macro_rules!` definition. The body (the rule list with
+# pattern => expansion pairs) uses the opaque MACRO_BODY_TT
+# slurp — pattern syntax is bespoke (token-tree fragments,
+# repetition metavariables, etc.) and doesn't fit any of
+# Rust's expression / item / type grammars.
+<macro_rules_definition> : KW_MACRO_RULES '!' IDENT '{' MACRO_BODY_TT '}'
+                         | KW_MACRO_RULES '!' IDENT '(' MACRO_BODY_TT ')' ';'
+                         | KW_MACRO_RULES '!' IDENT '[' MACRO_BODY_TT ']' ';'
+                         ;
 
 # ---- functions -----------------------------------------------------------
 
@@ -1556,8 +1574,8 @@ MACRO_BODY_TT = /[a-z]/
 # expression list — this covers `println!`, `vec!`, `assert!`,
 # `assert_eq!`, `format!`, `dbg!`, and the bulk of real-world
 # macro use. Macros whose body is non-expression syntax
-# (`quote!{ … }`, `macro_rules!` patterns, custom DSLs) need the
-# MACRO_BODY_TT token filter (see header note).
+# (`quote!{ … }`, `macro_rules!` patterns, custom DSLs) use
+# the MACRO_BODY_TT slurp form below.
 
 # Macro names use <path_in_expression> rather than <simple_path>
 # so that simple_path is confined to attribute / visibility / use
@@ -1565,7 +1583,10 @@ MACRO_BODY_TT = /[a-z]/
 # expression chain's path_name reduction state.
 <macro_invocation> : <path_in_expression> '!' '(' <call_args_opt> ')'
                    | <path_in_expression> '!' '[' <call_args_opt> ']'
+                   | <path_in_expression> '!' '(' MACRO_BODY_TT ')'
+                   | <path_in_expression> '!' '[' MACRO_BODY_TT ']'
                    ;
 
 <macro_invocation_brace> : <path_in_expression> '!' '{' <call_args_opt> '}'
+                         | <path_in_expression> '!' '{' MACRO_BODY_TT '}'
                          ;
