@@ -5,6 +5,198 @@ All notable changes to uplox land here. Format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) for the public
 surface (CLI, JSON bundle schema, Python API, hook firing points).
 
+## 3.1.0 — 2026-05-16
+
+Substantial additive release: three new lexer directives that subsume
+the most common context-sensitive lexing patterns, selectable LR
+construction algorithm, the v3 auto-AST surface across all four
+backends, a full Ada 2012 grammar driving uada80, multi-file source
+tracking, and fifteen new bundled example grammars. No breaking
+changes — every 3.0.0 grammar still parses unchanged.
+
+### Added
+
+- **Three new lexer directives.** Each subsumes a context-sensitive
+  lexing pattern that previously required per-grammar host code:
+  - `%layout` — INDENT / DEDENT / NEWLINE emission for
+    indentation-sensitive languages (Python, YAML); column tracking
+    with configurable flow brackets that suspend the algorithm.
+  - `%columns` — column-range dispatch for card-image / fixed-format
+    languages (Fortran 77, COBOL); maps column spans to lexer modes
+    (label / body / comment / continuation indicator / skip).
+  - `%continuation` — line-continuation marker handling (Python `\`,
+    Fortran column-6, COBOL column-7 `-`); collapses physical lines
+    into one logical line before the parser sees them. Composes with
+    `%layout` to suppress INDENT / DEDENT across continuations.
+
+  Bundle schema picks up `lex.layout`, `lex.columns`, `lex.continuation`
+  fields when used; pre-3.1 readers still round-trip bundles that
+  don't use them. See `docs/proposals/{layout,columns,continuation}.md`
+  for the design rationale.
+
+- **Selectable LR construction algorithm via `%define lr.type`.**
+  Three modes: `canonical-lr` (default; most honest diagnostics),
+  `lalr` (LALR(1) — typical 4-37x state shrink on real grammars,
+  e.g. `ada_full` goes 58611 → 1594 states), and `ielr` (IELR(1) —
+  LALR-size tables with canonical-LR conflict resolution; matches
+  LALR on every example grammar in this repo since none have
+  spurious LALR conflicts).
+
+- **Per-terminal s/r conflict escapes.** Two new yacc-style directives
+  resolve shift-reduce conflicts without restructuring the grammar:
+  `%shift <T>` (prefer the shift on `T`) and `%reduce <T>` (prefer
+  the reduce). Used by `ada_full` to handle Ada's context-pragma /
+  type-aspect / range-attribute s/r ambiguities.
+
+- **v3 auto-AST surface across all four backends.** Four new grammar
+  annotations (`%ast_drop` on tokens, `?` on optional-clause LHS,
+  `%ast=<Name>` per alternative, `@field=…` per RHS position) so
+  `uplox build` produces a typed AST schema in the bundle, and each
+  backend emits typed AST node types + a builder function that
+  turns the parse tree into AST nodes automatically. Shipped in
+  nine slices: spec parser, AST plan compiler, bundle serialisation,
+  then per-backend emitters (Python, C, C++, Lua). Validated against
+  `calc_ast`, `cowgol_ast` (78 tokens / 182 productions / 68 AST
+  kinds), `c_expr`, and the full `c23` grammar; eliminates the
+  hand-written parse-tree-to-AST lowering pass from every uc_core
+  consumer.
+
+- **Multi-file source tracking: `Token.file_id` + `FileTable`.** New
+  field on every emitted token; populated by a host-supplied
+  `FileTable` that maps file paths to ids. The C / C++ / Lua / Python
+  scanners all thread the id through. Lets downstream front-ends
+  emit diagnostics that point at original source files after the
+  preprocessor pass.
+
+- **`uplox.hooks.generic_brackets.rewrite_generics(...)`.** Reference
+  host-filter for the `<…>`-vs-comparison ambiguity that
+  `csharp` / `java` / `kotlin` / `swift` / `typescript` / `tsx`
+  grammars declare via `LT_GENERIC` / `GT_GENERIC` synthetic terminals.
+  Ships dialect tables for those six languages; pattern matches
+  Mono's `cs-tokenizer.cs` pairing-and-disambiguating-set approach.
+
+- **Inline literals in rule RHS.** `<if_stmt> ::= 'if' <expr> 'then'
+  <stmts> 'end if'` resolves to the matching token by literal text
+  — no `KW_IF`/`KW_THEN`/`KW_END` declarations required. Cuts
+  `KW_*` boilerplate by ~40% across the example grammars.
+
+- **`ada_full.uplox` — full Ada 2012 grammar driving uada80.** 671
+  productions, 1594 states under LALR(1) (58611 under canonical-LR;
+  37x shrink), 0 conflicts. Covers exceptions, access types,
+  renamings, tagged types / interfaces / abstract / synchronized /
+  limited, discriminated records, aspect specifications, generics,
+  tasks / protected types with the full entry / accept / select /
+  delay / abort / requeue surface, private types, separate clauses,
+  extended-return, qualified aggregates, variant records, and the
+  rest of the RM-95 / Ada 2005 / Ada 2012 additions to `ada_subset`.
+  Drives uada80's front-end at 100.0% on ACATS A/C/D/E/L (2846/2846,
+  with 3 malformed-source xfails) and 97.8% on the GNAT runtime
+  (1072/1096).
+
+- **`ada_subset.uplox` — Ada subset for the ACATS helper packages.**
+  214 productions, 417 states LALR(1), 0 conflicts.
+
+- **`cowgol.uplox` — Cowgol (Ada-inspired systems language).** Drives
+  ucow's parser end-to-end. 181 productions, 344 states LALR(1).
+
+- **`c23.uplox` — full C23 grammar driving uc_core.** Production
+  C frontend for uc80 and uc386; validated by uc386 at 100% on
+  `gcc-c-torture` (1514/1514) and `c-testsuite` (220/220). Covers
+  every C23 storage class / qualifier, all built-in numeric types
+  (`_BitInt(N)`, `_Decimal32/64/128`, `_Complex`, `_Imaginary`),
+  `_Generic`, `typeof` / `typeof_unqual`, compound and designated
+  initializers, the full statement and expression set, struct /
+  union / enum with bit-fields and embedded `static_assert`, plus
+  the GCC extensions (nested functions, `__label__`) the c-family
+  compilers actually use. Annotated with the v3 AST surface for
+  uc_core adoption. LALR(1) at 549 states, conflict-free.
+
+- **Fifteen first-cut "modern language" grammars.** LALR(1)-clean,
+  conflict-free, each parsing a real-world `features.<ext>`
+  fixture in `tests/fixtures/<lang>/`: `pascal` (350 states),
+  `delphi` (751), `json` (27), `yaml` (104), `python` (594),
+  `cobol` (385), `fortran77` (432), `csharp` (890), `rust` (1019),
+  `cpp` (879), `go` (543), `java` (837), `javascript` (868),
+  `typescript` (1392), `tsx` (1443), `kotlin` (605), `swift` (924).
+  None drives a production compiler yet — treat them as starting
+  points or as reference for language-tooling work.
+
+- **`c_expr.uplox` and `c_subset.uplox` (phased fill-in).** `c_expr`
+  is a 76-production C-expressions grammar with v3 AST annotations
+  matching uc_core's `Expression` AST shape; pilot for the uc_core
+  auto-AST migration. `c_subset` was extended through five phases
+  covering statements, declarations, control flow, type qualifiers /
+  casts / `sizeof(type)` / abstract declarators, and the typedef
+  lexer hook.
+
+- **`plm_pre.uplox` — PL/M-80 preprocessor.** 26-production grammar
+  for the LITERALLY / `$Q` / `$I` / `$RIGHTMARGIN` / `$INCLUDE`
+  text-substitution layer that runs ahead of `plm_full` in uplm80.
+
+- **Real-world parse fixtures.** `tests/test_grammar_fixtures.py`
+  walks `tests/fixtures/<lang>/` and parses every source file
+  through the matching grammar. Generic-bracket dialects get the
+  filter applied automatically.
+
+- **Self-host grammar parses the v3 AST annotations.** Plus the new
+  directives and integer-literal forms; `uplox_self.uplox` is now
+  capable of parsing every other example grammar in this repo
+  verbatim.
+
+- **Unused-token check.** `compile_grammar` now errors when a token
+  declared in `%tokens` is never referenced from any rule, directive,
+  or `%layout` / `%columns` / `%continuation` config. `%skip` tokens
+  are exempt by design. Catches dead declarations that accumulate
+  when rules get refactored without removing the corresponding
+  token. Diagnostic shape: `token(s) declared in %tokens but never
+  referenced: <name> (line N), …` with remediation hints.
+
+### Changed
+
+- **Bundled grammars cleaned up against the new unused-token
+  check.** 43 dead token declarations removed across 11 grammars:
+  `ada_full` (1), `c_expr` (1), `c_subset` (2), `cobol` (1),
+  `cowgol` / `cowgol_ast` (1 each), `csharp` (2), `plm_subset` (5),
+  `python` (1), `rust` (4), `uplox_self` (4). `ada_subset`'s 28
+  Ada-reserved-but-not-modelled keywords moved from `%keywords`
+  into `%tokens` with `%skip`, preserving lex-time reservation
+  (so `task : Integer := 1;` doesn't silently parse `task` as an
+  identifier) without firing the unused-token check.
+- **Rule-RHS KW_ cleanup.** Grammars now use inline literals
+  (`'volatile'`) on rule RHS in preference to the `KW_VOLATILE`
+  token name. The KW_ form survives only where the token is a
+  multi-spelling regex alternation (`c23`'s 17 GCC-alias tokens
+  like `__volatile__|__volatile|volatile`) or a host-filter-
+  emitted synthetic terminal (`csharp`'s 13 `KW_*_LINQ` tokens,
+  `rust`'s 4 `KW_*_ATTR` tokens). Convention notes added to the
+  c23, csharp, and rust grammar headers.
+
+### Documentation
+
+- **First-pass user docs.** New: `docs/tutorial.md` (your first
+  uplox grammar, walking through `calc`), `docs/cookbook.md`
+  (recipes for common language features), `docs/lr_modes.md`
+  (`%define lr.type` choice with concrete state-count costs),
+  `docs/conflict_resolution.md` (when to use `%shift`/`%reduce`
+  vs restructure), `docs/semantics.md` (what the parser passes to
+  semantic actions). README rewritten with Backend maturity, a
+  three-way grammar split (Production-tested / Feature smoke
+  tests / First-cut modern languages), and a Related projects
+  section linking the avwohl compilers that consume uplox bundles.
+
+### Test surface
+
+471+ tests covering all four backends end-to-end, the new
+directives, the v3 AST surface, and the real-world fixture parses.
+
+## 3.0.0 — 2026-05-09
+
+End-to-end rename plox → uplox. PyPI distribution, GitHub
+repository, Python module, and CLI binary all moved to the
+`uplox` name; the bare `plox` name on PyPI is squatted by an
+unrelated matplotlib helper. No grammar / API surface changes —
+3.0.0 grammars parse identically under 2.0.0 once renamed.
+
 ## 2.0.0 — 2026-05-02
 
 Breaking change to the `.uplox` grammar source format. v1 grammars do not
