@@ -9,18 +9,6 @@ Compiler front-end generator. Consumes a grammar specification and emits:
 
 The JSON bundle is the contract. Backends are independent and replaceable. uplox itself never emits target-language code from grammar source directly — it always goes through the JSON.
 
-## Status
-
-**v2.0.0** — breaking change to the `.uplox` grammar source format:
-single-quote token literals (`'('` not `"("`), `<name>` for every
-non-terminal reference (LHS and RHS), and a new `%keyword_prefix` /
-`%keywords` shortcut that collapses `KW = "KW"` boilerplate into a
-whitespace-separated list. v1 grammars do not parse under the new
-reader; all bundled examples and the self-host grammar were ported in
-this release. See [`docs/grammar_format.md`](docs/grammar_format.md)
-for the current syntax and [CHANGELOG.md](CHANGELOG.md) for the full
-1.x → 2.0.0 history.
-
 ## Goals
 
 - Replace the hand-written front-ends in the `uc*` compiler family (uc80, uc386, uplm80, uada80, ucow, …) with a single generator.
@@ -53,32 +41,6 @@ examples/      .uplox grammars: production (c23, plm_*, ada_*, cowgol,
                javascript, kotlin, swift, typescript, tsx, …)
 docs/          DSL spec, per-backend notes
 ```
-
-## Phasing
-
-All nine phases of the original plan landed in v1.0.0; the v1.1.0 polish round closed the items the v1.0.0 release notes called out as deferred at the cross-language level (token-filter ABI, post-reduce hook, GLR symmetry, self-host); v1.2.0 closed the post-1.0 deferred-grammar list for c_subset and lifted the action-body carve-out from the self-host grammar.
-
-| Phase | Deliverable                                                              | Shipped |
-|-------|--------------------------------------------------------------------------|---------|
-| 1     | Repo skeleton, pyproject, CI, license, grammar source format frozen      | 1.0.0   |
-| 2     | Lexer pipeline: regex → NFA → DFA → JSON, Python driver, tests           | 1.0.0   |
-| 3     | LR(1) parser builder, conflict reporting, JSON, Python driver            | 1.0.0   |
-| 4     | AST schema + default builder + hooks framework                           | 1.0.0   |
-| 5     | Port the smallest uc* front-end as the first real grammar (`plm_subset`) | 1.0.0   |
-| 6     | GLR extension                                                            | 1.0.0   |
-| 7     | C backend (re-entrant) — the highest-value target                        | 1.0.0   |
-| 8     | C++ and Lua backends                                                     | 1.0.0   |
-| 9     | Port remaining uc* front-ends; declare v1                                | 1.0.0   |
-| —     | C / C++ / Lua: token-filter ABI + post-reduce hook                       | 1.1.0   |
-| —     | Self-host bootstrap (`uplox_self.uplox`)                                   | 1.1.0   |
-| —     | LR(1) build perf (~30% on c_subset)                                      | 1.1.0   |
-| —     | c_subset: variadic, multi-line `#define`, bit-fields                     | 1.2.0   |
-| —     | c_subset: designated initializers, compound literals                     | 1.2.0   |
-| —     | c_subset: full abstract declarators, `_Generic`, `sizeof(type)`          | 1.2.0   |
-| —     | Lexer `%balanced=` for non-regular tokens; action bodies in uplox_self    | 1.2.0   |
-| —     | `%balanced=` parity in JSON bundle + C / C++ / Lua / emitted-Python      | 1.3.0   |
-| —     | Parse-error diagnostics (expected-token list, EOI rendering) parity      | 1.4.0   |
-| —     | DSL rework: `<name>` non-terminals, `'…'` literals, `%keywords`          | 2.0.0   |
 
 ## Install
 
@@ -307,6 +269,7 @@ Reference:
 - [`docs/lua_backend.md`](docs/lua_backend.md) — generated Lua module.
 - [`docs/py_backend.md`](docs/py_backend.md) — generated Python module.
 - [`CHANGELOG.md`](CHANGELOG.md) — versioned release notes.
+- [`docs/history.md`](docs/history.md) — the original phase plan and which release closed each phase.
 
 ## Related projects
 
