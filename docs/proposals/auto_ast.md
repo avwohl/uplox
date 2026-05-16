@@ -1,10 +1,14 @@
 # Proposal: declarative AST generation from `.uplox` grammars
 
-**Status:** draft, May 2026 — design decisions locked, validated
-against worked prototypes for calc
+**Status:** shipped (v3 auto-AST surface). Implemented in
+`uplox/spec/ast_plan.py` and the per-backend AST emitters; used by
+`examples/calc_ast.uplox`, `examples/cowgol_ast.uplox`,
+`examples/c_expr.uplox`, `examples/c_subset.uplox`,
+`examples/c23.uplox`, and `examples/uplox_self.uplox`. This document
+is kept as the design rationale, with the worked prototypes for calc
 ([`calc_annotated.md`](calc_annotated.md)) and cowgol
-([`cowgol_annotated.md`](cowgol_annotated.md)); implementation not
-started.
+([`cowgol_annotated.md`](cowgol_annotated.md)) preserved as
+walkthroughs.
 
 **Summary.** Add three grammar-source annotations (`%ast_drop`,
 `?` on LHS, `%ast=` per alternative, `@field` per RHS position)

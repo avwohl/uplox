@@ -1,10 +1,11 @@
 # Proposal: `%continuation` for line-continuation markers
 
-**Status:** draft, 2026 — design only, no implementation.
-Motivated by the planned `python.uplox` (`\` at line end),
-`fortran.uplox` (F90 `&` at line end; F77 column-6 indicator
-via [`%columns`](columns.md)), `cobol.uplox` (column-7 `-`),
-SQL dialects, and several DSLs.
+**Status:** shipped. Implemented in the spec reader / lex filters
+and used by `examples/python.uplox` (`\` at line end),
+`examples/fortran77.uplox` (column-6 indicator via
+[`%columns`](columns.md)), and `examples/cobol.uplox` (column-7
+`-`). F90 `&` and SQL dialects remain future work. This document
+is kept as the design rationale.
 
 **Summary.** Add a directive that names a token whose presence
 at line end signals "this line continues into the next" — the

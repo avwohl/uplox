@@ -1,9 +1,10 @@
 # Proposal: `%columns` for fixed-format / card-image grammars
 
-**Status:** draft, 2026 — design only, no implementation.
-Motivated by the planned `fortran.uplox` (F77 fixed-form) and
-`cobol.uplox` grammars, both of which partition each source
-line into column ranges with different lexical rules.
+**Status:** shipped. Implemented in the spec reader / lex filters
+and used by `examples/fortran77.uplox` and `examples/cobol.uplox`,
+both of which partition each source line into column ranges with
+different lexical rules. This document is kept as the design
+rationale.
 
 **Summary.** Add a `%columns` directive that maps column ranges
 to lexer modes — comment, label, body, continuation indicator,

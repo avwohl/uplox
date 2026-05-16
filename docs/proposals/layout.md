@@ -1,10 +1,9 @@
 # Proposal: `%layout` for indentation-sensitive grammars
 
-**Status:** draft, 2026 — design only, no implementation. Motivated
-by the `yaml.uplox` example that today documents a host-side
-INDENT / DEDENT filter, and by upcoming `python.uplox` /
-`haskell.uplox` / `fsharp.uplox` grammars that would all
-duplicate the same filter logic.
+**Status:** shipped. Implemented in the spec reader / lex filters
+and used by `examples/yaml.uplox` and `examples/python.uplox`.
+Haskell / F# / Nim grammars on top of `%layout` remain future work.
+This document is kept as the design rationale.
 
 **Summary.** Add a one-shot grammar directive that tells the
 uplox runtime to emit synthetic `INDENT` / `DEDENT` / `NEWLINE`
