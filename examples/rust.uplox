@@ -253,7 +253,6 @@ KW_MATCH      = 'match'
 KW_RETURN     = 'return'
 KW_BREAK      = 'break'
 KW_CONTINUE   = 'continue'
-KW_YIELD      = 'yield'
 
 # --- expression-keyword set -----------------------------------------------
 KW_AS         = 'as'
@@ -271,7 +270,6 @@ ARROW         = '->'
 PATHSEP_LT    = '::<'
 PATHSEP       = '::'
 DOTDOT_EQ     = '..='
-DOTDOTDOT     = '...'
 DOTDOT        = '..'
 LSHIFT_ASSIGN = '<<='
 RSHIFT_ASSIGN = '>>='
@@ -304,7 +302,6 @@ PERCENT       = '%'
 AMP           = '&'
 PIPE          = '|'
 CARET         = '^'
-TILDE         = '~'
 BANG          = '!'
 QUESTION      = '?'
 AT            = '@'
@@ -319,7 +316,6 @@ COMMA         = ','
 SEMI          = ';'
 COLON         = ':'
 DOT           = '.'
-DOLLAR        = '$'
 UNDERSCORE    = '_'
 
 # --- synthetic terminals (filter-produced) --------------------------------
@@ -335,6 +331,14 @@ UNDERSCORE    = '_'
 # IDENT and conflict with expression-path IDENT reductions on
 # the `::` continuation — same reduce/reduce class C grammars
 # resolve with the TYPEDEF_NAME filter.
+# These four KW_*_ATTR tokens are referenced by name on rule RHS
+# (`KW_SELF_ATTR`, `KW_SUPER_ATTR`, …) rather than by inline literal
+# because they are host-filter-emitted synthetic terminals. The
+# literal pattern below exists only so the build-time DFA knows the
+# token shape; the raw lexer would lex `self` as KW_SELF and `crate`
+# as KW_CRATE — the filter is what produces the _ATTR variants in
+# attribute / visibility / use-path context. Every other keyword
+# in this grammar appears as an inline literal on rule RHS.
 IDENT_ATTR        = /[A-Za-z_][A-Za-z0-9_]*/
 KW_SELF_ATTR      = /self/
 KW_SUPER_ATTR     = /super/

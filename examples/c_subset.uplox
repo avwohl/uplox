@@ -53,8 +53,6 @@ KW_UNSIGNED = 'unsigned'
 KW_BOOL    = 'bool'
 
 # Storage classes / qualifiers.
-KW_STATIC  = 'static'
-KW_EXTERN  = 'extern'
 KW_CONST   = 'const'
 KW_VOLATILE = 'volatile'
 KW_RESTRICT = 'restrict'

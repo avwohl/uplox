@@ -247,7 +247,6 @@ KW_VOLATILE   = 'volatile'
 KW_PARTIAL    = 'partial'
 KW_ASYNC      = 'async'
 KW_UNSAFE     = 'unsafe'
-KW_FIXED      = 'fixed'
 KW_EXPLICIT   = 'explicit'
 KW_IMPLICIT   = 'implicit'
 KW_REQUIRED   = 'required'
@@ -344,7 +343,6 @@ IDENT         = /[A-Za-z_][A-Za-z0-9_]*/
 
 # --- multi-character operators (declared before single-char) -------------
 ARROW         = '=>'
-ARROWPTR      = '->'
 NULLCOAL_ASSIGN = '??='
 LSHIFT_ASSIGN = '<<='
 RSHIFT_ASSIGN = '>>='
@@ -431,6 +429,13 @@ LPAREN_TUPLE  = /\(/
 # `select` / `from` / `group` etc as variable or field names keeps
 # working. The existing `<where>` clause on type parameters reuses
 # the real KW_WHERE token — only LINQ-position `where` is rewritten.
+#
+# These 13 KW_*_LINQ tokens are the only KW_* names that appear on
+# rule RHS in this grammar — every other keyword is referenced as an
+# inline literal (`'class'`, `'public'`, …). The KW_ form is needed
+# here because the literal is a `_SYNTHETIC_NEVER_EMITTED` placeholder
+# that the raw lexer never produces; inlining it would embed that
+# placeholder string in the rule, which is uglier than the KW_ form.
 KW_FROM_LINQ     = 'KW_FROM_LINQ_SYNTHETIC_NEVER_EMITTED'
 KW_WHERE_LINQ    = 'KW_WHERE_LINQ_SYNTHETIC_NEVER_EMITTED'
 KW_SELECT_LINQ   = 'KW_SELECT_LINQ_SYNTHETIC_NEVER_EMITTED'

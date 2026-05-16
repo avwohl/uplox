@@ -45,21 +45,58 @@ start = compilation_unit
 
 %keyword_prefix KW_
 %keywords
-ABORT ABS ABSTRACT ACCEPT ACCESS ALIASED ALL AND ARRAY AT
-BEGIN BODY CASE CONSTANT DECLARE DELAY DELTA DIGITS DO
-ELSE ELSIF END ENTRY EXCEPTION EXIT
-FOR FUNCTION GENERIC GOTO IF IN INTERFACE IS
-LIMITED LOOP MOD NEW NOT NULL OF OR OTHERS OUT OVERRIDING
-PACKAGE PARALLEL PRAGMA PRIVATE PROCEDURE PROTECTED
-RAISE RANGE RECORD REM RENAMES REQUEUE RETURN REVERSE
-SELECT SEPARATE SOME SUBTYPE SYNCHRONIZED
-TAGGED TASK TERMINATE THEN TYPE
-UNTIL USE WHEN WHILE WITH XOR
+ABS ALIASED ALL AND ARRAY
+BEGIN BODY CASE CONSTANT DECLARE
+ELSE ELSIF END EXIT
+FOR FUNCTION GOTO IF IN IS
+LOOP MOD NEW NOT NULL OF OR OTHERS OUT
+PACKAGE PRAGMA PRIVATE PROCEDURE
+RANGE RECORD REM RETURN REVERSE
+SUBTYPE
+THEN TYPE
+USE WHEN WHILE WITH XOR
 TRUE FALSE
 
 %tokens
 WS         = /[ \t\r\n]+/                            %skip
 COMMENT    = /--[^\n]*/                              %skip
+
+# Ada-2012 reserved words for constructs the subset doesn't model
+# (tasks, protected types, generics, access types, exceptions,
+# tagged / abstract / interface / synchronized / limited / overriding,
+# parallel loops, requeue, separate, delta / digits, do-blocks, at-
+# clauses). They're still reserved at the language level, so we lex
+# them and silently drop the tokens — `task : Integer := 1;` won't
+# accidentally parse with `task` as an identifier. Migrate to a rule
+# (and out of this block) when the construct moves into scope.
+KW_ABORT        = 'abort'        %skip
+KW_ABSTRACT     = 'abstract'     %skip
+KW_ACCEPT       = 'accept'       %skip
+KW_ACCESS       = 'access'       %skip
+KW_AT           = 'at'           %skip
+KW_DELAY        = 'delay'        %skip
+KW_DELTA        = 'delta'        %skip
+KW_DIGITS       = 'digits'       %skip
+KW_DO           = 'do'           %skip
+KW_ENTRY        = 'entry'        %skip
+KW_EXCEPTION    = 'exception'    %skip
+KW_GENERIC      = 'generic'      %skip
+KW_INTERFACE    = 'interface'    %skip
+KW_LIMITED      = 'limited'      %skip
+KW_OVERRIDING   = 'overriding'   %skip
+KW_PARALLEL     = 'parallel'     %skip
+KW_PROTECTED    = 'protected'    %skip
+KW_RAISE        = 'raise'        %skip
+KW_RENAMES      = 'renames'      %skip
+KW_REQUEUE      = 'requeue'      %skip
+KW_SELECT       = 'select'       %skip
+KW_SEPARATE     = 'separate'     %skip
+KW_SOME         = 'some'         %skip
+KW_SYNCHRONIZED = 'synchronized' %skip
+KW_TAGGED       = 'tagged'       %skip
+KW_TASK         = 'task'         %skip
+KW_TERMINATE    = 'terminate'    %skip
+KW_UNTIL        = 'until'        %skip
 
 # Character literal: any single graphic character wrapped in apostrophes,
 # including the apostrophe itself (``'''`` is the apostrophe character).

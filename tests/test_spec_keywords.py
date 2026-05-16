@@ -106,8 +106,6 @@ def test_keyword_resolved_via_prefixed_name_too():
 %keyword_prefix KW_
 %keywords
 HALT
-%tokens
-IDENT = /[A-Za-z]+/
 %rules
 <stmt> : HALT
        | KW_HALT

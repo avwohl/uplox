@@ -243,9 +243,6 @@ SEMI        = ';'
 COLON       = ':'
 DOT         = '.'
 
-# Backslash — consumed by the continuation filter at end of line.
-BACKSLASH   = '\\'
-
 # --- synthetic terminals (filter-produced) -------------------------------
 INDENT  = /\x01/
 DEDENT  = /\x02/

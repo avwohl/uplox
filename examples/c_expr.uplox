@@ -46,7 +46,6 @@ IDENT      = /[A-Za-z_][A-Za-z0-9_]*/
 # Multi-char operators first (longest-match preference).
 LSHIFT_EQ  = '<<='
 RSHIFT_EQ  = '>>='
-ELLIPSIS   = '...'
 LSHIFT     = '<<'
 RSHIFT     = '>>'
 LOR        = '||'

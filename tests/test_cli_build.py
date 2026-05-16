@@ -22,7 +22,7 @@ def write_calc_grammar(tmp_path: Path) -> Path:
         "MINUS  = '-'\n"
         "WS     = /[ \\t\\n]+/    %skip\n"
         "%rules\n"
-        "<expr> : <expr> PLUS NUMBER | NUMBER ;\n"
+        "<expr> : <expr> PLUS NUMBER | <expr> MINUS NUMBER | NUMBER ;\n"
     )
     return src
 
@@ -226,6 +226,7 @@ CALC_ANNOTATED_SRC = (
     "          | <term>\n"
     "          ;\n"
     "<term>?   : <term>@lhs '*'@op <factor>@rhs %ast=BinOp\n"
+    "          | <term>@lhs '/'@op <factor>@rhs %ast=BinOp\n"
     "          | <factor>\n"
     "          ;\n"
     "<factor>? : NUMBER@value                   %ast=NumLit\n"

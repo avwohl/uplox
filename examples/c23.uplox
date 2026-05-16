@@ -95,6 +95,17 @@ STRING_LIT = /(u8|u|U|L)?"([^"\\\n]|\\.)*"/
 # legacy lexer mapped them to the same token; we do the same with a regex
 # alternation. Longest alternatives go first so the DFA resolves
 # ``__const__`` to KW_CONST rather than IDENT.
+#
+# Convention for rule RHS: tokens with a plain single-literal declaration
+# (``KW_VOID = 'void'``) are referenced as inline literals on RHS — write
+# ``'void'``, not ``KW_VOID``. Tokens with a regex-alternation declaration
+# (``KW_VOLATILE = /__volatile__|__volatile|volatile/``) are referenced
+# by name (``KW_VOLATILE``) because an inline literal would resolve to
+# only one spelling and lose the GCC alternates. The 17 such multi-
+# spelling tokens — SIGNED / BOOL / COMPLEX / CONST / VOLATILE / RESTRICT
+# / INLINE / THREAD_LOCAL / ALIGNOF / ALIGNAS / STATIC_ASSERT / TYPEOF /
+# ASM / REAL / IMAG / VA_ARG / INT128 — are the only KW_* names that
+# legitimately appear on rule RHS in this grammar.
 KW_VOID    = 'void'
 KW_CHAR    = 'char'
 KW_SHORT   = 'short'

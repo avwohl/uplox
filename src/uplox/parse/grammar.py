@@ -213,10 +213,64 @@ def compile_grammar(ir: GrammarIR) -> Grammar:
     for p in grammar.productions:
         grammar.productions_by_lhs.setdefault(p.lhs, []).append(p.index)
 
+    _check_unused_tokens(ir, grammar)
+
     grammar.first_sets = _compute_first(grammar)
     grammar.follow_sets = _compute_follow(grammar)
     _populate_first_tail(grammar)
     return grammar
+
+
+def _check_unused_tokens(ir: GrammarIR, grammar: Grammar) -> None:
+    """Error if any declared `%tokens` terminal is never referenced.
+
+    Tokens are "referenced" if they appear anywhere the grammar can name a
+    terminal: on a production RHS (literals resolve here via
+    `literal_to_token`, so `'volatile'` counts as a reference to KW_VOLATILE),
+    in a `%shift` / `%reduce` / `%ast_drop` list, or in a `%layout` /
+    `%columns` / `%continuation` config.
+
+    `%skip` tokens (whitespace, comments, preprocessor lines) are exempt —
+    they are by design never referenced from rules.
+    """
+    used: set[str] = set()
+    for prod in grammar.productions:
+        for sym in prod.rhs:
+            if sym in grammar.terminals:
+                used.add(sym)
+    used |= grammar.shift_terminals
+    used |= grammar.reduce_terminals
+    used |= ir.ast_drop_tokens
+    if ir.layout is not None:
+        used.add(ir.layout.indent_token)
+        used.add(ir.layout.dedent_token)
+        used.add(ir.layout.newline_token)
+        used.update(ir.layout.flow_open)
+        used.update(ir.layout.flow_close)
+    if ir.columns is not None:
+        for clause in ir.columns.clauses:
+            if clause.continuation_token:
+                used.add(clause.continuation_token)
+            if clause.debug_token:
+                used.add(clause.debug_token)
+    if ir.continuation is not None and ir.continuation.marker_token:
+        used.add(ir.continuation.marker_token)
+
+    unused = [
+        tok for tok in ir.tokens
+        if not tok.skip and tok.name not in used
+    ]
+    if unused:
+        parts = []
+        for tok in unused:
+            pos = tok.position
+            loc = f"line {pos.line}" if pos is not None else "?"
+            parts.append(f"{tok.name} ({loc})")
+        raise GrammarError(
+            f"token(s) declared in %tokens but never referenced: {', '.join(parts)}. "
+            f"Remove the declaration, mark with `%skip` if lexer-only, "
+            f"or reference the token in a rule / directive."
+        )
 
 
 def _populate_first_tail(g: Grammar) -> None:
