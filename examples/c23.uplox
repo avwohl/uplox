@@ -689,7 +689,7 @@ KW_GENERIC KW_VA_ARG KW_OFFSETOF
 <matched_iteration_stmt>?
     : 'while' LPAREN <expr>@condition RPAREN <matched_stmt>@body
       %ast=WhileStmt
-    | 'do' <matched_stmt>@body 'while' LPAREN <expr>@condition RPAREN SEMI
+    | 'do' <stmt>@body 'while' LPAREN <expr>@condition RPAREN SEMI
       %ast=DoWhileStmt
     | 'for' LPAREN <for_init>@init <for_cond_opt>@condition SEMI <for_step_opt>@update RPAREN <matched_stmt>@body
       %ast=ForStmt
