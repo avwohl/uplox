@@ -21,6 +21,12 @@
 # * $-conditional compilation directives ($COND, $IF, $INCLUDE).
 # * Embedded assignment within parens `(x := y)` — uplm80 supports it,
 #   but it requires a non-trivial parser tweak that's noise for now.
+#
+# AST annotations (v3 auto-AST): every reachable production carries
+# %ast= or lifts through `?`. Punctuation and structural keywords are
+# in %ast_drop so they never appear in the typed tree. The c23 grammar
+# uses the same conventions — see examples/c23.uplox for the canonical
+# pattern.
 
 %grammar plm_full
 
@@ -79,105 +85,156 @@ SEMI       = ';'
 COLON      = ':'
 DOT        = '.'
 
+# Punctuation and structural keywords carry no AST information. The
+# %ast=Name on each production already encodes the construct; the
+# bracketing tokens just shape the parse.
+%ast_drop
+LPAREN RPAREN COMMA SEMI COLON DOT
+KW_PROCEDURE KW_DECLARE KW_END KW_EOF
+KW_IF KW_THEN KW_ELSE
+KW_DO KW_WHILE KW_CASE KW_BY KW_TO
+KW_CALL KW_GOTO KW_GO KW_HALT KW_ENABLE KW_DISABLE
+KW_AT KW_BASED KW_INITIAL KW_DATA KW_LITERALLY
+KW_STRUCTURE
+
 %rules
 
-# A module is items terminated by an optional trailing EOF keyword. A
-# module item is either a stand-alone declaration / statement / proc /
-# address-literal, OR a top-level labeled DO block.
-<module>      : <items>
-              | <items> EOF
-              ;
+# A module is items terminated by an optional trailing EOF keyword.
+<module>
+    : <items>@items         %ast=Module
+    | <items>@items KW_EOF  %ast=Module
+    ;
 
-<items>       : <items> <item>
-              | <item>
-              ;
+<items> %ast=list element=<item>
+    : <items> <item>
+    | <item>
+    ;
 
-<item>        : <address_literal>
-              | <proc_decl>
-              | <declare_stmt>
-              | <stmt>
-              ;
+<item>?
+    : <address_literal>
+    | <proc_decl>
+    | <declare_stmt>
+    | <stmt>
+    ;
 
-<address_literal> : NUMBER ':' ;
+# A bare `NUMBER:` at module scope sets the program origin (e.g. `100H:`).
+<address_literal>
+    : NUMBER@value COLON   %ast=AddressLiteral
+    ;
 
 # --- procedures -----------------------------------------------------------
 
-<proc_decl>   : IDENT ':' PROCEDURE <proc_signature> <proc_body>
-              ;
+<proc_decl>
+    : IDENT@name COLON KW_PROCEDURE <proc_signature>@signature <proc_body>@body
+      %ast=ProcDecl
+    ;
 
 # proc_signature wraps everything between PROCEDURE and the SEMI that
 # starts the body. PL/M-80 order is `PROCEDURE [params] [return-type]
 # [attrs] ;` — the return type follows the parameter list, not preceding
 # it.
-<proc_signature> : <proc_params> <proc_return> <proc_attrs> ';' ;
+<proc_signature>
+    : <proc_params>@params <proc_return>@return_type <proc_attrs>@attrs SEMI
+      %ast=ProcSignature
+    ;
 
-<proc_return> : BYTE
-              | ADDRESS
-              |
-              ;
+<proc_return>
+    : KW_BYTE@kw     %ast=ReturnType
+    | KW_ADDRESS@kw  %ast=ReturnType
+    |
+    ;
 
-<proc_params> : '(' <ident_list> ')'
-              | '(' ')'
-              |
-              ;
+<proc_params>
+    : LPAREN <ident_list>@names RPAREN  %ast=ProcParams
+    | LPAREN RPAREN                     %ast=ProcParams
+    |
+    ;
 
-<proc_attrs>  : <proc_attrs> <proc_attr>
-              |
-              ;
+<proc_attrs> %ast=list element=<proc_attr>
+    : <proc_attrs> <proc_attr>
+    |
+    ;
 
-<proc_attr>   : EXTERNAL
-              | PUBLIC
-              | REENTRANT
-              | INTERRUPT NUMBER
-              ;
+<proc_attr>?
+    : KW_EXTERNAL         %ast=ProcAttrExternal
+    | KW_PUBLIC           %ast=ProcAttrPublic
+    | KW_REENTRANT        %ast=ProcAttrReentrant
+    | KW_INTERRUPT NUMBER@number  %ast=ProcAttrInterrupt
+    ;
 
-<proc_body>   : <body_items> END <opt_end_label> ';' ;
+<proc_body>
+    : <body_items>@items KW_END <opt_end_label>@end_label SEMI
+      %ast=ProcBody
+    ;
 
 # A single sequence of declarations and/or statements. PL/M-80 conventionally
 # puts declarations first, but enforcing that at the grammar level means
 # either splitting into two empty-derivable lists (which collides on every
 # block-internal terminal) or threading a phase marker. Both add a lot of
 # states for no parser-level value.
-<body_items>  : <body_items> <body_item>
-              |
-              ;
-<body_item>   : <declare_stmt>
-              | <proc_decl>
-              | <stmt>
-              ;
+<body_items> %ast=list element=<body_item>
+    : <body_items> <body_item>
+    |
+    ;
 
-<opt_end_label> : IDENT
-                |
-                ;
+<body_item>?
+    : <declare_stmt>
+    | <proc_decl>
+    | <stmt>
+    ;
 
-<ident_list>  : IDENT
-              | <ident_list> ',' IDENT
-              ;
+<opt_end_label>
+    : IDENT@name   %ast=EndLabel
+    |
+    ;
+
+<ident_list> %ast=list element=<ident_name>
+    : <ident_name>
+    | <ident_list> COMMA <ident_name>
+    ;
+
+# Wrap each IDENT so the list element kind is a node, not a raw Token —
+# uplox list-rules require a uniform element node kind.
+<ident_name>
+    : IDENT@name   %ast=IdentName
+    ;
 
 # --- declarations ---------------------------------------------------------
 
-<declare_stmt> : DECLARE <decl_list> ';' ;
+<declare_stmt>
+    : KW_DECLARE <decl_list>@declarations SEMI   %ast=DeclareStmt
+    ;
 
-<decl_list>   : <decl_list> ',' <decl_item>
-              | <decl_item>
-              ;
+<decl_list> %ast=list element=<decl_item>
+    : <decl_list> COMMA <decl_item>
+    | <decl_item>
+    ;
 
 # A decl_item is one of:
 #   simple-typed:   NAME (or (a,b)) TYPE [attrs]
 #   data-init:      NAME DATA (...)
 #   literally:      NAME LITERALLY 'value' / NAME EQU 'value'
 #   structure:      NAME STRUCTURE ( ... ) [attrs]
-<decl_item>   : <decl_names> <based_opt> <array_size_opt> <decl_tail>
-              | '(' <based_decl_list> ')' <array_size_opt> <decl_tail>
-              | IDENT LITERALLY STRING
-              ;
+<decl_item>?
+    : <decl_names>@names <based_opt>@based <array_size_opt>@array_size <decl_tail>@tail
+      %ast=DeclItem
+    | LPAREN <based_decl_list>@based_decls RPAREN <array_size_opt>@array_size <decl_tail>@tail
+      %ast=DeclItemBasedGroup
+    | IDENT@name KW_LITERALLY STRING@value
+      %ast=LiterallyDecl
+    ;
 
 # `(NAME BASED BASE)` parenthesised form, comma-listed in PIP-style
 # code: `DECLARE (SA BASED A, SB BASED B) BYTE;`. Each name has its
 # own BASED clause; they share the trailing array-size and type.
-<based_decl_list> : IDENT BASED <dotted_ident>
-                  | <based_decl_list> ',' IDENT BASED <dotted_ident>
-                  ;
+<based_decl_list> %ast=list element=<based_decl>
+    : <based_decl>
+    | <based_decl_list> COMMA <based_decl>
+    ;
+
+<based_decl>
+    : IDENT@name KW_BASED <dotted_ident>@base   %ast=BasedDecl
+    ;
 
 # A typed decl_item ends in a type-spec (with optional attrs), a DATA
 # initializer, or a STRUCTURE body. Unifying these tails into one
@@ -193,139 +250,191 @@ DOT        = '.'
 ## seen in MP/M status-process declarations whose type comes from a
 ## sibling decl_item (`status$pd process$header, ..., bdos$save public
 ## data(...)`).
-<decl_tail>   : <type_spec> <attrs_opt>
-              | <type_spec> <attrs_opt> DATA '(' <arg_list> ')' <attrs_opt>
-              | <attrs_opt> DATA '(' <arg_list> ')' <attrs_opt>
-              | STRUCTURE '(' <struct_member_list> ')' <attrs_opt>
-              | STRUCTURE '(' <struct_member_list> ')' <attrs_opt> DATA '(' <arg_list> ')' <attrs_opt>
-              ;
+<decl_tail>?
+    : <type_spec>@type <attrs_opt>@attrs
+      %ast=DeclTailType
+    | <type_spec>@type <attrs_opt>@leading_attrs KW_DATA LPAREN <arg_list>@data_values RPAREN <attrs_opt>@trailing_attrs
+      %ast=DeclTailTypeData
+    | <attrs_opt>@leading_attrs KW_DATA LPAREN <arg_list>@data_values RPAREN <attrs_opt>@trailing_attrs
+      %ast=DeclTailData
+    | KW_STRUCTURE LPAREN <struct_member_list>@members RPAREN <attrs_opt>@attrs
+      %ast=DeclTailStructure
+    | KW_STRUCTURE LPAREN <struct_member_list>@members RPAREN <attrs_opt>@leading_attrs KW_DATA LPAREN <arg_list>@data_values RPAREN <attrs_opt>@trailing_attrs
+      %ast=DeclTailStructureData
+    ;
 
-<decl_names>  : IDENT
-              | '(' <ident_list> ')'
-              ;
+<decl_names>?
+    : IDENT@name                          %ast=DeclName
+    | LPAREN <ident_list>@names RPAREN    %ast=DeclNames
+    ;
 
 # `BUFF BASED BUFFA (128) BYTE` — the BASED clause sits between the
 # name(s) and the array size, before the type proper. The base name
 # may be a member access (`BASED PARSE$FN.BUFF$ADR`); use a
 # parens-free dotted form here so the trailing array-size LPAREN is
 # unambiguous.
-<based_opt>     : BASED <dotted_ident>
-                |
-                ;
+<based_opt>
+    : KW_BASED <dotted_ident>@base   %ast=BasedClause
+    |
+    ;
 
-<dotted_ident>  : IDENT
-                | <dotted_ident> '.' IDENT
-                ;
+<dotted_ident>?
+    : IDENT@name                              %ast=DottedIdent
+    | <dotted_ident>@base DOT IDENT@member    %ast=DottedMember
+    ;
 
 # `TRAN(32) BYTE` — array size goes between name and type. PL/M-80
 # also allows `TRAN(*) BYTE DATA(...)` where `*` means "size determined
 # by initializer length"; that form is common in MP/M sources.
-<array_size_opt> : '(' <size_expr> ')'
-                 | '(' '*' ')'
-                 |
-                 ;
+<array_size_opt>
+    : LPAREN <size_expr>@size RPAREN   %ast=ArraySize
+    | LPAREN STAR RPAREN               %ast=ArraySizeStar
+    |
+    ;
 
-<type_spec>   : BYTE
-              | ADDRESS
-              | LABEL
-              | BYTE '(' <size_expr> ')'
-              | ADDRESS '(' <size_expr> ')'
-              | IDENT                          # user-defined type name (struct alias)
-              ;
+<type_spec>?
+    : KW_BYTE                                          %ast=TypeByte
+    | KW_ADDRESS                                       %ast=TypeAddress
+    | KW_LABEL                                         %ast=TypeLabel
+    | KW_BYTE LPAREN <size_expr>@size RPAREN           %ast=TypeByteSized
+    | KW_ADDRESS LPAREN <size_expr>@size RPAREN        %ast=TypeAddressSized
+    | IDENT@name                                       %ast=TypeUserDefined
+    ;
 
 # Sizes inside type specs are usually NUMBER but may be IDENT (a LITERALLY
 # macro that expands to a constant).
-<size_expr>   : NUMBER
-              | IDENT
-              ;
+<size_expr>?
+    : NUMBER@value   %ast=SizeNumber
+    | IDENT@name     %ast=SizeIdent
+    ;
 
-<attrs_opt>   : <attrs_opt> <attr_clause>
-              |
-              ;
+<attrs_opt> %ast=list element=<attr_clause>
+    : <attrs_opt> <attr_clause>
+    |
+    ;
 
-<attr_clause> : EXTERNAL
-              | PUBLIC
-              | INITIAL '(' <arg_list> ')'
-              | AT      '(' <expr>     ')'
-              ;
+<attr_clause>?
+    : KW_EXTERNAL                                       %ast=AttrExternal
+    | KW_PUBLIC                                         %ast=AttrPublic
+    | KW_INITIAL LPAREN <arg_list>@values RPAREN        %ast=AttrInitial
+    | KW_AT      LPAREN <expr>@address     RPAREN       %ast=AttrAt
+    ;
 
 # --- structure types (parsed for shape; semantics deferred) ---------------
 
-<struct_member_list> : <struct_member>
-                     | <struct_member_list> ',' <struct_member>
-                     ;
+<struct_member_list> %ast=list element=<struct_member>
+    : <struct_member>
+    | <struct_member_list> COMMA <struct_member>
+    ;
 
 # Struct members may omit the type (defaults to BYTE per PL/M-80) —
 # common in BDOS-derived structs that list a queue header field by
 # name without re-spelling its byte layout.
-<struct_member> : <decl_names> <array_size_opt> <type_spec>
-                | <decl_names> <array_size_opt>
-                ;
+<struct_member>?
+    : <decl_names>@names <array_size_opt>@array_size <type_spec>@type
+      %ast=StructMember
+    | <decl_names>@names <array_size_opt>@array_size
+      %ast=StructMemberUntyped
+    ;
 
 # --- statements -----------------------------------------------------------
 
-<stmt>          : <matched_stmt>
-                | <unmatched_stmt>
-                ;
+<stmt>?
+    : <matched_stmt>
+    | <unmatched_stmt>
+    ;
 
 # Threading the matched/unmatched discipline through labels: an
 # `IDENT: stmt` is matched iff the inner stmt is matched. Without this,
 # `stmt -> matched_stmt` would cover a labelled-unmatched-if and ELSE
 # binding would conflict.
-<matched_stmt>   : <matched_if> | <non_if_stmt> | IDENT ':' <matched_stmt> ;
-<unmatched_stmt> : <unmatched_if>               | IDENT ':' <unmatched_stmt> ;
+<matched_stmt>?
+    : <matched_if>
+    | <non_if_stmt>
+    | IDENT@label COLON <matched_stmt>@stmt   %ast=LabeledStmt
+    ;
 
-<matched_if>     : IF <expr> THEN <matched_stmt> ELSE <matched_stmt> ;
-<unmatched_if>   : IF <expr> THEN <stmt>
-                 | IF <expr> THEN <matched_stmt> ELSE <unmatched_stmt>
-                 ;
+<unmatched_stmt>?
+    : <unmatched_if>
+    | IDENT@label COLON <unmatched_stmt>@stmt   %ast=LabeledStmt
+    ;
 
-<non_if_stmt> : <assignment_stmt>
-              | <call_stmt>
-              | <return_stmt>
-              | <goto_stmt>
-              | <halt_stmt>
-              | <enable_stmt>
-              | <disable_stmt>
-              | <do_block>
-              | <null_stmt>
-              ;
+<matched_if>
+    : KW_IF <expr>@condition KW_THEN <matched_stmt>@then_stmt KW_ELSE <matched_stmt>@else_stmt
+      %ast=IfStmtElse
+    ;
 
-<null_stmt>   : ';' ;
-<call_stmt>   : CALL <primary> ';' ;
+<unmatched_if>?
+    : KW_IF <expr>@condition KW_THEN <stmt>@then_stmt
+      %ast=IfStmt
+    | KW_IF <expr>@condition KW_THEN <matched_stmt>@then_stmt KW_ELSE <unmatched_stmt>@else_stmt
+      %ast=IfStmtElse
+    ;
 
-<return_stmt> : RETURN ';'
-              | RETURN <expr> ';'
-              ;
+<non_if_stmt>?
+    : <assignment_stmt>
+    | <call_stmt>
+    | <return_stmt>
+    | <goto_stmt>
+    | <halt_stmt>
+    | <enable_stmt>
+    | <disable_stmt>
+    | <do_block>
+    | <null_stmt>
+    ;
 
-<goto_stmt>   : GOTO IDENT ';'
-              | GO TO IDENT ';'
-              ;
+<null_stmt>
+    : SEMI   %ast=NullStmt
+    ;
 
-<halt_stmt>    : HALT ';' ;
-<enable_stmt>  : ENABLE ';' ;
-<disable_stmt> : DISABLE ';' ;
+<call_stmt>
+    : KW_CALL <primary>@callee SEMI   %ast=CallStmt
+    ;
+
+<return_stmt>?
+    : KW_RETURN SEMI               %ast=ReturnStmt
+    | KW_RETURN <expr>@value SEMI  %ast=ReturnStmtValue
+    ;
+
+<goto_stmt>?
+    : KW_GOTO IDENT@label SEMI    %ast=GotoStmt
+    | KW_GO KW_TO IDENT@label SEMI %ast=GotoStmt
+    ;
+
+<halt_stmt>    : KW_HALT SEMI    %ast=HaltStmt ;
+<enable_stmt>  : KW_ENABLE SEMI  %ast=EnableStmt ;
+<disable_stmt> : KW_DISABLE SEMI %ast=DisableStmt ;
 
 # Multi-target assignment: `A, B, C = expr;` writes the same value
 # to every primary in the list. Common in BDOS-style code for things
 # like `CURREC, CURTRK = 0;`. The list collapses to a single primary
 # in the common case, so single-target writes still parse.
-<assignment_stmt> : <primary_list> '=' <expr> ';' ;
-<primary_list>    : <primary>
-                  | <primary_list> ',' <primary>
-                  ;
+<assignment_stmt>
+    : <primary_list>@targets EQ <expr>@value SEMI   %ast=AssignStmt
+    ;
+
+<primary_list> %ast=list element=<primary>
+    : <primary>
+    | <primary_list> COMMA <primary>
+    ;
 
 # DO blocks come in five flavours:
 #   plain         DO; ... END;
 #   while         DO WHILE expr; ... END;
 #   iterative     DO i = expr TO expr [BY expr]; ... END;
 #   case          DO CASE expr; ... END;
-<do_block>    : DO ';' <body_items> END <opt_end_label> ';'
-              | DO WHILE <expr> ';' <body_items> END <opt_end_label> ';'
-              | DO IDENT '=' <expr> TO <expr> ';' <body_items> END <opt_end_label> ';'
-              | DO IDENT '=' <expr> TO <expr> BY <expr> ';' <body_items> END <opt_end_label> ';'
-              | DO CASE <expr> ';' <body_items> END <opt_end_label> ';'
-              ;
+<do_block>?
+    : KW_DO SEMI <body_items>@items KW_END <opt_end_label>@end_label SEMI
+      %ast=DoBlock
+    | KW_DO KW_WHILE <expr>@condition SEMI <body_items>@items KW_END <opt_end_label>@end_label SEMI
+      %ast=DoWhileBlock
+    | KW_DO IDENT@index EQ <expr>@start KW_TO <expr>@bound SEMI <body_items>@items KW_END <opt_end_label>@end_label SEMI
+      %ast=DoIterBlock
+    | KW_DO IDENT@index EQ <expr>@start KW_TO <expr>@bound KW_BY <expr>@step SEMI <body_items>@items KW_END <opt_end_label>@end_label SEMI
+      %ast=DoIterByBlock
+    | KW_DO KW_CASE <expr>@selector SEMI <body_items>@items KW_END <opt_end_label>@end_label SEMI
+      %ast=DoCaseBlock
+    ;
 
 # --- expressions ---------------------------------------------------------
 
@@ -334,69 +443,80 @@ DOT        = '.'
 # is permitted, conventionally inside parens to disambiguate from a
 # regular `=` assignment statement (which is its own top-level
 # construct ending in ';').
-<expr>        : <or_xor>
-              | <primary> ':=' <expr>
-              ;
+<expr>?
+    : <or_xor>
+    | <primary>@target ASSIGN_EMBED <expr>@value   %ast=EmbeddedAssign
+    ;
 
-<or_xor>      : <or_xor> OR  <and_e>
-              | <or_xor> XOR <and_e>
-              | <and_e>
-              ;
+<or_xor>?
+    : <or_xor>@left KW_OR@op  <and_e>@right   %ast=BinaryOp
+    | <or_xor>@left KW_XOR@op <and_e>@right   %ast=BinaryOp
+    | <and_e>
+    ;
 
-<and_e>       : <and_e> AND <not_e>
-              | <not_e>
-              ;
+<and_e>?
+    : <and_e>@left KW_AND@op <not_e>@right   %ast=BinaryOp
+    | <not_e>
+    ;
 
-<not_e>       : NOT <not_e>
-              | <rel_e>
-              ;
+<not_e>?
+    : KW_NOT@op <not_e>@operand   %ast=UnaryOp
+    | <rel_e>
+    ;
 
-<rel_e>       : <add_e> '='  <add_e>
-              | <add_e> '<'  <add_e>
-              | <add_e> '>'  <add_e>
-              | <add_e> '<=' <add_e>
-              | <add_e> '>=' <add_e>
-              | <add_e> '<>' <add_e>
-              | <add_e>
-              ;
+<rel_e>?
+    : <add_e>@left EQ@op <add_e>@right   %ast=BinaryOp
+    | <add_e>@left LT@op <add_e>@right   %ast=BinaryOp
+    | <add_e>@left GT@op <add_e>@right   %ast=BinaryOp
+    | <add_e>@left LE@op <add_e>@right   %ast=BinaryOp
+    | <add_e>@left GE@op <add_e>@right   %ast=BinaryOp
+    | <add_e>@left NE@op <add_e>@right   %ast=BinaryOp
+    | <add_e>
+    ;
 
-<add_e>       : <add_e> '+'  <mul_e>
-              | <add_e> '-'  <mul_e>
-              | <add_e> PLUS  <mul_e>
-              | <add_e> MINUS <mul_e>
-              | <mul_e>
-              ;
+<add_e>?
+    : <add_e>@left OP_PLUS@op  <mul_e>@right   %ast=BinaryOp
+    | <add_e>@left OP_MINUS@op <mul_e>@right   %ast=BinaryOp
+    | <add_e>@left KW_PLUS@op  <mul_e>@right   %ast=BinaryOp
+    | <add_e>@left KW_MINUS@op <mul_e>@right   %ast=BinaryOp
+    | <mul_e>
+    ;
 
-<mul_e>       : <mul_e> '*' <unary>
-              | <mul_e> '/' <unary>
-              | <mul_e> MOD <unary>
-              | <unary>
-              ;
+<mul_e>?
+    : <mul_e>@left STAR@op  <unary>@right   %ast=BinaryOp
+    | <mul_e>@left SLASH@op <unary>@right   %ast=BinaryOp
+    | <mul_e>@left KW_MOD@op <unary>@right  %ast=BinaryOp
+    | <unary>
+    ;
 
-<unary>       : '-' <unary>
-              | <primary>
-              ;
+<unary>?
+    : OP_MINUS@op <unary>@operand   %ast=UnaryOp
+    | <primary>
+    ;
 
-<primary>     : '.' '(' <arg_list> ')'
-              | '.' <qualname>
-              | '.' STRING                  # location-of a string literal
-              | <qualname>
-              | NUMBER
-              | STRING
-              | '(' <expr> ')'
-              ;
+<primary>?
+    : DOT LPAREN <arg_list>@values RPAREN   %ast=LocationOfList
+    | DOT <qualname>@operand                %ast=LocationOf
+    | DOT STRING@value                      %ast=LocationOfString
+    | <qualname>
+    | NUMBER@value                          %ast=NumberLiteral
+    | STRING@value                          %ast=StringLiteral
+    | LPAREN <expr>@inner RPAREN            %ast=ParenExpr
+    ;
 
 # Qualname covers a chain of `.member` accesses with optional
 # argument-style parens at any position — `FOO`, `FOO(I)`,
 # `REC.FIELD`, `REC.FIELD(I)`, `OUTER.INNER(X).LEAF` all qualify.
 # The trailing parens carry both array indexing and call args; PL/M
 # doesn't syntactically distinguish them at this level.
-<qualname>    : IDENT
-              | <qualname> '.' IDENT
-              | <qualname> '(' <arg_list> ')'
-              | <qualname> '(' ')'
-              ;
+<qualname>?
+    : IDENT@name                                                %ast=Identifier
+    | <qualname>@base DOT IDENT@member                          %ast=MemberAccess
+    | <qualname>@callee LPAREN <arg_list>@args RPAREN           %ast=Call
+    | <qualname>@callee LPAREN RPAREN                           %ast=CallNoArgs
+    ;
 
-<arg_list>    : <arg_list> ',' <expr>
-              | <expr>
-              ;
+<arg_list> %ast=list element=<expr>
+    : <arg_list> COMMA <expr>
+    | <expr>
+    ;
