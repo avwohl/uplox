@@ -163,6 +163,7 @@ KW_REAL    = /__real__|__real/
 KW_IMAG    = /__imag__|__imag/
 KW_VA_ARG  = /__builtin_va_arg|va_arg/
 KW_OFFSETOF = '__builtin_offsetof'
+KW_TYPES_COMPATIBLE_P = '__builtin_types_compatible_p'
 KW_INT128  = /__int128_t|__int128|__uint128_t/
 KW_LABEL   = '__label__'    # GCC extension: locally-scoped labels usable in nested fns
 
@@ -688,7 +689,7 @@ KW_GENERIC KW_VA_ARG KW_OFFSETOF
 <matched_iteration_stmt>?
     : 'while' LPAREN <expr>@condition RPAREN <matched_stmt>@body
       %ast=WhileStmt
-    | 'do' <matched_stmt>@body 'while' LPAREN <expr>@condition RPAREN SEMI
+    | 'do' <stmt>@body 'while' LPAREN <expr>@condition RPAREN SEMI
       %ast=DoWhileStmt
     | 'for' LPAREN <for_init>@init <for_cond_opt>@condition SEMI <for_step_opt>@update RPAREN <matched_stmt>@body
       %ast=ForStmt
@@ -965,6 +966,8 @@ KW_GENERIC KW_VA_ARG KW_OFFSETOF
       %ast=VaArgExpr
     | '__builtin_offsetof' LPAREN <type_name>@target_type COMMA <offsetof_designator>@designator RPAREN
       %ast=OffsetofExpr
+    | '__builtin_types_compatible_p' LPAREN <type_name>@t1 COMMA <type_name>@t2 RPAREN
+      %ast=TypesCompatibleP
     ;
 
 # offsetof's second argument is a member designator: an IDENT
