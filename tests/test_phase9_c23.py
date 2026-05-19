@@ -63,8 +63,9 @@ def test_c23_state_count_in_range(built):
     _scanner, table = built
     # 1649 → 2645 once the C23 type / qualifier / static_assert / typeof
     # / asm / nullptr / alignof / __real__ / __imag__ / FLOAT_LIT
-    # additions land. Slack stays generous; flag if it explodes.
-    assert 700 <= len(table.states) <= 3500, len(table.states)
+    # additions land; → 3566 with later grammar growth. Slack stays
+    # generous; flag if it explodes.
+    assert 700 <= len(table.states) <= 3800, len(table.states)
 
 
 def test_c_simple_function_definition(built):
