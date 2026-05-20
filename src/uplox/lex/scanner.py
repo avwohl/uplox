@@ -215,7 +215,7 @@ class Scanner:
             if last_accept_name not in skip:
                 yield Token(
                     name=last_accept_name,
-                    text=text_bytes.decode("utf-8", errors="replace"),
+                    text=text_bytes.decode("utf-8", errors="surrogateescape"),
                     line=line,
                     column=col,
                     offset=pos,
