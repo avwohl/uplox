@@ -135,7 +135,14 @@ class Scanner:
         filename string when needed; the scanner itself only carries the
         integer.
         """
-        data = source.encode("utf-8") if isinstance(source, str) else bytes(source)
+        # `errors='surrogateescape'` round-trips raw bytes that the
+        # caller read with the same error handler (the C preprocessor
+        # does this so it can pass through e.g. `"\xff"` literals in
+        # source). For plain UTF-8 sources it's a no-op.
+        data = (
+            source.encode("utf-8", errors="surrogateescape")
+            if isinstance(source, str) else bytes(source)
+        )
         return self._scan_bytes(data, file_id)
 
     def scan_all(self, source: str | bytes, *, file_id: int = 0) -> list[Token]:

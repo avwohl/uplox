@@ -381,7 +381,10 @@ class ColumnDispatcher:
     scanner: Scanner
 
     def scan(self, source: str | bytes, *, file_id: int = 0) -> Iterator[Token]:
-        data = source.encode("utf-8") if isinstance(source, str) else bytes(source)
+        data = (
+            source.encode("utf-8", errors="surrogateescape")
+            if isinstance(source, str) else bytes(source)
+        )
         # Pass 1: compute per-line offsets so we can index by (line, col).
         line_starts = [0]
         for i, b in enumerate(data):
