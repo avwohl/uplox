@@ -427,6 +427,7 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 <namespace_definition> : 'namespace' IDENT '{' <top_decls_opt> '}'
                        | 'namespace' '{' <top_decls_opt> '}'
                        | 'inline' 'namespace' IDENT '{' <top_decls_opt> '}'
+                       | 'inline' 'namespace' '{' <top_decls_opt> '}'
                        | 'namespace' IDENT '=' <qualified_namespace_name> ';'
                        ;
 
@@ -456,6 +457,9 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                     ;
 
 <typedef_declaration> : 'typedef' <decl_specs> <init_declarator_list> ';'
+                      | 'typedef' <decl_specs> ';'
+                      | 'typedef' <class_key> IDENT ';'
+                      | 'typedef' <class_key> IDENT_TYPE ';'
                       ;
 
 # --- declaration specifiers ----------------------------------------------
@@ -540,6 +544,8 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 
 <template_arg> : <type_id>
                | <conditional_expr>
+               | <type_id> ELLIPSIS
+               | <conditional_expr> ELLIPSIS
                ;
 
 # Nested-name specifier: `Foo::Bar::` chains used to qualify
@@ -685,6 +691,10 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                         | <decl_specs> <abstract_declarator> '=' <conditional_expr>
                         | <decl_specs> '=' <conditional_expr>
                         | <decl_specs> ELLIPSIS <declarator>
+                        | <decl_specs> '&' ELLIPSIS IDENT
+                        | <decl_specs> '&&' ELLIPSIS IDENT
+                        | <decl_specs> '&' ELLIPSIS
+                        | <decl_specs> '&&' ELLIPSIS
                         ;
 
 # Abstract declarator — declarator without a name. Supports
@@ -741,6 +751,10 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
              | <class_key> IDENT_TYPE <base_clause_opt>
              | <class_key> IDENT 'final' <base_clause_opt>
              | <class_key> IDENT_TYPE 'final' <base_clause_opt>
+             | <class_key> IDENT LT_TEMPLATE <template_arg_list> GT_TEMPLATE <base_clause_opt>
+             | <class_key> IDENT_TYPE LT_TEMPLATE <template_arg_list> GT_TEMPLATE <base_clause_opt>
+             | <class_key> IDENT LT_TEMPLATE GT_TEMPLATE <base_clause_opt>
+             | <class_key> IDENT_TYPE LT_TEMPLATE GT_TEMPLATE <base_clause_opt>
              ;
 
 <base_clause_opt> : ':' <base_specifier_list>
@@ -782,9 +796,21 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                      | <template_declaration>
                      | <typedef_declaration>
                      | <destructor_member>
+                     | <constructor_special_member>
+                     | <forward_decl>
                      | <preproc_directive>
                      | ';'
                      ;
+
+# Constructor `= default` / `= delete` (no return-type prefix —
+# distinct from the general `<member_declarator>` paths which
+# require `<decl_specs>`). Mirrors the `<destructor_member>`
+# shape; both bypass the `<function_definition>` path so the
+# parser doesn't commit to expecting a `<function_body>` after
+# `IDENT(args)`.
+<constructor_special_member> : <declarator> '=' 'default' ';'
+                             | <declarator> '=' 'delete' ';'
+                             ;
 
 # Destructor as a class member. cpp.uplox's `<unqualified_id>`
 # deliberately omits the `~IDENT` form because IDENT_TYPE-vs-
@@ -922,6 +948,7 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 # (C++20). The clause constrains the template parameters
 # with a constexpr expression (typically a concept).
 <template_declaration> : 'template' LT_TEMPLATE <template_parameter_list> GT_TEMPLATE <template_body>
+                       | 'template' LT_TEMPLATE GT_TEMPLATE <template_body>
                        | 'template' LT_TEMPLATE <template_parameter_list> GT_TEMPLATE <requires_clause> <template_body>
                        ;
 
@@ -937,7 +964,21 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 
 <template_parameter> : <type_parameter>
                      | <parameter_declaration>
+                     | <template_template_parameter>
                      ;
+
+# Template-template parameter: `template <...> class T` as a
+# parameter, optionally with a default value or pack-expansion
+# marker. The inner `<template_parameter_list>` recurses through
+# the same rule.
+<template_template_parameter> : 'template' LT_TEMPLATE <template_parameter_list> GT_TEMPLATE 'class' IDENT
+                              | 'template' LT_TEMPLATE <template_parameter_list> GT_TEMPLATE 'class'
+                              | 'template' LT_TEMPLATE <template_parameter_list> GT_TEMPLATE 'class' IDENT '=' <type_id>
+                              | 'template' LT_TEMPLATE <template_parameter_list> GT_TEMPLATE 'class' ELLIPSIS IDENT
+                              | 'template' LT_TEMPLATE <template_parameter_list> GT_TEMPLATE 'class' ELLIPSIS
+                              | 'template' LT_TEMPLATE <template_parameter_list> GT_TEMPLATE 'typename' IDENT
+                              | 'template' LT_TEMPLATE <template_parameter_list> GT_TEMPLATE 'typename'
+                              ;
 
                 <type_parameter> : 'typename'
                  | 'typename' IDENT
@@ -1055,8 +1096,10 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 # unpacking parameter packs into argument positions.
 <expression_list> : <conditional_expr>
                   | <conditional_expr> ELLIPSIS
+                  | <braced_init_list>
                   | <expression_list> ',' <conditional_expr>
                   | <expression_list> ',' <conditional_expr> ELLIPSIS
+                  | <expression_list> ',' <braced_init_list>
                   ;
 
 # Top-level expression is an assignment-expression. The
@@ -1182,6 +1225,7 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                | <postfix_expr> '++'
                | <postfix_expr> '--'
                | <simple_type_spec> '(' <expression_list_opt> ')'
+               | <simple_type_spec> <braced_init_list>
                | 'typeid' '(' <expression> ')'
                | 'typeid' '(' <type_id> ')'
                | 'static_cast' LT_TEMPLATE <type_id> GT_TEMPLATE '(' <expression> ')'
