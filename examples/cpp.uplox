@@ -995,6 +995,7 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 <template_body> : <declaration>
                 | <function_definition>
                 | <template_declaration>
+                | <forward_decl>
                 ;
 
 # --- statements ----------------------------------------------------------
