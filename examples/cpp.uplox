@@ -551,6 +551,10 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                    | DCOLON
                    | <nested_name_spec> IDENT_TYPE DCOLON
                    | <nested_name_spec> IDENT DCOLON
+                   | IDENT_TYPE LT_TEMPLATE <template_arg_list> GT_TEMPLATE DCOLON
+                   | IDENT_TYPE LT_TEMPLATE GT_TEMPLATE DCOLON
+                   | <nested_name_spec> IDENT_TYPE LT_TEMPLATE <template_arg_list> GT_TEMPLATE DCOLON
+                   | <nested_name_spec> IDENT_TYPE LT_TEMPLATE GT_TEMPLATE DCOLON
                    ;
 
 <nested_name_spec_opt> : <nested_name_spec>
@@ -678,6 +682,8 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                         | <decl_specs> <declarator>
                         | <decl_specs> <declarator> '=' <conditional_expr>
                         | <decl_specs> <abstract_declarator>
+                        | <decl_specs> <abstract_declarator> '=' <conditional_expr>
+                        | <decl_specs> '=' <conditional_expr>
                         | <decl_specs> ELLIPSIS <declarator>
                         ;
 
@@ -774,9 +780,36 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                      | <alias_declaration>
                      | <static_assert_decl>
                      | <template_declaration>
+                     | <typedef_declaration>
+                     | <destructor_member>
                      | <preproc_directive>
                      | ';'
                      ;
+
+# Destructor as a class member. cpp.uplox's `<unqualified_id>`
+# deliberately omits the `~IDENT` form because IDENT_TYPE-vs-
+# IDENT in id-expression / type-name positions can collide with
+# class scope's `IDENT_TYPE`. Class scope, however, can only
+# contain member-declarations (not expression-statements), so
+# a dedicated `~`-declarator rule is safe. Prefix keywords
+# (`virtual`, `inline`) ride through the existing
+# `<decl_specs>` so we don't duplicate `<function_spec>` and
+# create a reduce/reduce conflict at the first prefix keyword.
+<destructor_member> : <destructor_head> <function_qualifiers> <compound_statement>
+                    | <destructor_head> <function_qualifiers> ';'
+                    | <destructor_head> <function_qualifiers> '=' <conditional_expr> ';'
+                    | <destructor_head> <function_qualifiers> '=' 'default' ';'
+                    | <destructor_head> <function_qualifiers> '=' 'delete' ';'
+                    | <decl_specs> <destructor_head> <function_qualifiers> <compound_statement>
+                    | <decl_specs> <destructor_head> <function_qualifiers> ';'
+                    | <decl_specs> <destructor_head> <function_qualifiers> '=' <conditional_expr> ';'
+                    | <decl_specs> <destructor_head> <function_qualifiers> '=' 'default' ';'
+                    | <decl_specs> <destructor_head> <function_qualifiers> '=' 'delete' ';'
+                    ;
+
+<destructor_head> : '~' IDENT '(' ')'
+                  | '~' IDENT_TYPE '(' ')'
+                  ;
 
 <member_declarator_list> : <member_declarator>
                          | <member_declarator_list> ',' <member_declarator>
@@ -879,6 +912,7 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 
 <exception_declaration> : <decl_specs>
                         | <decl_specs> <declarator>
+                        | <decl_specs> <abstract_declarator>
                         | ELLIPSIS
                         ;
 
@@ -951,6 +985,7 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                        ;
 
 <declaration_statement> : <declaration>
+                        | <static_assert_decl>
                         ;
 
 <selection_statement> : 'if' '(' <expression> ')' <statement>
@@ -962,11 +997,25 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 
 <iteration_statement> : 'while' '(' <expression> ')' <statement>
                       | 'do' <statement> 'while' '(' <expression> ')' ';'
-                      | 'for' '(' <for_init> <expression_opt> ';' <expression_opt> ')' <statement>
+                      | 'for' '(' <for_init> <expression_opt> ';' <for_update_opt> ')' <statement>
                       | 'for' '(' <for_range_declaration> ':' <expression> ')' <statement>
                       ;
 
-<for_init> : <expression> ';'
+# C/C++ for-loop's third clause is a comma-separated update
+# list — `for (; ; ++i, ++j)` is idiomatic. The general
+# `<expression>` non-terminal stops at `<assignment_expr>`
+# specifically so a top-level comma doesn't collide with
+# argument-list separators, so the for-update slot needs its
+# own list non-terminal.
+<for_update_opt> : <for_update>
+                 |
+                 ;
+
+<for_update> : <assignment_expr>
+             | <for_update> ',' <assignment_expr>
+             ;
+
+<for_init> : <for_update> ';'
            | <declaration>
            | ';'
            ;
@@ -1023,6 +1072,7 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 <assignment_expr> : <conditional_expr>
                   | <throw_expr>
                   | <logical_or_expr> <assignment_operator> <assignment_expr>
+                  | <logical_or_expr> '=' <braced_init_list>
                   ;
 
 <throw_expr> : 'throw'
