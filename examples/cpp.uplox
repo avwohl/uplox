@@ -502,7 +502,9 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 # `typename ::Foo p;` instead of `class Foo p;`. Forward
 # declarations use the `<forward_decl>` top-level rule.
 <elaborated_type_spec> : 'enum' IDENT_TYPE
+                       | 'enum' IDENT
                        | 'enum' <nested_name_spec> IDENT_TYPE
+                       | 'enum' <nested_name_spec> IDENT
                        | 'typename' <nested_name_spec> IDENT
                        | 'typename' <nested_name_spec> IDENT_TYPE
                        ;
@@ -850,6 +852,7 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 # alternatives because the keyword tokens distinguish them.
 <member_declarator> : <declarator>
                     | <declarator> '=' <conditional_expr>
+                    | <declarator> '=' <braced_init_list>
                     | <declarator> '{' <initializer_clause_list> '}'
                     | <declarator> '=' 'default'
                     | <declarator> '=' 'delete'
