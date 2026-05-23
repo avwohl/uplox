@@ -105,7 +105,16 @@ def test_function_with_pointer_param(tmp_path):
 def test_hello_c_parses(tmp_path):
     """uc80/examples/hello.c: forward decl + main + call."""
     mod = _build_and_import(tmp_path)
-    src = open("/Users/wohl/src/uc80/examples/hello.c").read()
+    src = (
+        "/* Hello World in C */\n"
+        "\n"
+        "void puts(char *s);\n"
+        "\n"
+        "int main(void) {\n"
+        '    puts("Hello, World!");\n'
+        "    return 0;\n"
+        "}\n"
+    )
     ast = mod.parse(src)
     assert isinstance(ast, mod.TranslationUnit)
     assert len(ast.items) == 2
@@ -130,7 +139,20 @@ def test_hello_c_parses(tmp_path):
 def test_hello2_c_parses(tmp_path):
     """uc80/examples/hello2.c: while loop, pointer var decl, pointer deref."""
     mod = _build_and_import(tmp_path)
-    src = open("/Users/wohl/src/uc80/examples/hello2.c").read()
+    src = (
+        "/* Hello World with putchar */\n"
+        "\n"
+        "int putchar(int c);\n"
+        "\n"
+        "int main(void) {\n"
+        '    char *s = "Hello, World!\\r\\n";\n'
+        "    while (*s) {\n"
+        "        putchar(*s);\n"
+        "        s = s + 1;\n"
+        "    }\n"
+        "    return 0;\n"
+        "}\n"
+    )
     ast = mod.parse(src)
     assert isinstance(ast, mod.TranslationUnit)
     # Item 0: int putchar(int c);
