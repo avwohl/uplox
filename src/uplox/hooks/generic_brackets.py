@@ -78,6 +78,14 @@ class Dialect:
     lt_generic: str = "LT_GENERIC"
     gt_generic: str = "GT_GENERIC"
 
+    kind_map: dict[str, int] | None = None
+    """Optional name -> :class:`TokenKind` int map. When supplied,
+    tokens renamed by this filter (the LT/GT -> LT_GENERIC/GT_GENERIC
+    rewrites) get their ``kind`` updated to match the new name, so
+    hosts that drive comparisons off ``tok.kind`` still see the
+    rewritten token. Hosts that compare on ``tok.name`` (the legacy
+    path) work either way."""
+
 
 # Note: IDENT is included in the C# and Java follow sets so type-args
 # followed by a declarator name (`Map<String, V> m;` /
@@ -251,23 +259,27 @@ def rewrite_generics(
     abandon()
 
     out: list[Token] = []
+    kmap = dialect.kind_map
     for i, tok in enumerate(tokens):
         if i in confirmed_opens:
-            out.append(_rename(tok, dialect.lt_generic))
+            out.append(_rename(tok, dialect.lt_generic, kmap))
         elif i in confirmed_closes:
             n = confirmed_closes[i]
             for _ in range(n):
-                out.append(_rename(tok, dialect.gt_generic))
+                out.append(_rename(tok, dialect.gt_generic, kmap))
         else:
             out.append(tok)
     return out
 
 
-def _rename(tok: Token, new_name: str) -> Token:
+def _rename(tok: Token, new_name: str, kind_map: dict[str, int] | None) -> Token:
+    kind = kind_map.get(new_name, 0) if kind_map is not None else 0
     return Token(
         name=new_name,
         text=tok.text,
         line=tok.line,
         column=tok.column,
         offset=tok.offset,
+        file_id=tok.file_id,
+        kind=kind,
     )

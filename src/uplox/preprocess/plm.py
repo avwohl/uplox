@@ -48,7 +48,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from ..lex.build import balanced_tokens, lex_from_ir
-from ..lex.scanner import Scanner, Token
+from ..lex.scanner import Scanner, Token, build_token_kind
 from ..parse.grammar import compile_grammar
 from ..parse.lr1 import LRTable, build_table
 from ..parse.runtime import HookRegistry, ParseContext, ParseNode, parse
@@ -82,18 +82,22 @@ class PreprocessResult:
 
 
 @lru_cache(maxsize=1)
-def _build_plm_pre() -> tuple[Scanner, LRTable]:
+def _build_plm_pre() -> tuple[Scanner, LRTable, type]:
     """Build the plm_pre lexer + LR table once per process. Tiny grammar
-    (~30 LR states), so caching is sufficient."""
+    (~30 LR states), so caching is sufficient. Also returns the per-grammar
+    ``TokenKind`` enum class so callers can use ``tok.kind is K.KW_X``
+    fast-path comparisons."""
     ir = read_file(str(PLM_PRE_GRAMMAR))
-    dfa, _tokens, skip = lex_from_ir(ir)
+    dfa, tok_names, skip = lex_from_ir(ir)
+    k_enum = build_token_kind(tok_names, class_name="PlmPreTokenKind")
     scanner = Scanner(
         dfa=dfa,
         skip_tokens=frozenset(skip),
         balanced=balanced_tokens(ir),
+        kind_map=dict(k_enum.__members__),
     )
     table = build_table(compile_grammar(ir))
-    return scanner, table
+    return scanner, table, k_enum
 
 
 def preprocess(source: str) -> PreprocessResult:
@@ -115,7 +119,7 @@ def preprocess(source: str) -> PreprocessResult:
     # We do the same so plm_full's uppercase grammar matches input
     # written in any case. String literals and comments are preserved.
     source = _fold_to_upper(source)
-    scanner, table = _build_plm_pre()
+    scanner, table, K = _build_plm_pre()
     tokens = scanner.scan_all(source)
 
     # Live alias set — names that lex as IDENT but should be treated
@@ -126,13 +130,14 @@ def preprocess(source: str) -> PreprocessResult:
     macros: dict[str, str] = {}
 
     def token_filter(_ctx: ParseContext, tok: Token) -> Token:
-        if tok.name == "IDENT" and tok.text in aliases:
+        if tok.kind is K.IDENT and tok.text in aliases:
             return Token(
                 name="KW_LITERALLY",
                 text=tok.text,
                 line=tok.line,
                 column=tok.column,
                 offset=tok.offset,
+                kind=K.KW_LITERALLY,
             )
         return tok
 

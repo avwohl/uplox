@@ -24,8 +24,10 @@ scanner does not skip ahead.
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field
-from typing import Iterator
+from enum import IntEnum
+from typing import Iterator, Mapping, Optional
 
 from .dfa import DEAD, DFA
 
@@ -41,6 +43,16 @@ class Token:
     file" slot; the FileTable always initialises with ``""`` at index
     0 so a Token constructed without a file_id still decodes to an
     empty filename via the table.
+
+    ``kind`` is the host's :class:`TokenKind` IntEnum value for this
+    token (per-host enum generated from the grammar's terminals). It
+    is the fast comparison handle: ``tok.kind is K.KW_INT`` is a
+    single int compare vs a string equality. ``kind == 0`` is the
+    sentinel ``UNKNOWN`` value used when the scanner had no kind map
+    (legacy or generic-bundle callers); in that case the host must
+    fall back to ``tok.name`` string compares. The string ``name``
+    is preserved alongside for error messages, debug dumps, and the
+    minority of sites that look at the actual name text.
     """
 
     name: str
@@ -49,9 +61,30 @@ class Token:
     column: int
     offset: int  # byte offset into the input
     file_id: int = 0
+    kind: int = 0
 
     def __repr__(self) -> str:  # pragma: no cover - cosmetic
         return f"Token({self.name!r}, {self.text!r}, line={self.line}, col={self.column})"
+
+
+def build_token_kind(tokens: list[str], *, class_name: str = "TokenKind") -> type[IntEnum]:
+    """Return an :class:`IntEnum` mapping token-name strings to dense ints.
+
+    ``tokens`` is the grammar's terminal declaration order (the same list
+    that lives in the bundle's ``lex.tokens`` array). Value 0 is reserved
+    for the synthetic ``UNKNOWN`` slot — every real terminal starts at 1
+    — so ``Token.kind == 0`` cleanly means "no enum is in play here"
+    without colliding with any grammar token.
+
+    Hosts call this once at module load (typically right after loading
+    their grammar bundle) and re-export the result as ``K`` or
+    ``TokenKind`` for the parser code to import. The returned enum is
+    deterministic given the input order, which is also the bundle's
+    declared order — keep that order stable across builds so that
+    pickles / cached parser state remain comparable.
+    """
+    members = [("UNKNOWN", 0)] + [(name, i + 1) for i, name in enumerate(tokens)]
+    return IntEnum(class_name, members)
 
 
 class FileTable:
@@ -121,11 +154,19 @@ class Scanner:
     delimiter is whatever the DFA matched (typically a single literal char like
     ``"{"``). This lets a token cover content that is not itself a regular
     language — target-language action bodies, for example.
+
+    ``kind_map`` optionally maps each token name to its :class:`TokenKind` int
+    value (see :func:`build_token_kind`). When supplied, every emitted Token
+    carries ``tok.kind`` so hot-path comparisons can use ``tok.kind is K.X``
+    (single int compare) instead of byte-by-byte string equality. When absent
+    (generic / unbundled callers), ``tok.kind`` is ``0`` and host code must
+    fall back to ``tok.name``.
     """
     dfa: DFA
     skip_tokens: frozenset[str] = frozenset()
     filename: str = "<input>"
     balanced: dict[str, str] = field(default_factory=dict)
+    kind_map: Optional[Mapping[str, int]] = None
 
     def scan(self, source: str | bytes, *, file_id: int = 0) -> Iterator[Token]:
         """Yield tokens for ``source``. ``source`` may be ``str`` (UTF-8) or bytes.
@@ -156,6 +197,18 @@ class Scanner:
         dfa = self.dfa
         skip = self.skip_tokens
         balanced = self.balanced
+        kind_map = self.kind_map
+
+        # Intern every accept-state name once up front. The DFA's
+        # ``accepts`` table maps state id -> token name string and is
+        # loaded from JSON, so its string values are not interned by
+        # default. After this pass each ``last_accept_name = accepts[s]``
+        # below produces an interned string, which makes every downstream
+        # ``tok.name == "KW_INT"`` site a pointer compare (Python's
+        # string ``==`` short-circuits on ``is``). Source literals like
+        # ``"KW_INT"`` in host code are auto-interned by the compiler,
+        # so they end up pointing at the same object after this step.
+        accepts = {s: sys.intern(name) for s, name in dfa.accepts.items()}
 
         while pos < n:
             # One maximal-munch pass starting at ``pos``.
@@ -163,9 +216,9 @@ class Scanner:
             last_accept_end = -1
             last_accept_name = ""
 
-            if state in dfa.accepts:
+            if state in accepts:
                 last_accept_end = pos
-                last_accept_name = dfa.accepts[state]
+                last_accept_name = accepts[state]
 
             i = pos
             while i < n:
@@ -174,9 +227,9 @@ class Scanner:
                     break
                 state = nxt
                 i += 1
-                if state in dfa.accepts:
+                if state in accepts:
                     last_accept_end = i
-                    last_accept_name = dfa.accepts[state]
+                    last_accept_name = accepts[state]
 
             if last_accept_end <= pos:
                 # No progress possible. last_accept_end == pos with empty match
@@ -213,6 +266,7 @@ class Scanner:
 
             text_bytes = data[pos:last_accept_end]
             if last_accept_name not in skip:
+                kind = kind_map.get(last_accept_name, 0) if kind_map is not None else 0
                 yield Token(
                     name=last_accept_name,
                     text=text_bytes.decode("utf-8", errors="surrogateescape"),
@@ -220,6 +274,7 @@ class Scanner:
                     column=col,
                     offset=pos,
                     file_id=file_id,
+                    kind=kind,
                 )
             # Advance position and update line/column.
             for b in text_bytes:
