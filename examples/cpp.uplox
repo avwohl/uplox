@@ -425,10 +425,13 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 # --- namespaces ----------------------------------------------------------
 
 <namespace_definition> : 'namespace' IDENT '{' <top_decls_opt> '}'
+                       | 'namespace' IDENT_TYPE '{' <top_decls_opt> '}'
                        | 'namespace' '{' <top_decls_opt> '}'
                        | 'inline' 'namespace' IDENT '{' <top_decls_opt> '}'
+                       | 'inline' 'namespace' IDENT_TYPE '{' <top_decls_opt> '}'
                        | 'inline' 'namespace' '{' <top_decls_opt> '}'
                        | 'namespace' IDENT '=' <qualified_namespace_name> ';'
+                       | 'namespace' IDENT_TYPE '=' <qualified_namespace_name> ';'
                        ;
 
 <qualified_namespace_name> : IDENT
