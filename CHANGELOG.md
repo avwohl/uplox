@@ -5,6 +5,68 @@ All notable changes to uplox land here. Format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) for the public
 surface (CLI, JSON bundle schema, Python API, hook firing points).
 
+## 3.2.0 — 2026-05-25
+
+Per-grammar `TokenKind` IntEnum across the lexer / scanner / Python
+backend, so host-language code can use single-int identity compares
+instead of byte-by-byte string equality on `tok.name`. Additive
+across the public API — old generated bundles still load and run
+unchanged.
+
+### Added
+
+- **`Token.kind: int` field** on `uplox.lex.scanner.Token`. Carries
+  the per-grammar `TokenKind` IntEnum value for the token; defaults
+  to `0` (the synthetic `UNKNOWN` sentinel) when no kind map is in
+  play, so legacy / generic-bundle callers see no change. The
+  string `name` is preserved alongside for error messages and the
+  minority of sites that look at the actual name text.
+
+- **`build_token_kind(tokens, *, class_name="TokenKind")` helper**
+  in `uplox.lex.scanner`. Returns an `IntEnum` mapping each terminal
+  in the grammar to a dense int (UNKNOWN=0 reserved, real terminals
+  start at 1). Hosts call this once at module load to materialise
+  their `K` enum.
+
+- **`Scanner.kind_map` field**. Optional `Mapping[str, int]` passed
+  to the scanner; when supplied, every emitted `Token` carries
+  `tok.kind` so hot-path checks can use `tok.kind is K.X` (single
+  int compare) instead of byte-by-byte string equality.
+
+- **Python backend emits `K = build_token_kind(_tokens)` + `_KIND_MAP`**
+  in generated parser modules and threads `kind_map` into the
+  Scanner. `K` is exported from `__all__` alongside `parse` / `scan`,
+  so downstream front-ends can `from <grammar>_parser import K` and
+  drive hot rewrite passes off `tok.kind`.
+
+- **`Dialect.kind_map`** on `uplox.hooks.generic_brackets`. When
+  supplied, the LT/GT → LT_GENERIC/GT_GENERIC rewrites stamp the
+  new kind on the synthesised tokens so hosts that drive comparisons
+  off `tok.kind` see the rewritten kind too.
+
+### Changed
+
+- **Scanner interns DFA accept-state names** (`sys.intern`) once
+  per scan loop. Existing `tok.name == "X"` sites in host code
+  become pointer compares (Python's str `==` short-circuits via
+  `is`) with no source changes. Phase-1 speedup on parse-heavy
+  workloads (~2-3× on hot rewrite passes that match by name)
+  ahead of the typed-kind migration.
+
+### Migration notes
+
+- Existing generated bundles continue to work: the new `kind`
+  field defaults to `0` and the new `kind_map` argument is
+  optional. Hosts not using the typed path see no behaviour
+  change.
+
+- To opt into the fast path, regenerate your grammar bundle (any
+  3.2.x build will emit `K` and the kind-stamped Scanner) and
+  swap `tok.name == "X"` to `tok.kind is K.X`. The new pattern
+  composes with `frozenset[K]` for set-membership tests over hot
+  rewrite passes; uc_core / ucpp_core / uplm80 all migrated in
+  the same release window.
+
 ## 3.1.0 — 2026-05-16
 
 Substantial additive release: three new lexer directives that subsume
