@@ -777,13 +777,13 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                   ;
 
 <class_head> : <class_key>
-             | <class_key> IDENT <base_clause_opt>
+             | <class_key> IDENT <base_clause_opt> !{register_type_from_class_head@2}
              | <class_key> IDENT_TYPE <base_clause_opt>
-             | <class_key> IDENT 'final' <base_clause_opt>
+             | <class_key> IDENT 'final' <base_clause_opt> !{register_type_from_class_head@2}
              | <class_key> IDENT_TYPE 'final' <base_clause_opt>
-             | <class_key> IDENT LT_TEMPLATE <template_arg_list> GT_TEMPLATE <base_clause_opt>
+             | <class_key> IDENT LT_TEMPLATE <template_arg_list> GT_TEMPLATE <base_clause_opt> !{register_type_from_class_head@2}
              | <class_key> IDENT_TYPE LT_TEMPLATE <template_arg_list> GT_TEMPLATE <base_clause_opt>
-             | <class_key> IDENT LT_TEMPLATE GT_TEMPLATE <base_clause_opt>
+             | <class_key> IDENT LT_TEMPLATE GT_TEMPLATE <base_clause_opt> !{register_type_from_class_head@2}
              | <class_key> IDENT_TYPE LT_TEMPLATE GT_TEMPLATE <base_clause_opt>
              ;
 
