@@ -871,6 +871,7 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 # `IDENT(args)`.
 <constructor_special_member> : <declarator> '=' 'default' ';'
                              | <declarator> '=' 'delete' ';'
+                             | <declarator> ';'
                              ;
 
 # Destructor as a class member. cpp.uplox's `<unqualified_id>`
