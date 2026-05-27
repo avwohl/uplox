@@ -1091,14 +1091,33 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                         | <forward_decl>
                         ;
 
-<selection_statement> : 'if' '(' <expression> ')' <statement>
-                      | 'if' '(' <expression> ')' <statement> 'else' <statement>
-                      | 'if' 'constexpr' '(' <expression> ')' <statement>
-                      | 'if' 'constexpr' '(' <expression> ')' <statement> 'else' <statement>
-                      | 'switch' '(' <expression> ')' <statement>
+<selection_statement> : 'if' '(' <condition> ')' <statement>
+                      | 'if' '(' <condition> ')' <statement> 'else' <statement>
+                      | 'if' '(' <init_statement> <condition> ')' <statement>
+                      | 'if' '(' <init_statement> <condition> ')' <statement> 'else' <statement>
+                      | 'if' 'constexpr' '(' <condition> ')' <statement>
+                      | 'if' 'constexpr' '(' <condition> ')' <statement> 'else' <statement>
+                      | 'if' 'constexpr' '(' <init_statement> <condition> ')' <statement>
+                      | 'if' 'constexpr' '(' <init_statement> <condition> ')' <statement> 'else' <statement>
+                      | 'switch' '(' <condition> ')' <statement>
+                      | 'switch' '(' <init_statement> <condition> ')' <statement>
                       ;
 
-<iteration_statement> : 'while' '(' <expression> ')' <statement>
+# C++17 condition forms: plain expression OR a declaration with an
+# initializer (`Type x = init`) evaluated for truthiness.
+<condition> : <expression>
+            | <decl_specs> <declarator> '=' <conditional_expr>
+            | <decl_specs> <declarator> <braced_init_list>
+            ;
+
+# C++17 init-statement: appears before the condition in `if (init; cond)`
+# / `switch (init; cond)`. Either a simple expression-statement or a
+# declaration, terminated by `;`.
+<init_statement> : <expression> ';'
+                 | <declaration>
+                 ;
+
+<iteration_statement> : 'while' '(' <condition> ')' <statement>
                       | 'do' <statement> 'while' '(' <expression> ')' ';'
                       | 'for' '(' <for_init> <expression_opt> ';' <for_update_opt> ')' <statement>
                       | 'for' '(' <for_range_declaration> ':' <expression> ')' <statement>
