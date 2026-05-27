@@ -77,6 +77,17 @@
 %options
 start = translation_unit
 
+%actions
+# Host-side type-registration callbacks. Each fires after the
+# annotated production reduces; the host adds the introduced name(s)
+# to its name table. The classifier then relabels later IDENT
+# occurrences of those names as IDENT_TYPE.
+#
+# Note: these are additive to the host's whole-file pre-pass. They
+# do NOT replace `_rewrite_ident_types`; they're the migration
+# destination once the pre-pass is retired pass-by-pass.
+register_type_from_using_alias
+
 %shift
 KW_ELSE
 LBRACK
@@ -456,7 +467,7 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                     | 'using' 'typename' <nested_name_spec> IDENT_TYPE ';'
                     ;
 
-<alias_declaration> : 'using' IDENT '=' <type_id> ';'
+<alias_declaration> : 'using' IDENT '=' <type_id> ';' !{register_type_from_using_alias}
                     ;
 
 <typedef_declaration> : 'typedef' <decl_specs> <init_declarator_list> ';'
