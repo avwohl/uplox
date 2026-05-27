@@ -436,6 +436,8 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                | <class_key> IDENT_TYPE ';'
                | 'enum' 'class' IDENT ';' !{register_type_from_class_head@3}
                | 'enum' 'class' IDENT_TYPE ';'
+               | 'enum' 'struct' IDENT ';' !{register_type_from_class_head@3}
+               | 'enum' 'struct' IDENT_TYPE ';'
                | 'friend' <class_key> IDENT ';' !{register_type_from_class_head@3}
                | 'friend' <class_key> IDENT_TYPE ';'
                ;
