@@ -590,6 +590,8 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 
 <init_declarator> : <declarator>
                   | <declarator> <initializer>
+                  | <declarator> '=' 'default'
+                  | <declarator> '=' 'delete'
                   ;
 
 # --- declarators ---------------------------------------------------------
@@ -1183,11 +1185,19 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                 | <additive_expr> '-' <multiplicative_expr>
                 ;
 
-<multiplicative_expr> : <cast_expr>
-                      | <multiplicative_expr> '*' <cast_expr>
-                      | <multiplicative_expr> '/' <cast_expr>
-                      | <multiplicative_expr> '%' <cast_expr>
+<multiplicative_expr> : <pm_expr>
+                      | <multiplicative_expr> '*' <pm_expr>
+                      | <multiplicative_expr> '/' <pm_expr>
+                      | <multiplicative_expr> '%' <pm_expr>
                       ;
+
+# Pointer-to-member operators `.*` and `->*` — sit between
+# multiplicative and cast in C++ precedence. Used to invoke
+# pointers-to-member-function: `(obj.*pmf)(args)`.
+<pm_expr> : <cast_expr>
+          | <pm_expr> '.*' <cast_expr>
+          | <pm_expr> '->*' <cast_expr>
+          ;
 
 <cast_expr> : <unary_expr>
             | LPAREN_CAST <type_id> ')' <cast_expr>
