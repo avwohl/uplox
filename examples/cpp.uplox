@@ -474,7 +474,20 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
               | <using_declaration>
               | <alias_declaration>
               | <typedef_declaration>
+              | <structured_binding_declaration>
               ;
+
+# C++17 structured binding: `auto [a, b] = expr;` (and ref/cv-qualified
+# variants `auto& [a, b] = …;`, `const auto& [a, b] = …;`). The
+# identifier-list inside `[…]` binds names from a tuple-like initializer.
+<structured_binding_declaration> : <decl_specs> '[' <sb_identifier_list> ']' '=' <expression> ';'
+                                 | <decl_specs> '&' '[' <sb_identifier_list> ']' '=' <expression> ';'
+                                 | <decl_specs> '&&' '[' <sb_identifier_list> ']' '=' <expression> ';'
+                                 ;
+
+<sb_identifier_list> : IDENT
+                     | <sb_identifier_list> ',' IDENT
+                     ;
 
 <using_declaration> : 'using' IDENT ';'
                     | 'using' IDENT_TYPE ';'
