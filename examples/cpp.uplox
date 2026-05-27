@@ -1002,12 +1002,12 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 # parameter, optionally with a default value or pack-expansion
 # marker. The inner `<template_parameter_list>` recurses through
 # the same rule.
-<template_template_parameter> : 'template' LT_TEMPLATE <template_parameter_list> GT_TEMPLATE 'class' IDENT
+<template_template_parameter> : 'template' LT_TEMPLATE <template_parameter_list> GT_TEMPLATE 'class' IDENT !{register_type_from_template_param@6}
                               | 'template' LT_TEMPLATE <template_parameter_list> GT_TEMPLATE 'class'
-                              | 'template' LT_TEMPLATE <template_parameter_list> GT_TEMPLATE 'class' IDENT '=' <type_id>
-                              | 'template' LT_TEMPLATE <template_parameter_list> GT_TEMPLATE 'class' ELLIPSIS IDENT
+                              | 'template' LT_TEMPLATE <template_parameter_list> GT_TEMPLATE 'class' IDENT '=' <type_id> !{register_type_from_template_param@6}
+                              | 'template' LT_TEMPLATE <template_parameter_list> GT_TEMPLATE 'class' ELLIPSIS IDENT !{register_type_from_template_param@7}
                               | 'template' LT_TEMPLATE <template_parameter_list> GT_TEMPLATE 'class' ELLIPSIS
-                              | 'template' LT_TEMPLATE <template_parameter_list> GT_TEMPLATE 'typename' IDENT
+                              | 'template' LT_TEMPLATE <template_parameter_list> GT_TEMPLATE 'typename' IDENT !{register_type_from_template_param@6}
                               | 'template' LT_TEMPLATE <template_parameter_list> GT_TEMPLATE 'typename'
                               ;
 
