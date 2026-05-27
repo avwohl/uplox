@@ -1300,6 +1300,7 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
            | 'new' <type_id> <braced_init_list>
            | 'new' '(' <expression_list> ')' <type_id>
            | 'new' '(' <expression_list> ')' <type_id> '(' <expression_list_opt> ')'
+           | 'new' '(' <expression_list> ')' <type_id> <braced_init_list>
            ;
 
 <delete_expr> : 'delete' <cast_expr>
