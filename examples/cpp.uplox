@@ -98,6 +98,7 @@ register_type_from_template_param
 register_type_from_class_head
 register_type_from_concept
 register_namespace
+register_imported_name
 
 %shift
 KW_ELSE
@@ -471,11 +472,11 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 
 <using_declaration> : 'using' IDENT ';'
                     | 'using' IDENT_TYPE ';'
-                    | 'using' <nested_name_spec> IDENT ';'
-                    | 'using' <nested_name_spec> IDENT_TYPE ';'
+                    | 'using' <nested_name_spec> IDENT ';' !{register_imported_name@3}
+                    | 'using' <nested_name_spec> IDENT_TYPE ';' !{register_imported_name@3}
                     | 'using' 'namespace' <qualified_namespace_name> ';'
-                    | 'using' 'typename' <nested_name_spec> IDENT ';'
-                    | 'using' 'typename' <nested_name_spec> IDENT_TYPE ';'
+                    | 'using' 'typename' <nested_name_spec> IDENT ';' !{register_type_from_class_head@4}
+                    | 'using' 'typename' <nested_name_spec> IDENT_TYPE ';' !{register_type_from_class_head@4}
                     ;
 
 <alias_declaration> : 'using' IDENT '=' <type_id> ';' !{register_type_from_using_alias@2}
