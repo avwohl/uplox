@@ -94,6 +94,8 @@ start = translation_unit
 # the API grows a declaration-vs-use predicate or scope-stack
 # helper, the pre-pass remains the authority for class names.
 register_type_from_using_alias
+register_type_from_template_param
+register_type_from_class_head
 
 %shift
 KW_ELSE
@@ -423,11 +425,11 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 # `<elaborated_type_spec>` + `<declaration>` (which is
 # `<decl_specs> ';'` with the elaborated form as the
 # only spec).
-<forward_decl> : <class_key> IDENT ';'
+<forward_decl> : <class_key> IDENT ';' !{register_type_from_class_head@2}
                | <class_key> IDENT_TYPE ';'
-               | 'enum' 'class' IDENT ';'
+               | 'enum' 'class' IDENT ';' !{register_type_from_class_head@3}
                | 'enum' 'class' IDENT_TYPE ';'
-               | 'friend' <class_key> IDENT ';'
+               | 'friend' <class_key> IDENT ';' !{register_type_from_class_head@3}
                | 'friend' <class_key> IDENT_TYPE ';'
                ;
 
@@ -1007,15 +1009,15 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                               ;
 
                 <type_parameter> : 'typename'
-                 | 'typename' IDENT
-                 | 'typename' IDENT '=' <type_id>
+                 | 'typename' IDENT !{register_type_from_template_param@2}
+                 | 'typename' IDENT '=' <type_id> !{register_type_from_template_param@2}
                  | 'typename' ELLIPSIS
-                 | 'typename' ELLIPSIS IDENT
+                 | 'typename' ELLIPSIS IDENT !{register_type_from_template_param@3}
                  | 'class'
-                 | 'class' IDENT
-                 | 'class' IDENT '=' <type_id>
+                 | 'class' IDENT !{register_type_from_template_param@2}
+                 | 'class' IDENT '=' <type_id> !{register_type_from_template_param@2}
                  | 'class' ELLIPSIS
-                 | 'class' ELLIPSIS IDENT
+                 | 'class' ELLIPSIS IDENT !{register_type_from_template_param@3}
                  ;
 
 <template_body> : <declaration>
