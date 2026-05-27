@@ -96,6 +96,7 @@ start = translation_unit
 register_type_from_using_alias
 register_type_from_template_param
 register_type_from_class_head
+register_type_from_concept
 
 %shift
 KW_ELSE
@@ -414,7 +415,7 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 # Concept definition (C++20): `template<typename T> concept C
 # = expr;`. The `expr` is constexpr and typically uses
 # requires-clauses / requires-expressions.
-<concept_definition> : 'template' LT_TEMPLATE <template_parameter_list> GT_TEMPLATE 'concept' IDENT '=' <conditional_expr> ';'
+<concept_definition> : 'template' LT_TEMPLATE <template_parameter_list> GT_TEMPLATE 'concept' IDENT '=' <conditional_expr> ';' !{register_type_from_concept@6}
                      ;
 
 # Forward / type-reference declaration: `class Foo;`,
