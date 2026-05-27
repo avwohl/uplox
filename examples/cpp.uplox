@@ -663,7 +663,13 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 
 <noexcept_specifier> : 'noexcept'
                      | 'noexcept' '(' <expression> ')'
+                     | 'throw' '(' ')'
+                     | 'throw' '(' <type_id_list> ')'
                      ;
+
+<type_id_list> : <type_id>
+               | <type_id_list> ',' <type_id>
+               ;
 
 <trailing_return_type> : ARROW_PTR <type_id>
                        ;
