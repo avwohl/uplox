@@ -898,7 +898,7 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                |
                ;
 
-<enum_head_name_opt> : IDENT
+<enum_head_name_opt> : IDENT !{register_type_from_class_head@1}
                      | IDENT_TYPE
                      |
                      ;
