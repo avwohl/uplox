@@ -41,6 +41,12 @@ class CompiledProduction:
 
     ``index`` is the global production number; ``lhs``/``rhs`` use compiled
     symbol names (resolved from string literals to their token name).
+
+    ``predicate`` is the host-side predicate name when the production
+    carries ``?{name}``; ``post_action`` is the host-side action name
+    when the production carries ``!{name}``. Both are validated by
+    :func:`compile_grammar` against the IR's ``%predicates``/``%actions``
+    declarations and surfaced verbatim in the bundle.
     """
     index: int
     lhs: str
@@ -48,6 +54,8 @@ class CompiledProduction:
     action: str | None = None
     hook: str | None = None
     user_index: int = -1
+    predicate: str | None = None
+    post_action: str | None = None
     """Index into the user's original Production list, or -1 for the augmented start."""
 
 
@@ -78,6 +86,23 @@ class Grammar:
     """LR construction algorithm — ``canonical-lr`` (default) or
     ``lalr``. Set by ``%define lr.type {value}``. Consumed by
     :func:`uplox.parse.lr1.build_table` to dispatch construction."""
+    # Context-sensitive extension fields (Phases 1-4). Empty unless the
+    # grammar opts in via the corresponding ``%`` sections.
+    classifier_map: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    """Token name -> tuple of allowed alternative terminal names. Populated
+    from ``%classifier`` sections. The host registers callbacks per source
+    token at parse setup; the runtime invokes them via a TokenFilter shim."""
+    predicate_names: tuple[str, ...] = ()
+    """Names declared via ``%predicates``. Productions reference these via
+    ``?{name}``; the runtime resolves each name to a host callable at
+    parse setup."""
+    action_names: tuple[str, ...] = ()
+    """Names declared via ``%actions``. Productions reference these via
+    ``!{name}``; the runtime fires the host callable after the reduction."""
+    modes: tuple[str, ...] = ()
+    """Lexer mode names declared via ``%modes``. ``modes[0]`` is the default
+    mode; subsequent entries are alternative modes the lexer can switch
+    into via mode-switch actions. Empty when the grammar has no modes."""
 
     def is_terminal(self, sym: str) -> bool:
         return sym in self.terminals
@@ -194,10 +219,24 @@ def compile_grammar(ir: GrammarIR) -> Grammar:
             rhs=(ir.start_symbol,),
         )
     )
+    predicate_set = set(ir.predicates)
+    action_set = set(ir.actions)
     user_idx = 0
     for rule in ir.rules:
         for prod in rule.productions:
             rhs_resolved = tuple(resolve(s) for s in prod.rhs)
+            if prod.predicate is not None and prod.predicate not in predicate_set:
+                raise GrammarError(
+                    f"production at {prod.position} references undeclared "
+                    f"predicate {prod.predicate!r}; declare it in a "
+                    f"`%predicates` section first"
+                )
+            if prod.post_action is not None and prod.post_action not in action_set:
+                raise GrammarError(
+                    f"production at {prod.position} references undeclared "
+                    f"action {prod.post_action!r}; declare it in an "
+                    f"`%actions` section first"
+                )
             grammar.productions.append(
                 CompiledProduction(
                     index=len(grammar.productions),
@@ -206,9 +245,42 @@ def compile_grammar(ir: GrammarIR) -> Grammar:
                     action=prod.action,
                     hook=prod.hook,
                     user_index=user_idx,
+                    predicate=prod.predicate,
+                    post_action=prod.post_action,
                 )
             )
             user_idx += 1
+
+    # Lift IR-level classifier / predicate / action / mode declarations into
+    # the compiled grammar with validation.
+    for cls in ir.classifiers:
+        src_resolved = cls.source_name
+        if src_resolved not in terminal_names:
+            alias = keyword_aliases.get(src_resolved)
+            if alias is not None and alias in terminal_names:
+                src_resolved = alias
+            else:
+                raise GrammarError(
+                    f"%classifier source {cls.source_name!r} at "
+                    f"{cls.position} is not a declared terminal"
+                )
+        resolved_alts: list[str] = []
+        for alt in cls.alt_names:
+            if alt in terminal_names:
+                resolved_alts.append(alt)
+                continue
+            alias = keyword_aliases.get(alt)
+            if alias is not None and alias in terminal_names:
+                resolved_alts.append(alias)
+                continue
+            raise GrammarError(
+                f"%classifier {cls.source_name!r} alternative {alt!r} at "
+                f"{cls.position} is not a declared terminal"
+            )
+        grammar.classifier_map[src_resolved] = tuple(resolved_alts)
+    grammar.predicate_names = tuple(ir.predicates)
+    grammar.action_names = tuple(ir.actions)
+    grammar.modes = tuple(ir.modes)
 
     for p in grammar.productions:
         grammar.productions_by_lhs.setdefault(p.lhs, []).append(p.index)
@@ -255,6 +327,13 @@ def _check_unused_tokens(ir: GrammarIR, grammar: Grammar) -> None:
                 used.add(clause.debug_token)
     if ir.continuation is not None and ir.continuation.marker_token:
         used.add(ir.continuation.marker_token)
+    # %classifier alternatives are referenced via the host callback at parse
+    # time, never on a rule RHS, so credit them here so the unused-tokens
+    # check doesn't reject otherwise-correctly-declared classifier targets
+    # (e.g. TYPEDEF_NAME when typedef-tracking is the only thing using it).
+    for src, alts in grammar.classifier_map.items():
+        used.add(src)
+        used.update(alts)
 
     unused = [
         tok for tok in ir.tokens

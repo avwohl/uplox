@@ -32,7 +32,7 @@ exploring them at runtime in parallel.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Iterable, Optional
 
 from .grammar import END_MARKER, EPSILON, Grammar
 
@@ -74,6 +74,32 @@ class AcceptAction:
 
 
 Action = ShiftAction | ReduceAction | AcceptAction
+
+
+@dataclass
+class PredicatedActions:
+    """An ACTION cell holding multiple alternatives gated on host predicates.
+
+    The runtime walks ``alternatives`` in order; each entry is
+    ``(predicate_name | None, action)``. A predicate of ``None`` means the
+    alternative is unconditional and serves as the default. The runtime
+    picks the first entry whose predicate evaluates to True; if none
+    match and there is a fallback, it picks the fallback; otherwise the
+    parser errors.
+
+    This is the only place in the parser table that can hold more than
+    one action for the same (state, terminal). Created by
+    :func:`_record_action` when multiple productions sharing the same
+    LR conflict point carry distinct ``?{}`` predicates.
+    """
+    alternatives: list[tuple[Optional[str], Action]] = field(default_factory=list)
+    fallback: Optional[Action] = None
+
+    def __repr__(self) -> str:  # pragma: no cover - cosmetic
+        parts = [f"{name!r}->{act}" for name, act in self.alternatives]
+        if self.fallback is not None:
+            parts.append(f"default->{self.fallback}")
+        return f"predicated({', '.join(parts)})"
 
 
 @dataclass
@@ -307,13 +333,27 @@ def _apply_mapping(canonical: LRTable, mapping: list[int]) -> LRTable:
     new_table.states = [frozenset(s) for s in merged_items]
     new_table.start_state = mapping[canonical.start_state]
 
-    def _translate(act: Action) -> Action:
+    def _translate(act):
         if isinstance(act, ShiftAction):
             return ShiftAction(mapping[act.state])
+        if isinstance(act, PredicatedActions):
+            new_cell = PredicatedActions()
+            for pred, alt in act.alternatives:
+                new_cell.alternatives.append((pred, _translate(alt)))
+            if act.fallback is not None:
+                new_cell.fallback = _translate(act.fallback)
+            return new_cell
         return act
 
     for (state_id, term), action in canonical.action.items():
-        _record_action(new_table, mapping[state_id], term, _translate(action))
+        if isinstance(action, PredicatedActions):
+            cell = _translate(action)
+            for pred, alt in cell.alternatives:
+                _record_action(new_table, mapping[state_id], term, alt)
+            if cell.fallback is not None:
+                _record_action(new_table, mapping[state_id], term, cell.fallback)
+        else:
+            _record_action(new_table, mapping[state_id], term, _translate(action))
     for conflict in canonical.conflicts:
         new_state = mapping[conflict.state]
         for action in conflict.actions:
@@ -466,8 +506,16 @@ def _compute_default_reductions(table: LRTable) -> None:
     feedback (TypedefTracker etc.) work."""
     by_state: dict[int, list[Action]] = {}
     for (state, _term), action in table.action.items():
+        # A predicated cell cannot default-reduce — the runtime needs the
+        # lookahead to evaluate the predicates.
+        if isinstance(action, PredicatedActions):
+            continue
         by_state.setdefault(state, []).append(action)
     conflict_states = {c.state for c in table.conflicts}
+    # If any cell in a state is predicated, suppress default-reduce.
+    for (state, _term), action in table.action.items():
+        if isinstance(action, PredicatedActions):
+            conflict_states.add(state)
     for state, actions in by_state.items():
         if state in conflict_states:
             continue
@@ -482,8 +530,10 @@ def _record_action(table: LRTable, state: int, terminal: str, action: Action) ->
     """Record ``action`` in ACTION[state, terminal], collecting any conflict.
 
     Shift/reduce conflicts on a terminal listed in ``%shift`` are silently
-    resolved in favour of shift (the canonical dangling-else fix). All other
-    conflicts are recorded for the caller to surface."""
+    resolved in favour of shift (the canonical dangling-else fix). Per-
+    production ``?{predicate}`` annotations resolve the conflict at runtime
+    by selecting among alternatives. All remaining conflicts are recorded
+    for the caller to surface."""
     key = (state, terminal)
     existing = table.action.get(key)
     if existing is None:
@@ -506,6 +556,15 @@ def _record_action(table: LRTable, state: int, terminal: str, action: Action) ->
             return
         if isinstance(action, ShiftAction) and isinstance(existing, ReduceAction):
             return
+
+    # Predicate-resolved conflict: if every conflicting reduce is from a
+    # production carrying a ``?{name}`` annotation, route them into a
+    # PredicatedActions cell instead of recording a conflict. The runtime
+    # walks the alternatives in declaration order and picks the first
+    # whose predicate returns True.
+    if _try_record_predicated(table, key, existing, action):
+        return
+
     # Conflict — record it, keep the first action (deterministic) and move on.
     found = next(
         (c for c in table.conflicts if c.state == state and c.terminal == terminal),
@@ -516,6 +575,70 @@ def _record_action(table: LRTable, state: int, terminal: str, action: Action) ->
     else:
         if not any(_actions_equal(action, prev) for prev in found.actions):
             found.actions.append(action)
+
+
+def _action_predicate(table: LRTable, act: Action) -> Optional[str]:
+    """Return the predicate name attached to ``act``'s production, or None.
+
+    Shifts and Accepts never carry a predicate — only reduces do (the
+    predicate annotation lives on a production). Returns the
+    predicate name when the reduced production has one, else None.
+    """
+    if isinstance(act, ReduceAction):
+        prod = table.grammar.productions[act.production]
+        return prod.predicate
+    return None
+
+
+def _try_record_predicated(
+    table: LRTable, key: tuple[int, str], existing: Action, new_action: Action,
+) -> bool:
+    """If ``existing`` and ``new_action`` can be merged into a PredicatedActions
+    cell, do so and return True. Otherwise return False (caller records
+    a conflict).
+
+    Merge rules:
+    * If at least one of the two actions carries a predicate, route into a
+      PredicatedActions cell so the runtime picks at parse time.
+    * The unpredicated action (if any) becomes the fallback. A second
+      unpredicated action would be a genuine ambiguity — reject.
+    * Already-merged cells extend with the new action.
+    """
+    existing_pred = _action_predicate(table, existing)
+    new_pred = _action_predicate(table, new_action)
+
+    # Either an existing PredicatedActions cell, or two raw actions where
+    # at least one carries a predicate.
+    if isinstance(existing, PredicatedActions):
+        cell = existing
+        if new_pred is not None:
+            cell.alternatives.append((new_pred, new_action))
+            return True
+        if cell.fallback is None:
+            cell.fallback = new_action
+            return True
+        # Second unpredicated default — that's an ambiguity, not a
+        # predicate-resolvable conflict.
+        return False
+
+    if existing_pred is None and new_pred is None:
+        # Plain conflict; neither side is predicate-gated. Let the caller
+        # record the conflict.
+        return False
+
+    cell = PredicatedActions()
+    if existing_pred is not None:
+        cell.alternatives.append((existing_pred, existing))
+    else:
+        cell.fallback = existing
+    if new_pred is not None:
+        cell.alternatives.append((new_pred, new_action))
+    else:
+        if cell.fallback is not None:
+            return False  # already have an unconditional default
+        cell.fallback = new_action
+    table.action[key] = cell
+    return True
 
 
 def _actions_equal(a: Action, b: Action) -> bool:

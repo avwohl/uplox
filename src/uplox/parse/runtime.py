@@ -31,7 +31,7 @@ from typing import Any, Callable, Iterable, Optional, Union
 
 from ..lex.scanner import Token
 from .grammar import END_MARKER, Grammar
-from .lr1 import AcceptAction, LRTable, ReduceAction, ShiftAction
+from .lr1 import AcceptAction, LRTable, PredicatedActions, ReduceAction, ShiftAction
 
 
 @dataclass
@@ -84,6 +84,184 @@ class HookRegistry:
         cb(ctx, payload)
 
 
+# ---- Phase-1 / Phase-2 / Phase-3 registries ---------------------------------
+#
+# Three first-class registries for context-sensitive parsing:
+#
+#  * ClassifierRegistry — host re-labels lexer tokens at lookahead time.
+#    Keyed on the source terminal name (the one the DFA produced); each
+#    callback returns the final terminal name. The set of allowed
+#    alternative names is fixed at grammar-build time (``%classifier``).
+#
+#  * ActionRegistry — host runs a callable after a production with
+#    ``!{name}`` reduces. Identical semantics to a ``post_reduce`` hook
+#    declared on the same production, but lifted to its own concept so
+#    grammars can route mutator-style state updates (typedef table,
+#    template-name table) separately from analysis-style hooks.
+#
+#  * PredicateRegistry — host evaluates a predicate at parse time to
+#    select among predicated alternatives. The runtime consults the
+#    registry when the LR table has multiple action entries gated on
+#    different predicates at the same (state, lookahead).
+#
+# All three default to ``ignore_missing=False`` so a spec/host mismatch
+# is loud. Tools that don't care (lint, smoke) pass ``True``.
+
+
+ClassifyCallback = Callable[[str, "ParseContext"], str]
+ActionCallback = Callable[["ParseContext", "ParseNode"], None]
+PredicateCallback = Callable[[Token, "ParseContext"], bool]
+
+
+@dataclass
+class ClassifierRegistry:
+    """Maps source-terminal names to host classifier callbacks.
+
+    The callback receives ``(text, ctx)`` and returns the final terminal
+    name (one of the grammar's declared alternatives, or the source name
+    itself if no change). Empty registry behaves as the identity filter.
+
+    Wired through :func:`parse` via the ``classifiers=`` kwarg.
+    """
+    callbacks: dict[str, ClassifyCallback] = field(default_factory=dict)
+    ignore_missing: bool = False
+
+    def register(self, source_token: str, fn: ClassifyCallback) -> None:
+        self.callbacks[source_token] = fn
+
+    def classify(self, ctx: "ParseContext", tok: Token) -> Token:
+        cb = self.callbacks.get(tok.name)
+        if cb is None:
+            return tok
+        new_name = cb(tok.text, ctx)
+        if new_name == tok.name:
+            return tok
+        new_kind = 0
+        # Preserve the kind int if the host runtime has a kind_map
+        # stashed in ctx.user (the bundle-loader does this for emitted
+        # drivers). For pure-Python parses without it, the host can
+        # still compare by tok.name.
+        kind_map = ctx.user.get("kind_map") if isinstance(ctx.user, dict) else None
+        if isinstance(kind_map, dict):
+            new_kind = kind_map.get(new_name, 0)
+        return Token(
+            name=new_name, text=tok.text, line=tok.line, column=tok.column,
+            offset=tok.offset, file_id=tok.file_id, kind=new_kind,
+        )
+
+
+@dataclass
+class ActionRegistry:
+    """Maps action names to host callables fired after a successful reduce.
+
+    Each callback receives ``(ctx, node)`` where ``node`` is the reduced
+    ParseNode (or whatever the semantic action returned). Identical
+    semantics to a ``post_reduce`` hook but routed independently for
+    backend-codegen clarity.
+    """
+    callbacks: dict[str, ActionCallback] = field(default_factory=dict)
+    ignore_missing: bool = False
+
+    def register(self, name: str, fn: ActionCallback) -> None:
+        self.callbacks[name] = fn
+
+    def fire(self, ctx: "ParseContext", name: str, node: "ParseNode") -> None:
+        cb = self.callbacks.get(name)
+        if cb is None:
+            if self.ignore_missing:
+                return
+            raise ParseError(
+                f"action {name!r} referenced by a production but no callback registered"
+            )
+        cb(ctx, node)
+
+
+@dataclass
+class PredicateRegistry:
+    """Maps predicate names to host callables evaluated when the parser
+    has multiple predicated alternatives at the same (state, lookahead).
+
+    Each callback receives ``(lookahead_token, ctx)`` and returns
+    ``bool``. The runtime walks the predicates in their declaration
+    order and selects the first action whose predicate returns
+    ``True``. If no predicate matches and an unconditional default
+    action exists, the parser uses that; otherwise it errors.
+
+    Empty registry behaves as if all predicates returned ``False`` —
+    i.e. only unconditional actions fire. Pass
+    ``ignore_missing=False`` (the default) so a spec/host mismatch is
+    fatal.
+    """
+    callbacks: dict[str, PredicateCallback] = field(default_factory=dict)
+    ignore_missing: bool = False
+
+    def register(self, name: str, fn: PredicateCallback) -> None:
+        self.callbacks[name] = fn
+
+    def evaluate(self, ctx: "ParseContext", name: str, tok: Token) -> bool:
+        cb = self.callbacks.get(name)
+        if cb is None:
+            if self.ignore_missing:
+                return False
+            raise ParseError(
+                f"predicate {name!r} referenced by the table but no callback registered"
+            )
+        return bool(cb(tok, ctx))
+
+
+# ---- Phase 4: lexer modes ----------------------------------------------------
+
+
+@dataclass
+class ModeStack:
+    """Per-parse mode-stack helper.
+
+    Lexer modes (COBOL PIC clauses, TeX catcodes, Fortran format spec) are
+    state the lexer and parser share. The stack lives on the parse
+    context; actions push/pop it as the parse progresses; classifier
+    and predicate callbacks inspect it.
+
+    The grammar's ``%modes`` declaration fixes the set of valid mode
+    names. ``modes[0]`` is the initial state. Pushing an undeclared
+    mode is a host bug — assertion at debug, no enforcement otherwise.
+
+    Notes on what this DOES and DOES NOT do today:
+
+    * **Does**: tracks the current mode, exposes ``push``/``pop``/
+      ``current``, and survives error paths because state is on the
+      ParseContext.
+    * **Does NOT**: switch DFAs per mode. The current Scanner runs
+      one DFA. Mode-aware tokenisation for languages that genuinely
+      need different lexer states (TeX catcodes, Verilog escaped
+      identifiers) needs an additional scanner refactor — tracked as
+      future work. The COBOL-style use case where mode determines
+      which token NAME a matched text resolves to is already covered
+      by the classifier registry combined with this mode stack.
+    """
+    modes: tuple[str, ...] = ()
+    stack: list[str] = field(default_factory=list)
+
+    def reset(self) -> None:
+        self.stack = [self.modes[0]] if self.modes else []
+
+    def current(self) -> str:
+        return self.stack[-1] if self.stack else ""
+
+    def push(self, mode: str) -> None:
+        if self.modes and mode not in self.modes:
+            raise ValueError(
+                f"ModeStack.push({mode!r}): not in declared modes {self.modes!r}"
+            )
+        self.stack.append(mode)
+
+    def pop(self) -> str:
+        if len(self.stack) <= 1:
+            raise RuntimeError(
+                "ModeStack.pop: can't pop the initial/default mode"
+            )
+        return self.stack.pop()
+
+
 # Semantic actions are Python callables receiving (context, rhs_values) and
 # returning the value to push onto the stack for the LHS. The default action,
 # used when no callable is registered for a production, builds a ParseNode.
@@ -114,6 +292,10 @@ class ParseContext:
     value_stack: list[StackValue] = field(default_factory=list)
     semantic_actions: dict[int, SemanticAction] = field(default_factory=dict)
     hooks: HookRegistry = field(default_factory=HookRegistry)
+    classifiers: ClassifierRegistry = field(default_factory=ClassifierRegistry)
+    actions: ActionRegistry = field(default_factory=ActionRegistry)
+    predicates: PredicateRegistry = field(default_factory=PredicateRegistry)
+    mode_stack: ModeStack = field(default_factory=ModeStack)
     user: dict[str, Any] = field(default_factory=dict)
     """Free-form scratchpad for hooks and host drivers."""
 
@@ -148,6 +330,9 @@ def parse(
     hooks: HookRegistry | None = None,
     semantic_actions: dict[int, SemanticAction] | None = None,
     token_filter: TokenFilter | None = None,
+    classifiers: ClassifierRegistry | None = None,
+    actions: ActionRegistry | None = None,
+    predicates: PredicateRegistry | None = None,
 ) -> StackValue:
     """Run the LR driver. Returns the value associated with the start symbol.
 
@@ -155,36 +340,64 @@ def parse(
     end-marker. If ``tokens`` is itself unterminated, the driver still terminates
     by encountering the synthetic ``$``.
 
-    ``token_filter`` is the lexer-feedback hook for grammars that need to
-    re-classify tokens based on parser-driven state — see
-    :data:`TokenFilter`.
+    ``token_filter`` is the legacy lexer-feedback hook for grammars that
+    need to re-classify tokens based on parser-driven state. New code
+    should use :class:`ClassifierRegistry` via the ``classifiers=`` kwarg;
+    both apply (classifier first, then ``token_filter``) for back-compat.
+
+    ``classifiers`` is the Phase-1 token classifier registry. When the
+    grammar carries ``%classifier`` declarations, host callbacks register
+    here re-label tokens at lookahead-fetch time.
+
+    ``actions`` is the Phase-2 post-reduce action registry. When a
+    production carries ``!{name}``, the matching callback fires after
+    the reduction completes.
+
+    ``predicates`` is the Phase-3 predicate registry. When the LR table
+    has predicated alternatives, the runtime consults this registry to
+    pick the matching alternative.
     """
     ctx = ParseContext(
         table=table,
         hooks=hooks or HookRegistry(),
         semantic_actions=semantic_actions or {},
+        classifiers=classifiers or ClassifierRegistry(),
+        actions=actions or ActionRegistry(),
+        predicates=predicates or PredicateRegistry(),
+        mode_stack=ModeStack(modes=table.grammar.modes),
     )
+    ctx.mode_stack.reset()
     ctx.state_stack.append(table.start_state)
 
     # Normalise the input: append a synthetic end-of-input token at the end.
     token_iter = iter(tokens)
     end = Token(name=END_MARKER, text="", line=0, column=0, offset=-1)
 
+    def _apply_filters(tok: Token) -> Token:
+        if tok is end:
+            return tok
+        # Classifier first (host-supplied name relabel), then the legacy
+        # raw token_filter callable for back-compat with existing host
+        # drivers (TypedefTracker etc.).
+        if ctx.classifiers.callbacks:
+            tok = ctx.classifiers.classify(ctx, tok)
+        if token_filter is not None:
+            tok = token_filter(ctx, tok)
+        return tok
+
     def fetch_next() -> Token:
         try:
             tok = next(token_iter)
         except StopIteration:
             return end
-        if token_filter is not None and tok is not end:
-            tok = token_filter(ctx, tok)
-        return tok
+        return _apply_filters(tok)
 
     lookahead = fetch_next()
     end_seen = lookahead is end
 
     while True:
         state = ctx.state_stack[-1]
-        action = table.action.get((state, lookahead.name))
+        action = _select_action(ctx, state, lookahead)
         if action is None:
             # Default reduction fallback: a state whose only actions are all
             # reduce-X (for the same X) reduces unconditionally. Required for
@@ -194,8 +407,7 @@ def parse(
             default_prod = table.default_reductions.get(state)
             if default_prod is not None:
                 _do_reduce(ctx, default_prod)
-                if token_filter is not None and lookahead is not end:
-                    lookahead = token_filter(ctx, lookahead)
+                lookahead = _apply_filters(lookahead)
                 continue
             _on_error(ctx, lookahead)
 
@@ -217,12 +429,11 @@ def parse(
 
         if isinstance(action, ReduceAction):
             _do_reduce(ctx, action.production)
-            # A post_reduce hook may have updated the host's name table
-            # (typedef-name tracking is the canonical case). Re-apply the
-            # filter so the pending lookahead reflects that new state before
-            # the next action lookup.
-            if token_filter is not None and lookahead is not end:
-                lookahead = token_filter(ctx, lookahead)
+            # A post_reduce hook or action may have updated host name
+            # tables (typedef tracking, template-name tracking). Re-
+            # classify so the pending lookahead reflects that new state
+            # before the next action lookup.
+            lookahead = _apply_filters(lookahead)
             continue
 
         if isinstance(action, AcceptAction):
@@ -231,6 +442,30 @@ def parse(
             return ctx.value_stack[-1]
 
         raise ParseError(f"unknown action {action!r}")
+
+
+def _select_action(ctx: ParseContext, state: int, lookahead: Token):
+    """Look up an action for (state, lookahead.name), evaluating any
+    predicated alternatives in declaration order.
+
+    For non-predicated grammars this is a single dict lookup. When the
+    table has a PredicatedActions cell, walks the alternatives in order
+    and picks the first whose predicate returns True; falls through to
+    the default action when no predicate matches.
+    """
+    cell = ctx.table.action.get((state, lookahead.name))
+    if cell is None:
+        return None
+    if isinstance(cell, PredicatedActions):
+        for pred_name, act in cell.alternatives:
+            if pred_name is None:
+                # Unconditional default — only reached if no preceding
+                # predicate matched.
+                return act
+            if ctx.predicates.evaluate(ctx, pred_name, lookahead):
+                return act
+        return cell.fallback
+    return cell
 
 
 def _do_reduce(ctx: ParseContext, prod_index: int) -> None:
@@ -259,6 +494,12 @@ def _do_reduce(ctx: ParseContext, prod_index: int) -> None:
     ctx.state_stack.append(target)
     ctx.value_stack.append(new_value)
     _fire_hook_if_named(ctx, "post_reduce", prod_index, {"value": new_value})
+    # Phase-2 first-class action: fire the host callback registered for
+    # the production's ``!{name}`` annotation, if any. Fires after the
+    # post_reduce hook so a production with both gets the hook first
+    # (analysis) then the action (state-mutating).
+    if prod.post_action is not None:
+        ctx.actions.fire(ctx, prod.post_action, new_value)
 
 
 def _fire_pre_shift(ctx: ParseContext, tok: Token) -> None:

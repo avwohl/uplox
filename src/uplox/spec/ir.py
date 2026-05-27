@@ -87,6 +87,19 @@ class Production:
     node-kind names. ``None`` means no AST annotation on this alternative
     — the alt is then either eligible for the ``?``-lift on its rule (if
     set) or excluded from AST construction.
+
+    ``predicate`` is the name of a ``%predicates`` entry (set when the
+    production carries a ``?{name}`` annotation). At parser-build time,
+    productions sharing the same RHS shape but differing in their
+    predicate are allowed to share an LR action cell; the runtime
+    consults the predicates in declaration order. ``None`` means the
+    production is the unconditional default for its (state, lookahead).
+
+    ``post_action`` is the name of an ``%actions`` entry (set when the
+    production carries a ``!{name}`` annotation). The runtime fires it
+    after the reduction; semantically equivalent to a ``post_reduce``
+    hook but lifted to its own first-class concept so backend codegen
+    can route actions and hooks separately.
     """
 
     rhs: list[Symbol] = field(default_factory=list)
@@ -94,6 +107,8 @@ class Production:
     hook: Optional[str] = None
     ast_kind: Optional[str] = None
     position: Optional[Position] = None
+    predicate: Optional[str] = None
+    post_action: Optional[str] = None
 
 
 @dataclass
@@ -125,6 +140,38 @@ class HookDecl:
 
     name: str
     when: str  # one of: "pre_shift", "pre_reduce", "post_reduce", "on_error"
+    position: Optional[Position] = None
+
+
+@dataclass
+class ClassifierDecl:
+    """Declares a token whose final terminal name is decided by a host
+    callback at scan / lookahead-fetch time.
+
+    The classifier receives the matched ``(text, ctx)`` and returns one of
+    ``alt_names`` — the alternative terminal names the grammar declares
+    upfront. ``source_name`` is the token the DFA actually matched
+    (e.g. ``IDENT``); the alternatives are other terminals the host may
+    redirect to (``TYPEDEF_NAME``, ``TEMPLATE_NAME``, …). All
+    alternatives must be declared as ordinary terminals via ``%tokens``;
+    the classifier section only wires the lookup.
+
+    The grammar-side declaration exists so:
+
+    1. The set of classifiable tokens is known statically (backend codegen
+       emits a single dispatch point).
+    2. The alternative names are validated against the terminal set at
+       grammar-build time, not at runtime.
+    3. Bundles round-trip the wiring without a host-side registry.
+
+    Host wires actual callables via :class:`ClassifierRegistry` at parse
+    setup. Names referenced in the grammar without a registered callback
+    are fatal at parse time (the registry has an ``ignore_missing`` flag
+    for tooling that wants to parse without classification).
+    """
+
+    source_name: str
+    alt_names: list[str] = field(default_factory=list)
     position: Optional[Position] = None
 
 
@@ -232,3 +279,24 @@ class GrammarIR:
     layout: Optional[LayoutConfig] = None
     columns: Optional[ColumnsConfig] = None
     continuation: Optional[ContinuationConfig] = None
+    # Per-token classifier declarations. Each entry binds one source terminal
+    # (the one the DFA actually matches) to a fixed set of alternative
+    # terminal names the host classifier may redirect to. Empty by default;
+    # grammars opt in with ``%classifier`` sections.
+    classifiers: list[ClassifierDecl] = field(default_factory=list)
+    # Per-LR-state predicates. Each predicate is a host-supplied callable
+    # consulted at runtime when the LR table has multiple actions gated on
+    # different predicates. Empty by default; grammars opt in by attaching
+    # ``?{name}`` annotations on productions.
+    predicates: list[str] = field(default_factory=list)
+    # Per-production action declarations. Each entry names a host-side
+    # callable invoked after a successful reduction with the reduced
+    # subtree + context. Identical mechanism to ``%hook=post_reduce``
+    # but the spec lifts it to a first-class concept. Empty by default;
+    # grammars opt in via ``!{name}`` annotations.
+    actions: list[str] = field(default_factory=list)
+    # Lexer-mode declarations (Phase 4). When non-empty, the lexer
+    # maintains a mode stack starting with ``modes[0]``; mode-switch
+    # actions push/pop the stack. ``modes[0]`` is the default; bundle
+    # serialisation emits one DFA per mode.
+    modes: list[str] = field(default_factory=list)

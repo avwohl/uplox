@@ -64,23 +64,41 @@ from ..parse.lr1 import (
     AcceptAction,
     Action,
     LRTable,
+    PredicatedActions,
     ReduceAction,
     ShiftAction,
     _compute_default_reductions,
 )
 
 
-def _action_to_code(a: Action) -> str:
+def _action_to_code(a):
     if isinstance(a, ShiftAction):
         return f"s{a.state}"
     if isinstance(a, ReduceAction):
         return f"r{a.production}"
     if isinstance(a, AcceptAction):
         return "acc"
+    if isinstance(a, PredicatedActions):
+        # Encoded as a dict so the JSON survives schemas that key on
+        # action codes (the runtime branches on type).
+        alts = []
+        for pred, alt in a.alternatives:
+            alts.append({"predicate": pred, "action": _action_to_code(alt)})
+        out: dict = {"predicated": alts}
+        if a.fallback is not None:
+            out["default"] = _action_to_code(a.fallback)
+        return out
     raise TypeError(f"unknown action {a!r}")
 
 
-def _code_to_action(code: str) -> Action:
+def _code_to_action(code):
+    if isinstance(code, dict) and "predicated" in code:
+        cell = PredicatedActions()
+        for entry in code["predicated"]:
+            cell.alternatives.append((entry.get("predicate"), _code_to_action(entry["action"])))
+        if "default" in code:
+            cell.fallback = _code_to_action(code["default"])
+        return cell
     if code == "acc":
         return AcceptAction()
     if code.startswith("s"):
@@ -106,18 +124,26 @@ def table_to_json(table: LRTable) -> dict[str, Any]:
 
     productions_json: list[dict[str, Any]] = []
     for p in g.productions:
-        productions_json.append({
+        entry: dict[str, Any] = {
             "index": p.index,
             "lhs": p.lhs,
             "rhs": list(p.rhs),
             "hook": p.hook,
             "action": p.action,
-        })
+        }
+        # Phase-3/2 context-sensitive fields. Only emit when set so older
+        # bundles (no classifier/predicate/action wiring) round-trip
+        # byte-for-byte through the new code.
+        if p.predicate is not None:
+            entry["predicate"] = p.predicate
+        if p.post_action is not None:
+            entry["post_action"] = p.post_action
+        productions_json.append(entry)
 
     # Group ACTION and GOTO by state for compact, locality-friendly JSON.
     states_json: list[dict[str, Any]] = []
     for s in range(len(table.states)):
-        actions: dict[str, str] = {}
+        actions: dict[str, Any] = {}
         gotos: dict[str, int] = {}
         for (state, sym), act in table.action.items():
             if state == s:
@@ -130,7 +156,7 @@ def table_to_json(table: LRTable) -> dict[str, Any]:
             entry["default_reduction"] = table.default_reductions[s]
         states_json.append(entry)
 
-    return {
+    out = {
         "kind": "lr1",
         "start_state": table.start_state,
         "end_marker": END_MARKER,
@@ -140,6 +166,21 @@ def table_to_json(table: LRTable) -> dict[str, Any]:
         "productions": productions_json,
         "states": states_json,
     }
+    # Context-sensitive parsing wiring (Phases 1-4). Each block is only
+    # emitted when the grammar declared at least one entry — empty wiring
+    # stays absent so older bundles compare byte-for-byte under the new
+    # serializer.
+    if g.classifier_map:
+        out["classifiers"] = {
+            src: list(alts) for src, alts in sorted(g.classifier_map.items())
+        }
+    if g.predicate_names:
+        out["predicates"] = list(g.predicate_names)
+    if g.action_names:
+        out["actions"] = list(g.action_names)
+    if g.modes:
+        out["modes"] = list(g.modes)
+    return out
 
 
 def table_from_json(section: dict[str, Any]) -> LRTable:
@@ -163,6 +204,8 @@ def table_from_json(section: dict[str, Any]) -> LRTable:
             action=p.get("action"),
             hook=p.get("hook"),
             user_index=p.get("user_index", -1),
+            predicate=p.get("predicate"),
+            post_action=p.get("post_action"),
         ))
 
     non_terminals = set(section["non_terminals"])
@@ -181,6 +224,18 @@ def table_from_json(section: dict[str, Any]) -> LRTable:
         start_symbol=section["start_symbol"],
         augmented_start=section.get("augmented_start", AUGMENTED_START),
     )
+    # Restore context-sensitive wiring blocks. Absent blocks leave the
+    # grammar's defaults (empty / no-op) intact.
+    cls = section.get("classifiers")
+    if isinstance(cls, dict):
+        for src, alts in cls.items():
+            grammar.classifier_map[src] = tuple(alts)
+    if isinstance(section.get("predicates"), list):
+        grammar.predicate_names = tuple(section["predicates"])
+    if isinstance(section.get("actions"), list):
+        grammar.action_names = tuple(section["actions"])
+    if isinstance(section.get("modes"), list):
+        grammar.modes = tuple(section["modes"])
     for p in productions:
         grammar.productions_by_lhs.setdefault(p.lhs, []).append(p.index)
 

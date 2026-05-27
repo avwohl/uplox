@@ -35,6 +35,7 @@ import re
 from typing import Optional
 
 from .ir import (
+    ClassifierDecl,
     ColumnClause,
     ColumnsConfig,
     ContinuationConfig,
@@ -103,6 +104,10 @@ _SECTIONS = (
     "layout",
     "columns",
     "continuation",
+    "classifier",
+    "predicates",
+    "actions",
+    "modes",
 )
 _SECTION_RE = re.compile(r"\s*%(" + "|".join(_SECTIONS) + r")\b\s*(.*)$")
 _KEYWORD_PREFIX_RE = re.compile(r"\s*%keyword_prefix\s+(\S+)\s*$")
@@ -164,6 +169,14 @@ def read_source(text: str, filename: str = "<source>") -> GrammarIR:
             _parse_columns(ir, section_buf, filename)
         elif section == "continuation":
             _parse_continuation(ir, section_buf, filename)
+        elif section == "classifier":
+            _parse_classifier(ir, section_buf, filename)
+        elif section == "predicates":
+            _parse_predicates(ir, section_buf, filename)
+        elif section == "actions":
+            _parse_actions(ir, section_buf, filename)
+        elif section == "modes":
+            _parse_modes(ir, section_buf, filename)
         elif section == "rules":
             text = "\n".join(t for _l, t in section_buf)
             ir.options["__rules_text__"] = text
@@ -348,6 +361,125 @@ def _parse_hooks(ir: GrammarIR, lines: list[tuple[int, str]], filename: str) -> 
                 f"{filename}:{lineno}: unknown hook event {when!r}; expected one of {_HOOK_WHENS}"
             )
         ir.hooks.append(HookDecl(name=name, when=when, position=Position(filename, lineno, 1)))
+
+
+def _parse_classifier(ir: GrammarIR, lines: list[tuple[int, str]], filename: str) -> None:
+    """Parse a ``%classifier`` section: ``SOURCE -> ALT1 ALT2 ...`` lines.
+
+    Each line declares a single source terminal whose final terminal name is
+    decided by a host callback at scan time. The source must be a declared
+    token; the alternatives must each be declared as terminals as well —
+    validation is deferred to :func:`compile_grammar` because keyword-prefix
+    aliases haven't been resolved yet at read time.
+
+    Multiple ``%classifier`` lines may target the same source; the second
+    declaration is a duplicate error.
+    """
+    seen: dict[str, int] = {}
+    for lineno, line in lines:
+        if "->" not in line:
+            raise ReaderError(
+                f"{filename}:{lineno}: `%classifier` line must be "
+                f"`SOURCE -> ALT1 [ALT2 ...]`"
+            )
+        src, _, rest = line.partition("->")
+        src = src.strip()
+        alts = rest.split()
+        if not _KEYWORD_NAME_RE.fullmatch(src):
+            raise ReaderError(
+                f"{filename}:{lineno}: classifier source {src!r} is not a valid identifier"
+            )
+        if not alts:
+            raise ReaderError(
+                f"{filename}:{lineno}: classifier {src!r} must list at least one alternative"
+            )
+        for alt in alts:
+            if not _KEYWORD_NAME_RE.fullmatch(alt):
+                raise ReaderError(
+                    f"{filename}:{lineno}: classifier alt {alt!r} is not a valid identifier"
+                )
+        if src in seen:
+            raise ReaderError(
+                f"{filename}:{lineno}: classifier source {src!r} already declared at line {seen[src]}"
+            )
+        seen[src] = lineno
+        ir.classifiers.append(
+            ClassifierDecl(
+                source_name=src,
+                alt_names=list(alts),
+                position=Position(filename, lineno, 1),
+            )
+        )
+
+
+def _parse_predicates(ir: GrammarIR, lines: list[tuple[int, str]], filename: str) -> None:
+    """Parse a ``%predicates`` section: whitespace-separated identifier names,
+    one or more per line. Each name declares a predicate that may appear in
+    ``?{name}`` production annotations. The host registers a callable per
+    name at parse setup.
+
+    Predicate names must be unique across all ``%predicates`` lines.
+    """
+    seen: dict[str, int] = {}
+    for lineno, line in lines:
+        for word in line.split():
+            if not _KEYWORD_NAME_RE.fullmatch(word):
+                raise ReaderError(
+                    f"{filename}:{lineno}: predicate {word!r} is not a valid identifier"
+                )
+            if word in seen:
+                raise ReaderError(
+                    f"{filename}:{lineno}: predicate {word!r} already declared at line {seen[word]}"
+                )
+            seen[word] = lineno
+            ir.predicates.append(word)
+
+
+def _parse_actions(ir: GrammarIR, lines: list[tuple[int, str]], filename: str) -> None:
+    """Parse an ``%actions`` section: whitespace-separated identifier names.
+
+    Each name declares an action — a host-side callable invoked after the
+    reduction of a production carrying ``!{name}``. Identical to
+    ``%hooks <name> post_reduce`` but with first-class syntax and clearer
+    semantics (an action runs once per reduction, doesn't fire on errors,
+    and is expected to mutate host state).
+    """
+    seen: dict[str, int] = {}
+    for lineno, line in lines:
+        for word in line.split():
+            if not _KEYWORD_NAME_RE.fullmatch(word):
+                raise ReaderError(
+                    f"{filename}:{lineno}: action {word!r} is not a valid identifier"
+                )
+            if word in seen:
+                raise ReaderError(
+                    f"{filename}:{lineno}: action {word!r} already declared at line {seen[word]}"
+                )
+            seen[word] = lineno
+            ir.actions.append(word)
+
+
+def _parse_modes(ir: GrammarIR, lines: list[tuple[int, str]], filename: str) -> None:
+    """Parse a ``%modes`` section: whitespace-separated mode names. The first
+    name is the default mode (active at scan start). Subsequent names are
+    additional modes the lexer may switch into via mode-switch actions.
+
+    Token rules can carry an ``%in=<mode>`` annotation (parsed elsewhere)
+    to restrict their applicability. Mode names must be unique.
+    """
+    seen: dict[str, int] = {}
+    for lineno, line in lines:
+        for word in line.split():
+            if not _KEYWORD_NAME_RE.fullmatch(word):
+                raise ReaderError(
+                    f"{filename}:{lineno}: mode {word!r} is not a valid identifier"
+                )
+            if word in seen:
+                raise ReaderError(
+                    f"{filename}:{lineno}: mode {word!r} already declared at line {seen[word]}"
+                )
+            seen[word] = lineno
+            ir.modes.append(word)
 
 
 _KEYWORD_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
@@ -998,12 +1130,64 @@ def _parse_production(lex: _RulesLexer) -> Production:
     hook: str | None = None
     action: str | None = None
     ast_kind: str | None = None
+    predicate: str | None = None
+    post_action: str | None = None
     prod_pos = lex.position()
     while True:
         lex.skip_ws_and_comments()
         c = lex.peek()
         if not c or c in "|;":
             break
+        if c == "?":
+            # ?{predicate_name} — gate this alternative on a host predicate
+            pred_pos = lex.position()
+            lex.take()  # '?'
+            if lex.peek() != "{":
+                raise ReaderError(
+                    f"{lex.filename}:{lex.line}:{lex.col}: expected '{{' after '?' (predicate annotation)"
+                )
+            lex.take()  # '{'
+            lex.skip_ws_and_comments()
+            pred_name, _ = lex.take_ident()
+            lex.skip_ws_and_comments()
+            if lex.peek() != "}":
+                raise ReaderError(
+                    f"{lex.filename}:{lex.line}:{lex.col}: expected '}}' to close ?{{{pred_name}}}"
+                )
+            lex.take()  # '}'
+            if predicate is not None:
+                raise ReaderError(
+                    f"{lex.filename}:{pred_pos.line}:{pred_pos.column}: "
+                    f"duplicate ?{{}} predicate on this alternative "
+                    f"(was {predicate!r}, now {pred_name!r})"
+                )
+            predicate = pred_name
+            continue
+        if c == "!":
+            # !{action_name} — post-reduce action
+            act_pos = lex.position()
+            lex.take()  # '!'
+            if lex.peek() != "{":
+                raise ReaderError(
+                    f"{lex.filename}:{lex.line}:{lex.col}: expected '{{' after '!' (action annotation)"
+                )
+            lex.take()  # '{'
+            lex.skip_ws_and_comments()
+            act_name, _ = lex.take_ident()
+            lex.skip_ws_and_comments()
+            if lex.peek() != "}":
+                raise ReaderError(
+                    f"{lex.filename}:{lex.line}:{lex.col}: expected '}}' to close !{{{act_name}}}"
+                )
+            lex.take()  # '}'
+            if post_action is not None:
+                raise ReaderError(
+                    f"{lex.filename}:{act_pos.line}:{act_pos.column}: "
+                    f"duplicate !{{}} action on this alternative "
+                    f"(was {post_action!r}, now {act_name!r})"
+                )
+            post_action = act_name
+            continue
         if c == "%":
             keyword_pos = lex.position()
             lex.take()
@@ -1072,7 +1256,8 @@ def _parse_production(lex: _RulesLexer) -> Production:
             f"{lex.filename}:{lex.line}:{lex.col}: unexpected character {c!r} in production"
         )
     return Production(
-        rhs=rhs, action=action, hook=hook, ast_kind=ast_kind, position=prod_pos
+        rhs=rhs, action=action, hook=hook, ast_kind=ast_kind, position=prod_pos,
+        predicate=predicate, post_action=post_action,
     )
 
 
