@@ -705,7 +705,26 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 # in user code outside of templated cleanup utilities.
 <unqualified_id> : IDENT
                  | 'operator' <overloadable_operator>
+                 | 'operator' <conversion_type_id>
                  ;
+
+# Conversion-operator target type: a subset of <type_id> that the
+# parser can disambiguate from <overloadable_operator>. Built-in
+# primitive types and named/qualified types, with optional pointer/
+# reference qualifiers.
+<conversion_type_id> : <simple_type_spec> <conversion_ptr_seq_opt>
+                     | <elaborated_type_spec> <conversion_ptr_seq_opt>
+                     ;
+
+<conversion_ptr_seq_opt> : <conversion_ptr_seq>
+                         |
+                         ;
+
+<conversion_ptr_seq> : <conversion_ptr_op>
+                     | <conversion_ptr_seq> <conversion_ptr_op>
+                     ;
+
+<conversion_ptr_op> : '*' | '&' | '&&' | 'const' | 'volatile' ;
 
 <overloadable_operator> : '+' | '-' | '*' | '/' | '%'
                         | '^' | '&' | '|' | '~' | '!'
