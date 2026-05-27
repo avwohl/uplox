@@ -1067,6 +1067,7 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 
 <declaration_statement> : <declaration>
                         | <static_assert_decl>
+                        | <forward_decl>
                         ;
 
 <selection_statement> : 'if' '(' <expression> ')' <statement>
