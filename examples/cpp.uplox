@@ -484,7 +484,7 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 
 <typedef_declaration> : 'typedef' <decl_specs> <init_declarator_list> ';'
                       | 'typedef' <decl_specs> ';'
-                      | 'typedef' <class_key> IDENT ';'
+                      | 'typedef' <class_key> IDENT ';' !{register_type_from_class_head@3}
                       | 'typedef' <class_key> IDENT_TYPE ';'
                       ;
 
