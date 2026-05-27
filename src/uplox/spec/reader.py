@@ -1132,6 +1132,7 @@ def _parse_production(lex: _RulesLexer) -> Production:
     ast_kind: str | None = None
     predicate: str | None = None
     post_action: str | None = None
+    post_action_arg_pos: int | None = None
     prod_pos = lex.position()
     while True:
         lex.skip_ws_and_comments()
@@ -1164,7 +1165,10 @@ def _parse_production(lex: _RulesLexer) -> Production:
             predicate = pred_name
             continue
         if c == "!":
-            # !{action_name} — post-reduce action
+            # !{action_name} or !{action_name@N} — post-reduce action.
+            # The optional `@N` arg targets a specific RHS position
+            # (1-indexed); the runtime passes that child to the callback
+            # instead of the whole reduced subtree.
             act_pos = lex.position()
             lex.take()  # '!'
             if lex.peek() != "{":
@@ -1174,7 +1178,28 @@ def _parse_production(lex: _RulesLexer) -> Production:
             lex.take()  # '{'
             lex.skip_ws_and_comments()
             act_name, _ = lex.take_ident()
+            arg_pos: int | None = None
             lex.skip_ws_and_comments()
+            if lex.peek() == "@":
+                lex.take()  # '@'
+                lex.skip_ws_and_comments()
+                # Read a positive integer.
+                num_start = lex.position()
+                digits = []
+                while lex.peek().isdigit():
+                    digits.append(lex.take())
+                if not digits:
+                    raise ReaderError(
+                        f"{lex.filename}:{num_start.line}:{num_start.column}: "
+                        f"expected RHS position number after '@' in !{{{act_name}@...}}"
+                    )
+                arg_pos = int("".join(digits))
+                if arg_pos < 1:
+                    raise ReaderError(
+                        f"{lex.filename}:{num_start.line}:{num_start.column}: "
+                        f"!{{...@N}} position must be 1-indexed and positive (got {arg_pos})"
+                    )
+                lex.skip_ws_and_comments()
             if lex.peek() != "}":
                 raise ReaderError(
                     f"{lex.filename}:{lex.line}:{lex.col}: expected '}}' to close !{{{act_name}}}"
@@ -1187,6 +1212,7 @@ def _parse_production(lex: _RulesLexer) -> Production:
                     f"(was {post_action!r}, now {act_name!r})"
                 )
             post_action = act_name
+            post_action_arg_pos = arg_pos
             continue
         if c == "%":
             keyword_pos = lex.position()
@@ -1258,6 +1284,7 @@ def _parse_production(lex: _RulesLexer) -> Production:
     return Production(
         rhs=rhs, action=action, hook=hook, ast_kind=ast_kind, position=prod_pos,
         predicate=predicate, post_action=post_action,
+        post_action_arg_pos=post_action_arg_pos,
     )
 
 

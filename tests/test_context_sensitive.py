@@ -132,6 +132,39 @@ def _seed_user(state: dict):
 # ---- Phase 2: action --------------------------------------------------------
 
 
+def test_action_with_positional_arg():
+    """`!{name@N}` passes children[N-1] of the reduced production to
+    the action instead of the whole subtree."""
+    src = """
+        %grammar acttest_pos
+        %keyword_prefix KW_
+        %keywords
+        using
+        %tokens
+        WS = /[ \\t\\n]+/ %skip
+        IDENT = /[A-Za-z_][A-Za-z0-9_]*/
+        SEMI = ';'
+        EQ = '='
+        %actions
+        record_name
+        %rules
+        <prog> : <items> ;
+        <items> : | <items> <item> ;
+        # `using IDENT = IDENT ;` — positions: 1=using 2=IDENT 3=EQ 4=IDENT 5=SEMI
+        # Test extracts position 2 (the LHS name only).
+        <item> : using IDENT EQ IDENT SEMI !{record_name@2} ;
+    """
+    table, scanner = _build(src)
+
+    seen: list[str] = []
+    actions = ActionRegistry()
+    actions.register("record_name", lambda ctx, child: seen.append(child.text))
+
+    tokens = list(scanner.scan("using Foo = Bar;"))
+    parse(table, tokens, actions=actions, hooks=HookRegistry(ignore_missing=True))
+    assert seen == ["Foo"]
+
+
 def test_action_fires_after_reduce():
     """An action registered via %actions + !{name} runs after each
     reduction of the annotated production."""

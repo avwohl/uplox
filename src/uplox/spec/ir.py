@@ -109,6 +109,10 @@ class Production:
     position: Optional[Position] = None
     predicate: Optional[str] = None
     post_action: Optional[str] = None
+    post_action_arg_pos: Optional[int] = None
+    """1-indexed RHS position to pass to ``post_action`` instead of the
+    full reduced subtree. Set by the ``!{name@N}`` grammar syntax. ``None``
+    means the action receives the whole ParseNode (legacy behaviour)."""
 
 
 @dataclass

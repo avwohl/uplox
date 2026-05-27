@@ -138,6 +138,8 @@ def table_to_json(table: LRTable) -> dict[str, Any]:
             entry["predicate"] = p.predicate
         if p.post_action is not None:
             entry["post_action"] = p.post_action
+        if p.post_action_arg_pos is not None:
+            entry["post_action_arg_pos"] = p.post_action_arg_pos
         productions_json.append(entry)
 
     # Group ACTION and GOTO by state for compact, locality-friendly JSON.
@@ -206,6 +208,7 @@ def table_from_json(section: dict[str, Any]) -> LRTable:
             user_index=p.get("user_index", -1),
             predicate=p.get("predicate"),
             post_action=p.get("post_action"),
+            post_action_arg_pos=p.get("post_action_arg_pos"),
         ))
 
     non_terminals = set(section["non_terminals"])

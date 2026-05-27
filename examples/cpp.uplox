@@ -86,6 +86,13 @@ start = translation_unit
 # Note: these are additive to the host's whole-file pre-pass. They
 # do NOT replace `_rewrite_ident_types`; they're the migration
 # destination once the pre-pass is retired pass-by-pass.
+#
+# `register_type_from_class_head` is intentionally NOT enabled yet —
+# the runtime classifier lacks the declaration-position context that
+# the pre-pass uses to keep the class name as IDENT inside its own
+# constructor declarators (`class Foo { Foo(int v) { } };`). Until
+# the API grows a declaration-vs-use predicate or scope-stack
+# helper, the pre-pass remains the authority for class names.
 register_type_from_using_alias
 
 %shift
@@ -467,7 +474,7 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                     | 'using' 'typename' <nested_name_spec> IDENT_TYPE ';'
                     ;
 
-<alias_declaration> : 'using' IDENT '=' <type_id> ';' !{register_type_from_using_alias}
+<alias_declaration> : 'using' IDENT '=' <type_id> ';' !{register_type_from_using_alias@2}
                     ;
 
 <typedef_declaration> : 'typedef' <decl_specs> <init_declarator_list> ';'

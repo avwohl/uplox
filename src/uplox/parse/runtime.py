@@ -498,8 +498,20 @@ def _do_reduce(ctx: ParseContext, prod_index: int) -> None:
     # the production's ``!{name}`` annotation, if any. Fires after the
     # post_reduce hook so a production with both gets the hook first
     # (analysis) then the action (state-mutating).
+    #
+    # Per-position targeting (``!{name@N}``): when set, pass the
+    # specific RHS child to the callback instead of the whole reduced
+    # subtree. The runtime captured `rhs_vals` before popping the
+    # value stack, so child indices are 1-indexed against that list.
     if prod.post_action is not None:
-        ctx.actions.fire(ctx, prod.post_action, new_value)
+        if prod.post_action_arg_pos is not None:
+            idx = prod.post_action_arg_pos - 1
+            if 0 <= idx < len(rhs_vals):
+                ctx.actions.fire(ctx, prod.post_action, rhs_vals[idx])
+            else:
+                ctx.actions.fire(ctx, prod.post_action, new_value)
+        else:
+            ctx.actions.fire(ctx, prod.post_action, new_value)
 
 
 def _fire_pre_shift(ctx: ParseContext, tok: Token) -> None:

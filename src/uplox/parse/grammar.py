@@ -56,6 +56,7 @@ class CompiledProduction:
     user_index: int = -1
     predicate: str | None = None
     post_action: str | None = None
+    post_action_arg_pos: int | None = None
     """Index into the user's original Production list, or -1 for the augmented start."""
 
 
@@ -237,6 +238,12 @@ def compile_grammar(ir: GrammarIR) -> Grammar:
                     f"action {prod.post_action!r}; declare it in an "
                     f"`%actions` section first"
                 )
+            if (prod.post_action_arg_pos is not None
+                    and prod.post_action_arg_pos > len(rhs_resolved)):
+                raise GrammarError(
+                    f"production at {prod.position}: !{{...@{prod.post_action_arg_pos}}} "
+                    f"position is past the RHS length {len(rhs_resolved)}"
+                )
             grammar.productions.append(
                 CompiledProduction(
                     index=len(grammar.productions),
@@ -247,6 +254,7 @@ def compile_grammar(ir: GrammarIR) -> Grammar:
                     user_index=user_idx,
                     predicate=prod.predicate,
                     post_action=prod.post_action,
+                    post_action_arg_pos=prod.post_action_arg_pos,
                 )
             )
             user_idx += 1
