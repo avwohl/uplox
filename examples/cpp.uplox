@@ -100,6 +100,9 @@ register_type_from_concept
 register_namespace
 register_imported_name
 
+%predicates
+enum_is_elaborated_use
+
 %shift
 KW_ELSE
 LBRACK
@@ -527,8 +530,8 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 # To reference a type-key-prefixed class, use `typename` —
 # `typename ::Foo p;` instead of `class Foo p;`. Forward
 # declarations use the `<forward_decl>` top-level rule.
-<elaborated_type_spec> : 'enum' IDENT_TYPE
-                       | 'enum' IDENT
+<elaborated_type_spec> : 'enum' IDENT_TYPE ?{enum_is_elaborated_use}
+                       | 'enum' IDENT ?{enum_is_elaborated_use}
                        | 'enum' <nested_name_spec> IDENT_TYPE
                        | 'enum' <nested_name_spec> IDENT
                        | 'typename' <nested_name_spec> IDENT
@@ -891,12 +894,10 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 <enum_specifier> : <enum_head> '{' <enumerator_list_opt> '}'
                  ;
 
-<enum_head> : 'enum' <enum_key_opt> <enum_head_name_opt> <enum_base_opt>
+<enum_head> : 'enum' <enum_head_name_opt> <enum_base_opt>
+            | 'enum' 'class' <enum_head_name_opt> <enum_base_opt>
+            | 'enum' 'struct' <enum_head_name_opt> <enum_base_opt>
             ;
-
-<enum_key_opt> : 'class' | 'struct'
-               |
-               ;
 
 <enum_head_name_opt> : IDENT !{register_type_from_class_head@1}
                      | IDENT_TYPE

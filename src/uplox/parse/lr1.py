@@ -359,18 +359,24 @@ def _apply_mapping(canonical: LRTable, mapping: list[int]) -> LRTable:
         for action in conflict.actions:
             _record_action(new_table, new_state, conflict.terminal, _translate(action))
 
+    # Track which canonical states contributed which GOTO targets so
+    # we can produce a useful diagnostic if the invariant fails.
+    goto_origin: dict[tuple[int, str], list[tuple[int, int]]] = {}
     for (state_id, nt), target in canonical.goto.items():
         new_state = mapping[state_id]
         new_target = mapping[target]
         existing = new_table.goto.get((new_state, nt))
+        goto_origin.setdefault((new_state, nt), []).append((state_id, target))
         if existing is not None and existing != new_target:
             # GOTO targets must agree across canonical states that
             # share an LR(0) core (and thus share GOTO behaviour).
             # IELR/LALR only ever merge core-identical states, so this
             # disagreement would be a builder bug, not a grammar bug.
+            origins = goto_origin.get((new_state, nt), [])
+            origin_str = ', '.join(f'canonical[{s}]->canonical[{t}]={mapping[t]}' for s, t in origins)
             raise AssertionError(
                 f"merge: GOTO[{new_state}, {nt!r}] disagreement: "
-                f"{existing} vs {new_target}"
+                f"{existing} vs {new_target}\n  origins: {origin_str}"
             )
         new_table.goto[(new_state, nt)] = new_target
 
@@ -433,6 +439,27 @@ def build_ielr1(grammar: Grammar) -> LRTable:
                 next_id += 1
         return mapping
 
+    # Reverse-GOTO index: target canonical state → list of (source, nt).
+    # Used to propagate splits backward: if Y is split into a singleton,
+    # any predecessor X with GOTO[X, sym] = Y must also be a singleton
+    # so the merged GOTO cells remain consistent.
+    predecessors: dict[int, list[int]] = {}
+    for (src, _nt), tgt in canonical.goto.items():
+        predecessors.setdefault(tgt, []).append(src)
+
+    def _propagate_singletons(seeds: set[int]) -> set[int]:
+        """Closure: add every canonical predecessor of a singleton state
+        to the singleton set. Repeat until fixpoint."""
+        out: set[int] = set(seeds)
+        worklist = list(seeds)
+        while worklist:
+            s = worklist.pop()
+            for pred in predecessors.get(s, ()):
+                if pred not in out:
+                    out.add(pred)
+                    worklist.append(pred)
+        return out
+
     # Hard cap: at most n_states iterations; in practice usually 1.
     for _ in range(n_states + 1):
         mapping = _build_mapping()
@@ -460,7 +487,13 @@ def build_ielr1(grammar: Grammar) -> LRTable:
 
         if not new_singletons:
             return table
-        forced_singletons.update(new_singletons)
+        # Propagate the new singletons backward through GOTOs: when a
+        # state Y is forced to a singleton, every predecessor X (in
+        # canonical state space) that GOTOs to Y on some non-terminal
+        # must also be split. Otherwise two same-core predecessors that
+        # share the same merged ID could end up with disagreeing GOTO
+        # cells (one to Y-as-singleton, one to a still-merged successor).
+        forced_singletons.update(_propagate_singletons(new_singletons))
 
     # Should be unreachable: if every state becomes a singleton, the table
     # equals canonical LR(1) and has no spurious conflicts. Surface as an
