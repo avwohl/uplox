@@ -105,6 +105,19 @@ enter_init_decl_list
 enum_is_elaborated_use
 class_is_elaborated_use
 
+%state_set
+# `declarator_position` — states where an IDENT is being introduced
+# as a declarator-id rather than used as a value/type. The C++
+# frontend's IDENT classifier reads this to suppress
+# IDENT -> IDENT_TYPE promotion for declarator names (constructor
+# names, function names, variable names, etc.).
+declarator_position : declarator_id unqualified_id
+# `type_position` — states where an IDENT could become a type-name.
+# Promotion to IDENT_TYPE is gated on being IN this set AND NOT in
+# `declarator_position` (declarators win — `Foo Foo` is type Foo,
+# variable Foo).
+type_position : type_name simple_type_spec elaborated_type_spec type_id nested_name_spec
+
 %shift
 KW_ELSE
 LBRACK
