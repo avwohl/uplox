@@ -5,6 +5,34 @@ All notable changes to uplox land here. Format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) for the public
 surface (CLI, JSON bundle schema, Python API, hook firing points).
 
+## Unreleased
+
+### Added
+
+- **Classifier lookahead window** (Phase 1 extension). A classifier
+  callback may now accept a third positional parameter — a
+  `LookaheadView` over the upcoming raw tokens. `view.peek(n)` returns
+  up to `n` upcoming tokens; `view.peek_one()` returns the first or
+  `None`. Peeked tokens are buffered into the token stream and served
+  to the parser on subsequent fetches, so each source token is fetched
+  exactly once. The signature is detected by `inspect.signature` and
+  cached per callback — existing two-arg `(text, ctx) -> name`
+  callbacks are unaffected.
+
+  Unlocks classifier decisions that need to look INSIDE a token group
+  before committing — C-style cast `(type)expr` vs paren-expr `(expr)`,
+  C++ vexing-parse `T x(arg)` (fn-decl vs var-init), assignment-in-call
+  `f(x = 0)`, and other multi-token-lookahead disambiguations.
+
+- **IELR backward-propagation fix**. When the IELR refinement step
+  splits a state Y into a singleton merge group (because the merged
+  table introduced a spurious conflict), predecessors of Y in the
+  GOTO graph must also be split. Otherwise two same-LR(0)-core
+  predecessors that share a merged ID can have disagreeing GOTO cells,
+  tripping the `apply_mapping` invariant assertion. The fix is a
+  closure step that propagates splits backward through canonical-state
+  GOTO predecessors until fixpoint.
+
 ## 3.2.0 — 2026-05-25
 
 Per-grammar `TokenKind` IntEnum across the lexer / scanner / Python
