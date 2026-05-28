@@ -1227,11 +1227,11 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 # optionally followed by `...` for pack expansion. The
 # pack-expansion `f(args...)` is a C++11 feature for
 # unpacking parameter packs into argument positions.
-<expression_list> : <conditional_expr>
-                  | <conditional_expr> ELLIPSIS
+<expression_list> : <assignment_expr>
+                  | <assignment_expr> ELLIPSIS
                   | <braced_init_list>
-                  | <expression_list> ',' <conditional_expr>
-                  | <expression_list> ',' <conditional_expr> ELLIPSIS
+                  | <expression_list> ',' <assignment_expr>
+                  | <expression_list> ',' <assignment_expr> ELLIPSIS
                   | <expression_list> ',' <braced_init_list>
                   ;
 
