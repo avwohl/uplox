@@ -355,6 +355,7 @@ DOT        = '.'
 LT_TEMPLATE  = 'LT_TEMPLATE_SYNTHETIC_NEVER_EMITTED'
 GT_TEMPLATE  = 'GT_TEMPLATE_SYNTHETIC_NEVER_EMITTED'
 LPAREN_CAST  = 'LPAREN_CAST_SYNTHETIC_NEVER_EMITTED'
+LPAREN_INIT  = 'LPAREN_INIT_SYNTHETIC_NEVER_EMITTED'
 IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 
 %rules
@@ -793,6 +794,7 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 <initializer> : '=' <conditional_expr>
               | '=' <braced_init_list>
               | '(' <expression_list_opt> ')'
+              | LPAREN_INIT <expression_list_opt> ')'
               | <braced_init_list>
               ;
 
@@ -1318,9 +1320,11 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 
 <new_expr> : 'new' <type_id>
            | 'new' <type_id> '(' <expression_list_opt> ')'
+           | 'new' <type_id> LPAREN_INIT <expression_list_opt> ')'
            | 'new' <type_id> <braced_init_list>
            | 'new' '(' <expression_list> ')' <type_id>
            | 'new' '(' <expression_list> ')' <type_id> '(' <expression_list_opt> ')'
+           | 'new' '(' <expression_list> ')' <type_id> LPAREN_INIT <expression_list_opt> ')'
            | 'new' '(' <expression_list> ')' <type_id> <braced_init_list>
            ;
 
