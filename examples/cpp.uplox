@@ -99,6 +99,7 @@ register_type_from_class_head
 register_type_from_concept
 register_namespace
 register_imported_name
+enter_init_decl_list
 
 %predicates
 enum_is_elaborated_use
@@ -633,10 +634,10 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                        | <init_declarator_list> ',' <init_declarator>
                        ;
 
-<init_declarator> : <declarator>
-                  | <declarator> <initializer>
-                  | <declarator> '=' 'default'
-                  | <declarator> '=' 'delete'
+<init_declarator> : <declarator> !{enter_init_decl_list}
+                  | <declarator> <initializer> !{enter_init_decl_list}
+                  | <declarator> '=' 'default' !{enter_init_decl_list}
+                  | <declarator> '=' 'delete' !{enter_init_decl_list}
                   ;
 
 # --- declarators ---------------------------------------------------------
