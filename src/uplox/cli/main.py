@@ -237,6 +237,184 @@ def _cmd_check(args: argparse.Namespace) -> int:
     return 1 if parser_conflicts else 0
 
 
+def _format_item(grammar, prod_idx: int, dot: int, la: str) -> str:
+    """Render an LR(1) item `<lhs>: alpha . beta ; lookahead`."""
+    prod = grammar.productions[prod_idx]
+    rhs = list(prod.rhs)
+    rhs.insert(dot, ".")
+    rhs_str = " ".join(rhs)
+    return f"<{prod.lhs}> : {rhs_str}    [ {la} ]"
+
+
+def _cmd_explain_state(args: argparse.Namespace) -> int:
+    """Dump the LR items, actions, and GOTOs for a given state.
+
+    Reads the grammar source (rebuilds the table to recover the items),
+    then prints a human-readable summary of `state_id`. Useful for
+    debugging IELR state-divergence and "why doesn't this token shift
+    here?" questions where the bundle alone (which discards items)
+    isn't enough.
+    """
+    try:
+        ir = read_file(args.source)
+        grammar = compile_grammar(ir)
+        table = build_table(grammar)
+    except (ReaderError, ValueError, GrammarError) as e:
+        print(str(e), file=sys.stderr)
+        return 1
+
+    sid = args.state_id
+    if sid < 0 or sid >= len(table.states):
+        print(
+            f"state {sid} out of range (table has {len(table.states)} states)",
+            file=sys.stderr,
+        )
+        return 1
+
+    items = sorted(table.states[sid])
+    print(f"=== State {sid} ===")
+    print(f"  {len(items)} item(s):")
+    for prod_idx, dot, la in items:
+        print(f"    {_format_item(table.grammar, prod_idx, dot, la)}")
+
+    actions = sorted(
+        (term, act) for (state, term), act in table.action.items()
+        if state == sid
+    )
+    print(f"\n  Actions ({len(actions)}):")
+    for term, act in actions:
+        print(f"    on {term:<22} -> {act}")
+
+    gotos = sorted(
+        (nt, tgt) for (state, nt), tgt in table.goto.items()
+        if state == sid
+    )
+    if gotos:
+        print(f"\n  GOTOs ({len(gotos)}):")
+        for nt, tgt in gotos:
+            print(f"    on <{nt}> -> state {tgt}")
+
+    # Reverse-direction: what states transition INTO this state?
+    incoming_shifts: list[tuple[int, str]] = []
+    incoming_gotos: list[tuple[int, str]] = []
+    for (src, sym), act in table.action.items():
+        from ..parse.lr1 import ShiftAction
+        if isinstance(act, ShiftAction) and act.state == sid:
+            incoming_shifts.append((src, sym))
+    for (src, sym), tgt in table.goto.items():
+        if tgt == sid:
+            incoming_gotos.append((src, sym))
+    if incoming_shifts or incoming_gotos:
+        print(f"\n  Reached from:")
+        for src, sym in sorted(incoming_shifts):
+            print(f"    state {src} shifts {sym}")
+        for src, sym in sorted(incoming_gotos):
+            print(f"    state {src} gotos <{sym}>")
+
+    if sid in table.default_reductions:
+        print(f"\n  Default reduction: {table.default_reductions[sid]}")
+
+    if sid in table.state_set_membership:
+        print(
+            f"\n  State sets: {sorted(table.state_set_membership[sid])}"
+        )
+    return 0
+
+
+def _cmd_diff_states(args: argparse.Namespace) -> int:
+    """Diff two states' items, actions, and GOTOs.
+
+    Use case: an IELR state-divergence bug — you expect two states
+    reached via different production paths to behave identically, but
+    they don't. This shows exactly which items / actions / GOTOs differ
+    so you can identify the merge that should have happened.
+    """
+    try:
+        ir = read_file(args.source)
+        grammar = compile_grammar(ir)
+        table = build_table(grammar)
+    except (ReaderError, ValueError, GrammarError) as e:
+        print(str(e), file=sys.stderr)
+        return 1
+
+    a, b = args.state_a, args.state_b
+    nstates = len(table.states)
+    if a < 0 or a >= nstates or b < 0 or b >= nstates:
+        print(
+            f"state out of range (table has {nstates} states)",
+            file=sys.stderr,
+        )
+        return 1
+
+    items_a = {(p, d) for (p, d, _la) in table.states[a]}
+    items_b = {(p, d) for (p, d, _la) in table.states[b]}
+    actions_a = {
+        term: act for (state, term), act in table.action.items()
+        if state == a
+    }
+    actions_b = {
+        term: act for (state, term), act in table.action.items()
+        if state == b
+    }
+    gotos_a = {
+        nt: tgt for (state, nt), tgt in table.goto.items() if state == a
+    }
+    gotos_b = {
+        nt: tgt for (state, nt), tgt in table.goto.items() if state == b
+    }
+
+    print(f"=== Diff state {a} vs state {b} ===")
+    only_a = items_a - items_b
+    only_b = items_b - items_a
+    print(f"\n  Items only in {a} ({len(only_a)}):")
+    for p, d in sorted(only_a):
+        prod = table.grammar.productions[p]
+        rhs = list(prod.rhs)
+        rhs.insert(d, ".")
+        print(f"    <{prod.lhs}> : {' '.join(rhs)}")
+    print(f"\n  Items only in {b} ({len(only_b)}):")
+    for p, d in sorted(only_b):
+        prod = table.grammar.productions[p]
+        rhs = list(prod.rhs)
+        rhs.insert(d, ".")
+        print(f"    <{prod.lhs}> : {' '.join(rhs)}")
+
+    only_act_a = set(actions_a) - set(actions_b)
+    only_act_b = set(actions_b) - set(actions_a)
+    diff_act = {
+        t for t in set(actions_a) & set(actions_b)
+        if actions_a[t] != actions_b[t]
+    }
+    if only_act_a or only_act_b or diff_act:
+        print(f"\n  Action differences:")
+        for t in sorted(only_act_a):
+            print(f"    only {a}: on {t} -> {actions_a[t]}")
+        for t in sorted(only_act_b):
+            print(f"    only {b}: on {t} -> {actions_b[t]}")
+        for t in sorted(diff_act):
+            print(f"    on {t}: {a} -> {actions_a[t]} ; {b} -> {actions_b[t]}")
+    else:
+        print(f"\n  Actions: identical ({len(actions_a)} entries)")
+
+    only_g_a = set(gotos_a) - set(gotos_b)
+    only_g_b = set(gotos_b) - set(gotos_a)
+    diff_g = {
+        nt for nt in set(gotos_a) & set(gotos_b)
+        if gotos_a[nt] != gotos_b[nt]
+    }
+    if only_g_a or only_g_b or diff_g:
+        print(f"\n  GOTO differences:")
+        for nt in sorted(only_g_a):
+            print(f"    only {a}: on <{nt}> -> {gotos_a[nt]}")
+        for nt in sorted(only_g_b):
+            print(f"    only {b}: on <{nt}> -> {gotos_b[nt]}")
+        for nt in sorted(diff_g):
+            print(f"    on <{nt}>: {a} -> {gotos_a[nt]} ; {b} -> {gotos_b[nt]}")
+    else:
+        print(f"\n  GOTOs: identical ({len(gotos_a)} entries)")
+    return 0
+
+
 def _cmd_emit(args: argparse.Namespace) -> int:
     import json as _json
     import os as _os
@@ -333,6 +511,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="parse with the GLR runtime (handles ambiguous grammars; produces a parse forest)",
     )
     p_parse.set_defaults(func=_cmd_parse)
+
+    p_explain = sub.add_parser(
+        "explain-state",
+        help="dump items, actions, and GOTOs for a single LR state (debug aid)",
+    )
+    p_explain.add_argument("source", help="path to .uplox source file")
+    p_explain.add_argument(
+        "state_id", type=int,
+        help="LR state ID to explain (0-based; see `uplox check`)",
+    )
+    p_explain.set_defaults(func=_cmd_explain_state)
+
+    p_diff = sub.add_parser(
+        "diff-states",
+        help="diff two LR states' items, actions, and GOTOs (IELR-divergence debug aid)",
+    )
+    p_diff.add_argument("source", help="path to .uplox source file")
+    p_diff.add_argument("state_a", type=int, help="first state ID")
+    p_diff.add_argument("state_b", type=int, help="second state ID")
+    p_diff.set_defaults(func=_cmd_diff_states)
 
     p_emit = sub.add_parser("emit", help="emit a C driver from a bundle (--target=c is supported in Phase 7)")
     p_emit.add_argument("bundle", help="path to JSON bundle")

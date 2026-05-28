@@ -292,6 +292,60 @@ def test_build_surfaces_ast_plan_error(tmp_path, capsys):
     assert not out.exists()
 
 
+def test_explain_state_dumps_items_and_actions(tmp_path, capsys):
+    """`uplox explain-state` prints items, actions, and GOTOs for a state."""
+    src = write_calc_grammar(tmp_path)
+    rc = main(["explain-state", str(src), "0"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "State 0" in out
+    assert "item(s)" in out
+    # Initial state has items expecting expr / NUMBER.
+    assert "expr" in out or "NUMBER" in out
+    assert "Actions" in out
+
+
+def test_explain_state_rejects_out_of_range(tmp_path, capsys):
+    src = write_calc_grammar(tmp_path)
+    rc = main(["explain-state", str(src), "9999"])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "out of range" in err
+
+
+def test_explain_state_shows_reached_from(tmp_path, capsys):
+    """For a non-initial state, the output names states/symbols that
+    reach it. Useful for tracing where a divergent state came from."""
+    src = write_calc_grammar(tmp_path)
+    # State 1 is whatever the grammar happens to produce; we just check
+    # that the "Reached from:" section appears for a non-start state.
+    rc = main(["explain-state", str(src), "1"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Reached from" in out
+
+
+def test_diff_states_compares_two_states(tmp_path, capsys):
+    """`uplox diff-states` reports item / action / GOTO differences."""
+    src = write_calc_grammar(tmp_path)
+    rc = main(["diff-states", str(src), "0", "1"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Diff state 0 vs state 1" in out
+    # Either items differ (most cases) or are identical.
+    assert "Items only in" in out or "identical" in out
+
+
+def test_diff_states_same_state_shows_identical(tmp_path, capsys):
+    """A state diffed against itself reports identical."""
+    src = write_calc_grammar(tmp_path)
+    rc = main(["diff-states", str(src), "0", "0"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    # No items differ when comparing a state to itself.
+    assert "Items only in 0 (0)" in out
+
+
 def test_check_reports_conflicts(tmp_path, capsys):
     src = tmp_path / "amb.uplox"
     src.write_text(
