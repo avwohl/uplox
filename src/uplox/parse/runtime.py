@@ -390,6 +390,29 @@ class ParseContext:
     def grammar(self) -> Grammar:
         return self.table.grammar
 
+    def in_state_set(self, name: str) -> bool:
+        """Return True if the current LR state is in the named
+        ``%state_set`` declared by the grammar.
+
+        Use this from classifier/predicate callbacks to answer parse-
+        state questions like "am I currently parsing a declarator?"
+        without inspecting raw state numbers. The grammar declares
+        the named set::
+
+            %state_set
+            declarator_position : noptr_declarator init_declarator
+
+        and at build time the LR builder precomputes which states have
+        an in-progress item for any listed LHS. This lookup is O(1).
+        """
+        if not self.state_stack:
+            return False
+        state = self.state_stack[-1]
+        memberships = self.table.state_set_membership.get(state)
+        if memberships is None:
+            return False
+        return name in memberships
+
 
 class ParseError(Exception):
     def __init__(self, message: str, token: Optional[Token] = None):

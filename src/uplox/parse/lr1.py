@@ -149,6 +149,11 @@ class LRTable:
     update host state from the resulting reduce's hooks before the next
     action lookup. Without this, canonical LR(1) errors before the reduce
     can fire — see uplox.hooks.TypedefTracker for the canonical use case."""
+    state_set_membership: dict[int, frozenset[str]] = field(default_factory=dict)
+    """state_id -> set of `%state_set` names this state belongs to. A state
+    is in a set if any of its LR(0) items has an in-progress (dot not at
+    end) production whose LHS is listed in the set. Queried at runtime
+    via :meth:`ParseContext.in_state_set`."""
 
 
 # ---- Closure / goto ----------------------------------------------------------
@@ -271,6 +276,7 @@ def build_lr1(grammar: Grammar) -> LRTable:
                 _record_action(table, state_id, la, ReduceAction(prod_idx))
 
     _compute_default_reductions(table)
+    _compute_state_set_membership(table)
     return table
 
 
@@ -381,6 +387,7 @@ def _apply_mapping(canonical: LRTable, mapping: list[int]) -> LRTable:
         new_table.goto[(new_state, nt)] = new_target
 
     _compute_default_reductions(new_table)
+    _compute_state_set_membership(new_table)
     return new_table
 
 
@@ -519,6 +526,46 @@ def build_table(grammar: Grammar) -> LRTable:
         f"unknown grammar.lr_type {grammar.lr_type!r}; "
         f"expected one of 'canonical-lr', 'lalr', 'ielr'"
     )
+
+
+def _compute_state_set_membership(table: LRTable) -> None:
+    """Populate :attr:`LRTable.state_set_membership` from the grammar's
+    declared `%state_set` directives.
+
+    A state is "in" the set iff some item in the state has an LHS
+    listed in the set, OR has the named LHS appearing as one of the
+    not-yet-consumed RHS symbols (i.e. the dot is to the left of that
+    symbol). The first condition catches "currently parsing X" /
+    "about to reduce X"; the second catches "about to start X" /
+    closure-expected. Together they answer the intuitive question
+    "is X anywhere in the parser's current expectation tree?"
+    """
+    state_sets = table.grammar.state_sets
+    if not state_sets:
+        return
+    # Flatten the union of all set-listed LHSs once for fast scanning.
+    all_named: set[str] = set()
+    for lhss in state_sets.values():
+        all_named.update(lhss)
+    productions = table.grammar.productions
+    for state_id, items in enumerate(table.states):
+        active_lhss: set[str] = set()
+        for prod_idx, dot_pos, _la in items:
+            prod = productions[prod_idx]
+            if prod.lhs in all_named:
+                active_lhss.add(prod.lhs)
+            # Also include LHSs that appear in the not-yet-consumed
+            # RHS suffix — those are non-terminals the parser is
+            # about to descend into via closure.
+            for sym in prod.rhs[dot_pos:]:
+                if sym in all_named:
+                    active_lhss.add(sym)
+        memberships = {
+            name for name, lhss in state_sets.items()
+            if lhss & active_lhss
+        }
+        if memberships:
+            table.state_set_membership[state_id] = frozenset(memberships)
 
 
 def _compute_default_reductions(table: LRTable) -> None:

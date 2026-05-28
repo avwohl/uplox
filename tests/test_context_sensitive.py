@@ -249,6 +249,137 @@ def test_classifier_peek_handles_eof_short():
     assert last_peek[0] <= 3
 
 
+# ---- Phase 1 extension: named state sets ------------------------------------
+
+
+def test_state_set_membership_basic():
+    """A grammar with a `%state_set` declaration: at parse time, the
+    classifier can ask `ctx.in_state_set("inside_x")` and get the
+    correct answer."""
+    src = """
+        %grammar ssettest
+        %tokens
+        WS = /[ \\t\\n]+/ %skip
+        IDENT = /[A-Za-z_][A-Za-z0-9_]*/
+        TYPEDEF_NAME = /__never_matches__/
+        LPAREN = '('
+        RPAREN = ')'
+        SEMI = ';'
+        %classifier
+        IDENT -> TYPEDEF_NAME
+        %state_set
+        inside_args : args
+        %rules
+        <prog> : <items> ;
+        <items> : | <items> <item> ;
+        <item> : IDENT SEMI | IDENT LPAREN <args> RPAREN SEMI ;
+        <args> : | <args> IDENT ;
+    """
+    table, scanner = _build(src)
+    assert "inside_args" in table.grammar.state_sets
+
+    seen_inside: dict[str, bool] = {}
+
+    def classify(text, ctx):
+        # Record the FIRST in-state observation for each name; later
+        # re-classifications may fire after reductions advance the
+        # parser into different states.
+        if text not in seen_inside:
+            seen_inside[text] = ctx.in_state_set("inside_args")
+        return "IDENT"
+
+    cls = ClassifierRegistry()
+    cls.register("IDENT", classify)
+    tokens = list(scanner.scan("a; b(c d) ;"))
+    parse(table, tokens, classifiers=cls,
+          hooks=HookRegistry(ignore_missing=True))
+    # `a` and `b` are outside the parens; `c` and `d` are inside.
+    assert seen_inside == {"a": False, "b": False, "c": True, "d": True}
+
+
+def test_state_set_unknown_returns_false():
+    """Querying an undeclared state-set name returns False, never
+    raises."""
+    src = """
+        %grammar ssetfalse
+        %tokens
+        WS = /[ \\t\\n]+/ %skip
+        IDENT = /[A-Za-z_][A-Za-z0-9_]*/
+        TYPEDEF_NAME = /__never_matches__/
+        SEMI = ';'
+        %classifier
+        IDENT -> TYPEDEF_NAME
+        %rules
+        <prog> : <items> ;
+        <items> : | <items> IDENT SEMI ;
+    """
+    table, scanner = _build(src)
+
+    result: list[bool] = []
+    cls = ClassifierRegistry()
+    cls.register(
+        "IDENT",
+        lambda text, ctx: (result.append(ctx.in_state_set("does_not_exist")), "IDENT")[1],
+    )
+    tokens = list(scanner.scan("foo;"))
+    parse(table, tokens, classifiers=cls,
+          hooks=HookRegistry(ignore_missing=True))
+    # Classifier may fire multiple times for the same token via
+    # default-reduction re-classification; every fire must return False
+    # since the named set isn't declared.
+    assert all(r is False for r in result)
+    assert len(result) >= 1
+
+
+def test_state_set_round_trips_through_bundle():
+    """The `%state_set` declaration survives bundle JSON serialisation
+    and reconstruction. Per-state membership is preserved verbatim."""
+    src = """
+        %grammar ssetbundle
+        %tokens
+        WS = /[ \\t\\n]+/ %skip
+        IDENT = /[A-Za-z_][A-Za-z0-9_]*/
+        LPAREN = '('
+        RPAREN = ')'
+        SEMI = ';'
+        %state_set
+        inside_args : args
+        %rules
+        <prog> : <items> ;
+        <items> : | <items> <item> ;
+        <item> : IDENT SEMI | IDENT LPAREN <args> RPAREN SEMI ;
+        <args> : | <args> IDENT ;
+    """
+    table, _ = _build(src)
+    original = dict(table.state_set_membership)
+    serialised = table_to_json(table)
+    assert "state_sets" in serialised
+    assert serialised["state_sets"] == {"inside_args": ["args"]}
+    rebuilt = table_from_json(serialised)
+    assert rebuilt.state_set_membership == original
+    assert "inside_args" in rebuilt.grammar.state_sets
+
+
+def test_state_set_unknown_lhs_rejected():
+    """A `%state_set` entry referring to a non-existent non-terminal
+    is a build-time error (otherwise the runtime query would silently
+    always return False)."""
+    src = """
+        %grammar sseterr
+        %tokens
+        WS = /[ \\t\\n]+/ %skip
+        IDENT = /[A-Za-z_][A-Za-z0-9_]*/
+        SEMI = ';'
+        %state_set
+        broken : nonexistent_lhs
+        %rules
+        <prog> : <items> ;
+        <items> : | <items> IDENT SEMI ;
+    """
+    with pytest.raises(Exception, match="nonexistent_lhs"):
+        _build(src)
+
+
 # ---- Phase 2: action --------------------------------------------------------
 
 

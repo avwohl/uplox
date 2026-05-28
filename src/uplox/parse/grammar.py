@@ -104,6 +104,12 @@ class Grammar:
     """Lexer mode names declared via ``%modes``. ``modes[0]`` is the default
     mode; subsequent entries are alternative modes the lexer can switch
     into via mode-switch actions. Empty when the grammar has no modes."""
+    state_sets: dict[str, frozenset[str]] = field(default_factory=dict)
+    """Named LR-state sets — set name -> frozenset of non-terminal LHSs.
+    Populated from ``%state_set`` directives. At build time the LR table
+    computes per-state membership and the runtime exposes
+    ``ctx.in_state_set(name)`` so host callbacks can answer parse-state
+    questions without inspecting state numbers."""
 
     def is_terminal(self, sym: str) -> bool:
         return sym in self.terminals
@@ -289,6 +295,21 @@ def compile_grammar(ir: GrammarIR) -> Grammar:
     grammar.predicate_names = tuple(ir.predicates)
     grammar.action_names = tuple(ir.actions)
     grammar.modes = tuple(ir.modes)
+    for ss in ir.state_sets:
+        # Validate each listed LHS exists as a real non-terminal in
+        # the grammar — a typo here is otherwise silent (the runtime
+        # `in_state_set` would just return False on every query).
+        unknown = [
+            lhs for lhs in ss.lhss
+            if lhs not in grammar.productions_by_lhs
+            and not any(p.lhs == lhs for p in grammar.productions)
+        ]
+        if unknown:
+            raise GrammarError(
+                f"state_set {ss.name!r} references unknown non-terminal(s): "
+                f"{', '.join(unknown)}"
+            )
+        grammar.state_sets[ss.name] = frozenset(ss.lhss)
 
     for p in grammar.productions:
         grammar.productions_by_lhs.setdefault(p.lhs, []).append(p.index)

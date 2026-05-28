@@ -156,6 +156,8 @@ def table_to_json(table: LRTable) -> dict[str, Any]:
         entry: dict[str, Any] = {"id": s, "actions": actions, "gotos": gotos}
         if s in table.default_reductions:
             entry["default_reduction"] = table.default_reductions[s]
+        if s in table.state_set_membership:
+            entry["state_sets"] = sorted(table.state_set_membership[s])
         states_json.append(entry)
 
     out = {
@@ -182,6 +184,11 @@ def table_to_json(table: LRTable) -> dict[str, Any]:
         out["actions"] = list(g.action_names)
     if g.modes:
         out["modes"] = list(g.modes)
+    if g.state_sets:
+        out["state_sets"] = {
+            name: sorted(lhss)
+            for name, lhss in sorted(g.state_sets.items())
+        }
     return out
 
 
@@ -239,6 +246,10 @@ def table_from_json(section: dict[str, Any]) -> LRTable:
         grammar.action_names = tuple(section["actions"])
     if isinstance(section.get("modes"), list):
         grammar.modes = tuple(section["modes"])
+    state_sets_section = section.get("state_sets")
+    if isinstance(state_sets_section, dict):
+        for name, lhss in state_sets_section.items():
+            grammar.state_sets[name] = frozenset(lhss)
     for p in productions:
         grammar.productions_by_lhs.setdefault(p.lhs, []).append(p.index)
 
@@ -255,6 +266,8 @@ def table_from_json(section: dict[str, Any]) -> LRTable:
             table.goto[(s, sym)] = tgt
         if "default_reduction" in entry:
             table.default_reductions[s] = entry["default_reduction"]
+        if "state_sets" in entry:
+            table.state_set_membership[s] = frozenset(entry["state_sets"])
     # Older bundles (pre-default-reductions) don't carry the field, so we
     # recompute it from the action table — the result is byte-identical to
     # what the original build produced.

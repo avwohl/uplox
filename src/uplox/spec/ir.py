@@ -304,3 +304,26 @@ class GrammarIR:
     # actions push/pop the stack. ``modes[0]`` is the default; bundle
     # serialisation emits one DFA per mode.
     modes: list[str] = field(default_factory=list)
+    # Named LR-state sets (Phase-1 extension). Each entry binds a
+    # name to a list of non-terminal LHSs; at build time the LR
+    # builder computes which LR states have an in-progress item for
+    # any of those non-terminals, and the runtime exposes
+    # ``ctx.in_state_set(name)`` so host classifiers/predicates can
+    # answer parse-state questions like "am I currently inside a
+    # declarator?" without inspecting raw state numbers.
+    state_sets: list["StateSetDecl"] = field(default_factory=list)
+
+
+@dataclass
+class StateSetDecl:
+    """A ``%state_set`` directive: a named group of non-terminal LHSs.
+
+    A state is "in" the set if any of its LR(0) items has an in-
+    progress (dot not at end) production whose LHS is listed here.
+    Computed at build time, queried at runtime via
+    :meth:`ParseContext.in_state_set`.
+    """
+
+    name: str
+    lhss: list[str]
+    position: Optional[Position] = None

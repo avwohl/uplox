@@ -108,6 +108,7 @@ _SECTIONS = (
     "predicates",
     "actions",
     "modes",
+    "state_set",
 )
 _SECTION_RE = re.compile(r"\s*%(" + "|".join(_SECTIONS) + r")\b\s*(.*)$")
 _KEYWORD_PREFIX_RE = re.compile(r"\s*%keyword_prefix\s+(\S+)\s*$")
@@ -177,6 +178,8 @@ def read_source(text: str, filename: str = "<source>") -> GrammarIR:
             _parse_actions(ir, section_buf, filename)
         elif section == "modes":
             _parse_modes(ir, section_buf, filename)
+        elif section == "state_set":
+            _parse_state_set(ir, section_buf, filename)
         elif section == "rules":
             text = "\n".join(t for _l, t in section_buf)
             ir.options["__rules_text__"] = text
@@ -480,6 +483,55 @@ def _parse_modes(ir: GrammarIR, lines: list[tuple[int, str]], filename: str) -> 
                 )
             seen[word] = lineno
             ir.modes.append(word)
+
+
+def _parse_state_set(ir: GrammarIR, lines: list[tuple[int, str]], filename: str) -> None:
+    """Parse a ``%state_set`` section. Format::
+
+        %state_set
+        <name1> : <lhs1> <lhs2> <lhs3>
+        <name2> : <lhs4> <lhs5>
+
+    Each entry binds a name to a list of non-terminal LHS strings (the
+    `<…>` brackets are stripped). At build time, an LR state is "in"
+    the set if any of its LR(0) items has an in-progress (dot not at
+    end) production whose LHS is listed in the set.
+    """
+    from .ir import StateSetDecl
+
+    seen: dict[str, int] = {}
+    for lineno, line in lines:
+        if ":" not in line:
+            raise ReaderError(
+                f"{filename}:{lineno}: state_set entry must be `<name> : <lhs1> <lhs2>...`"
+            )
+        name_part, lhss_part = line.split(":", 1)
+        name = name_part.strip()
+        if not _KEYWORD_NAME_RE.fullmatch(name):
+            raise ReaderError(
+                f"{filename}:{lineno}: state_set name {name!r} is not a valid identifier"
+            )
+        if name in seen:
+            raise ReaderError(
+                f"{filename}:{lineno}: state_set {name!r} already declared at line {seen[name]}"
+            )
+        seen[name] = lineno
+        lhss = []
+        for word in lhss_part.split():
+            # Allow either `<name>` or bare `name`.
+            cleaned = word.strip()
+            if cleaned.startswith("<") and cleaned.endswith(">"):
+                cleaned = cleaned[1:-1]
+            if not _KEYWORD_NAME_RE.fullmatch(cleaned):
+                raise ReaderError(
+                    f"{filename}:{lineno}: state_set entry {word!r} is not a valid identifier"
+                )
+            lhss.append(cleaned)
+        if not lhss:
+            raise ReaderError(
+                f"{filename}:{lineno}: state_set {name!r} has no LHS members"
+            )
+        ir.state_sets.append(StateSetDecl(name=name, lhss=lhss))
 
 
 _KEYWORD_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
