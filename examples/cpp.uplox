@@ -385,6 +385,7 @@ LT_TEMPLATE  = 'LT_TEMPLATE_SYNTHETIC_NEVER_EMITTED'
 GT_TEMPLATE  = 'GT_TEMPLATE_SYNTHETIC_NEVER_EMITTED'
 LPAREN_CAST  = 'LPAREN_CAST_SYNTHETIC_NEVER_EMITTED'
 LPAREN_INIT  = 'LPAREN_INIT_SYNTHETIC_NEVER_EMITTED'
+LBRACE_FN    = 'LBRACE_FN_SYNTHETIC_NEVER_EMITTED'
 IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 
 %rules
@@ -1113,6 +1114,7 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 # --- statements ----------------------------------------------------------
 
 <compound_statement> : '{' <statements_opt> '}'
+                     | LBRACE_FN '}'
                      ;
 
 <statements_opt> : <statements>
