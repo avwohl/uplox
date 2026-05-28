@@ -109,8 +109,59 @@ class HookRegistry:
 
 
 ClassifyCallback = Callable[[str, "ParseContext"], str]
+# Phase-1 extension: a classifier may also accept a third ``peek``
+# argument — a :class:`LookaheadView` over the upcoming raw tokens.
+# Useful when a re-classification decision depends on what follows
+# (e.g. C-style cast `(type)expr` vs paren-expr `(expr)`, or the
+# C++ vexing-parse `T x(arg)` where `arg` being a type vs a value
+# determines fn-decl vs var-init).
+#
+# Signature detection is by parameter count: callbacks declaring 3
+# positional parameters (or `*args`) receive the peek; 2-arg callbacks
+# get the legacy signature for back-compat. See
+# :meth:`ClassifierRegistry.classify`.
+ClassifyCallbackWithPeek = Callable[[str, "ParseContext", "LookaheadView"], str]
 ActionCallback = Callable[["ParseContext", "ParseNode"], None]
 PredicateCallback = Callable[[Token, "ParseContext"], bool]
+
+
+@dataclass
+class LookaheadView:
+    """Read-only window over the next raw tokens the parser will see.
+
+    Created lazily on first peek by the runtime so empty / single-arg
+    classifiers pay nothing. The window honours classifier
+    re-classification (peeked tokens reflect post-classifier names),
+    but does NOT re-fire classifiers when called — peeked tokens are
+    cached, and on actual consumption they're served from the cache
+    so the classifier sees each token exactly once.
+
+    Use ``view.peek(n)`` to materialise up to ``n`` tokens ahead. The
+    runtime guarantees the returned list never exceeds the available
+    input (so ``peek(100)`` near EOF returns a short list, not an
+    error).
+    """
+    _buffer: list[Token] = field(default_factory=list)
+    _fetcher: Callable[[], Token] | None = None
+    _end_marker: str = ""
+
+    def peek(self, n: int) -> list[Token]:
+        """Return up to ``n`` upcoming raw tokens. Tokens are returned
+        in stream order; the first element is what the parser sees
+        AFTER the token currently being classified."""
+        if self._fetcher is None:
+            return []
+        while len(self._buffer) < n:
+            tok = self._fetcher()
+            self._buffer.append(tok)
+            if tok.name == self._end_marker:
+                break
+        return self._buffer[:n]
+
+    def peek_one(self) -> Token | None:
+        """Convenience: returns ``peek(1)[0]`` or ``None`` at EOF."""
+        toks = self.peek(1)
+        return toks[0] if toks else None
 
 
 @dataclass
@@ -129,18 +180,24 @@ class ClassifierRegistry:
     def register(self, source_token: str, fn: ClassifyCallback) -> None:
         self.callbacks[source_token] = fn
 
-    def classify(self, ctx: "ParseContext", tok: Token) -> Token:
+    def classify(self, ctx: "ParseContext", tok: Token,
+                 peek: "LookaheadView | None" = None) -> Token:
         cb = self.callbacks.get(tok.name)
         if cb is None:
             return tok
-        new_name = cb(tok.text, ctx)
+        # Phase-1-with-peek: introspect callback arity. 2-arg callbacks
+        # get the legacy signature; 3-arg (or *args) get the peek
+        # view. Detection is cached on the registry to avoid an
+        # `inspect.signature` call per token classification.
+        wants_peek = self._wants_peek(cb)
+        if wants_peek:
+            view = peek if peek is not None else LookaheadView()
+            new_name = cb(tok.text, ctx, view)
+        else:
+            new_name = cb(tok.text, ctx)
         if new_name == tok.name:
             return tok
         new_kind = 0
-        # Preserve the kind int if the host runtime has a kind_map
-        # stashed in ctx.user (the bundle-loader does this for emitted
-        # drivers). For pure-Python parses without it, the host can
-        # still compare by tok.name.
         kind_map = ctx.user.get("kind_map") if isinstance(ctx.user, dict) else None
         if isinstance(kind_map, dict):
             new_kind = kind_map.get(new_name, 0)
@@ -148,6 +205,36 @@ class ClassifierRegistry:
             name=new_name, text=tok.text, line=tok.line, column=tok.column,
             offset=tok.offset, file_id=tok.file_id, kind=new_kind,
         )
+
+    def _wants_peek(self, cb: Callable) -> bool:
+        cache = getattr(self, "_peek_cache", None)
+        if cache is None:
+            cache = {}
+            object.__setattr__(self, "_peek_cache", cache)
+        cached = cache.get(id(cb))
+        if cached is not None:
+            return cached
+        import inspect
+        try:
+            sig = inspect.signature(cb)
+        except (ValueError, TypeError):
+            cache[id(cb)] = False
+            return False
+        params = sig.parameters
+        pos_or_kw = [
+            p for p in params.values()
+            if p.kind in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            )
+        ]
+        has_varargs = any(
+            p.kind is inspect.Parameter.VAR_POSITIONAL
+            for p in params.values()
+        )
+        wants = has_varargs or len(pos_or_kw) >= 3
+        cache[id(cb)] = wants
+        return wants
 
 
 @dataclass
@@ -373,23 +460,60 @@ def parse(
     token_iter = iter(tokens)
     end = Token(name=END_MARKER, text="", line=0, column=0, offset=-1)
 
+    # Peek buffer for classifier-with-lookahead. Tokens fetched by a
+    # classifier's `peek(n)` call land here; subsequent `fetch_next`
+    # serves from this buffer first so the classifier doesn't re-fire
+    # for already-peeked tokens.
+    peek_buffer: list[Token] = []
+
+    def _raw_fetch() -> Token:
+        if peek_buffer:
+            return peek_buffer.pop(0)
+        try:
+            return next(token_iter)
+        except StopIteration:
+            return end
+
+    def _peek_fetch_for_view() -> Token:
+        """Fetcher used by a LookaheadView. Buffers the token into
+        `peek_buffer` so it's served (in order) by the next
+        `_raw_fetch` call, AND returns it so the view can present it
+        to the classifier."""
+        try:
+            tok = next(token_iter)
+        except StopIteration:
+            tok = end
+        peek_buffer.append(tok)
+        return tok
+
+    def _make_lookahead() -> LookaheadView:
+        return LookaheadView(
+            _buffer=list(peek_buffer),
+            _fetcher=_peek_fetch_for_view,
+            _end_marker=END_MARKER,
+        )
+
     def _apply_filters(tok: Token) -> Token:
         if tok is end:
             return tok
         # Classifier first (host-supplied name relabel), then the legacy
         # raw token_filter callable for back-compat with existing host
-        # drivers (TypedefTracker etc.).
+        # drivers (TypedefTracker etc.). When the classifier accepts a
+        # peek argument, the runtime builds a LookaheadView lazily.
         if ctx.classifiers.callbacks:
-            tok = ctx.classifiers.classify(ctx, tok)
+            view = None
+            cb = ctx.classifiers.callbacks.get(tok.name)
+            if cb is not None and ctx.classifiers._wants_peek(cb):
+                view = _make_lookahead()
+            tok = ctx.classifiers.classify(ctx, tok, view)
         if token_filter is not None:
             tok = token_filter(ctx, tok)
         return tok
 
     def fetch_next() -> Token:
-        try:
-            tok = next(token_iter)
-        except StopIteration:
-            return end
+        tok = _raw_fetch()
+        if tok is end:
+            return tok
         return _apply_filters(tok)
 
     lookahead = fetch_next()

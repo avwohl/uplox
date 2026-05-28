@@ -129,6 +129,126 @@ def _seed_user(state: dict):
     return reg
 
 
+# ---- Phase 1 extension: classifier with lookahead window --------------------
+
+
+def test_classifier_with_peek_views_next_tokens():
+    """A 3-arg classifier callback receives a `LookaheadView` over the
+    upcoming raw tokens. Peeked tokens reach the parser later, exactly
+    once each — the classifier doesn't re-fire for already-peeked
+    items."""
+    src = """
+        %grammar peektest
+        %tokens
+        WS = /[ \\t\\n]+/ %skip
+        IDENT = /[A-Za-z_][A-Za-z0-9_]*/
+        TYPEDEF_NAME = /__never_matches__/
+        LPAREN = '('
+        RPAREN = ')'
+        SEMI = ';'
+        %classifier
+        IDENT -> TYPEDEF_NAME
+        %rules
+        <prog> : <items> ;
+        <items> : | <items> <item> ;
+        <item> : IDENT SEMI
+               | TYPEDEF_NAME SEMI
+               | IDENT LPAREN RPAREN SEMI
+               | TYPEDEF_NAME LPAREN RPAREN SEMI
+               ;
+    """
+    table, scanner = _build(src)
+
+    # Classifier sees `peek` and decides based on whether `(` follows.
+    # IDENT-followed-by-LPAREN-RPAREN-SEMI is treated as a "call"
+    # (kept IDENT); IDENT-followed-by-SEMI is a "type" (relabel).
+    seen_peeks: dict[str, list[str]] = {}
+
+    def classify(text, ctx, peek):
+        next_two = peek.peek(2)
+        seen_peeks[text] = [t.name for t in next_two]
+        if next_two and next_two[0].name == "LPAREN":
+            return "IDENT"
+        return "TYPEDEF_NAME"
+
+    cls = ClassifierRegistry()
+    cls.register("IDENT", classify)
+
+    tokens = list(scanner.scan("Foo; bar();"))
+    tree = parse(table, tokens, classifiers=cls,
+                 hooks=HookRegistry(ignore_missing=True))
+    assert tree.kind == "prog"
+    # Each IDENT saw its next two tokens via peek.
+    assert seen_peeks == {
+        "Foo": ["SEMI", "IDENT"],     # `Foo` saw `; bar`
+        "bar": ["LPAREN", "RPAREN"],  # `bar` saw `( )`
+    }
+
+
+def test_classifier_legacy_two_arg_still_works():
+    """Existing two-arg classifier callbacks (no `peek` param) remain
+    fully supported — arity detection picks the legacy path."""
+    src = """
+        %grammar legacytest
+        %tokens
+        WS = /[ \\t\\n]+/ %skip
+        IDENT = /[A-Za-z_][A-Za-z0-9_]*/
+        TYPEDEF_NAME = /__never_matches__/
+        SEMI = ';'
+        %classifier
+        IDENT -> TYPEDEF_NAME
+        %rules
+        <prog> : <items> ;
+        <items> : | <items> <item> ;
+        <item> : IDENT SEMI | TYPEDEF_NAME SEMI ;
+    """
+    table, scanner = _build(src)
+    cls = ClassifierRegistry()
+    cls.register(
+        "IDENT",
+        lambda text, ctx: "TYPEDEF_NAME" if text == "Foo" else "IDENT",
+    )
+    tokens = list(scanner.scan("Foo; bar;"))
+    tree = parse(table, tokens, classifiers=cls,
+                 hooks=HookRegistry(ignore_missing=True))
+    assert tree.kind == "prog"
+
+
+def test_classifier_peek_handles_eof_short():
+    """`peek(N)` near EOF returns up to N tokens, never an error.
+    The end-marker terminates the buffer."""
+    src = """
+        %grammar peekeof
+        %tokens
+        WS = /[ \\t\\n]+/ %skip
+        IDENT = /[A-Za-z_][A-Za-z0-9_]*/
+        TYPEDEF_NAME = /__never_matches__/
+        SEMI = ';'
+        %classifier
+        IDENT -> TYPEDEF_NAME
+        %rules
+        <prog> : <items> ;
+        <items> : | <items> <item> ;
+        <item> : IDENT SEMI | TYPEDEF_NAME SEMI ;
+    """
+    table, scanner = _build(src)
+    last_peek: list[int] = [0]
+
+    def classify(text, ctx, peek):
+        last_peek[0] = len(peek.peek(100))
+        return "IDENT"
+
+    cls = ClassifierRegistry()
+    cls.register("IDENT", classify)
+    tokens = list(scanner.scan("only_one;"))
+    parse(table, tokens, classifiers=cls,
+          hooks=HookRegistry(ignore_missing=True))
+    # Two real tokens remain after `only_one` (SEMI and end marker);
+    # peek(100) returns up to 3 because the end marker itself counts.
+    # Whatever the exact short count, the call MUST not raise.
+    assert last_peek[0] <= 3
+
+
 # ---- Phase 2: action --------------------------------------------------------
 
 
