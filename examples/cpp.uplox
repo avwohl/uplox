@@ -706,6 +706,7 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 <unqualified_id> : IDENT
                  | 'operator' <overloadable_operator>
                  | 'operator' <conversion_type_id>
+                 | 'operator' STRING_LIT IDENT
                  ;
 
 # Conversion-operator target type: a subset of <type_id> that the
@@ -1374,6 +1375,10 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 <literal> : INT_LIT | FLOAT_LIT
           | CHAR_LIT | STRING_LIT
           | 'true' | 'false' | 'nullptr'
+          | INT_LIT IDENT
+          | FLOAT_LIT IDENT
+          | CHAR_LIT IDENT
+          | STRING_LIT IDENT
           ;
 
 <id_expression> : <unqualified_id>
