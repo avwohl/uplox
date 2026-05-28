@@ -24,6 +24,19 @@ surface (CLI, JSON bundle schema, Python API, hook firing points).
   C++ vexing-parse `T x(arg)` (fn-decl vs var-init), assignment-in-call
   `f(x = 0)`, and other multi-token-lookahead disambiguations.
 
+- **Named LR-state sets** (Phase 1 extension). Grammars can declare
+  `%state_set name : <lhs1> <lhs2>` directives that name groups of
+  non-terminals. At build time, the LR table records which states
+  have an LR(0) item with one of those LHSs (or a not-yet-consumed
+  RHS containing one). At runtime, host classifier/predicate
+  callbacks call `ctx.in_state_set(name)` to query — O(1).
+
+  Use cases: parse-state-aware classifiers can answer questions
+  like "am I currently parsing a declarator?" without maintaining
+  their own state machines via brittle prev-token heuristics. Build-
+  time validation catches typos in declared LHS names. Membership is
+  serialised into the bundle JSON so loaded tables don't recompute.
+
 - **IELR backward-propagation fix**. When the IELR refinement step
   splits a state Y into a singleton merge group (because the merged
   table introduced a spurious conflict), predecessors of Y in the
