@@ -117,6 +117,12 @@ declarator_position : declarator_id unqualified_id
 # `declarator_position` (declarators win — `Foo Foo` is type Foo,
 # variable Foo).
 type_position : type_name simple_type_spec elaborated_type_spec type_id nested_name_spec
+# `expression_position` — states where an IDENT is part of a value
+# expression. Used to break the symmetry when a state is in BOTH
+# type_position and expression_position (closure overlap): if the
+# IDENT could only reach the expression branch via known patterns
+# (postfix-call args, assignment RHS, etc.), keep as IDENT.
+expression_position : expression assignment_expr conditional_expr logical_or_expr logical_and_expr inclusive_or_expr exclusive_or_expr and_expr equality_expr relational_expr spaceship_expr shift_expr additive_expr multiplicative_expr pm_expr cast_expr unary_expr postfix_expr primary_expr expression_list expression_list_opt
 
 %shift
 KW_ELSE
