@@ -37,6 +37,16 @@ surface (CLI, JSON bundle schema, Python API, hook firing points).
   time validation catches typos in declared LHS names. Membership is
   serialised into the bundle JSON so loaded tables don't recompute.
 
+- **`uplox explain-state` and `uplox diff-states` subcommands** —
+  IELR / LR(1) debug aids. `explain-state` rebuilds the table from
+  the .uplox source and dumps a single state's LR(1) items (with
+  lookaheads), action map, GOTO map, reverse-direction "reached from"
+  set, default reduction, and state-set memberships. `diff-states`
+  reports which items / actions / GOTOs differ between two states —
+  the canonical workflow for identifying IELR state-divergence
+  symptoms (e.g. two states reached via different production paths
+  that should behave identically but don't).
+
 - **IELR backward-propagation fix**. When the IELR refinement step
   splits a state Y into a singleton merge group (because the merged
   table introduced a spurious conflict), predecessors of Y in the
