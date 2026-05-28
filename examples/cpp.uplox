@@ -205,6 +205,14 @@ KW_THREAD_LOCAL KW_TYPEDEF
 KW_ENUM
 KW_DECLTYPE
 KW_OPERATOR_KW
+# GCC/MSVC/Watcom extension keywords — accepted as no-op
+# storage_class_spec. Resolve s/r conflicts in favour of shift so
+# they extend an in-progress decl_specs.
+KW_GCC_CDECL KW_GCC_STDCALL KW_GCC_FASTCALL KW_GCC_THISCALL
+KW_GCC_WATCALL
+KW_GCC_FAR KW_GCC_NEAR KW_GCC_HUGE
+KW_GCC_RESTRICT KW_GCC_RESTRICT_
+KW_GCC_FORCEINLINE KW_GCC_INLINE KW_GCC_INLINE_
 KW_TYPENAME
 
 %reduce
@@ -255,6 +263,23 @@ KW_STATIC  = 'static'
 KW_EXTERN  = 'extern'
 KW_REGISTER = 'register'
 KW_INLINE  = 'inline'
+
+# GCC / MSVC / Watcom calling-convention and memory-model keywords.
+# Accepted as no-op storage_class_spec by the grammar; no semantic
+# effect on codegen (cdecl is the only convention v0.X targets).
+KW_GCC_CDECL    = '__cdecl'
+KW_GCC_STDCALL  = '__stdcall'
+KW_GCC_FASTCALL = '__fastcall'
+KW_GCC_THISCALL = '__thiscall'
+KW_GCC_WATCALL  = '__watcall'
+KW_GCC_FAR      = '__far'
+KW_GCC_NEAR     = '__near'
+KW_GCC_HUGE     = '__huge'
+KW_GCC_RESTRICT = '__restrict'
+KW_GCC_RESTRICT_ = '__restrict__'
+KW_GCC_FORCEINLINE = '__forceinline'
+KW_GCC_INLINE   = '__inline'
+KW_GCC_INLINE_  = '__inline__'
 KW_CONSTEXPR = 'constexpr'
 KW_CONSTEVAL = 'consteval'
 KW_CONSTINIT = 'constinit'
@@ -554,6 +579,11 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
             ;
 
 <storage_class_spec> : 'static' | 'extern' | 'register' | 'mutable'
+                     | '__cdecl' | '__stdcall' | '__fastcall' | '__thiscall'
+                     | '__watcall'
+                     | '__far' | '__near' | '__huge'
+                     | '__restrict' | '__restrict__'
+                     | '__forceinline' | '__inline' | '__inline__'
                      ;
 
 <function_spec> : 'inline' | 'virtual' | 'explicit'
@@ -1114,7 +1144,7 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 # --- statements ----------------------------------------------------------
 
 <compound_statement> : '{' <statements_opt> '}'
-                     | LBRACE_FN '}'
+                     | LBRACE_FN <statements_opt> '}'
                      ;
 
 <statements_opt> : <statements>
