@@ -123,6 +123,15 @@ type_position : type_name simple_type_spec elaborated_type_spec type_id nested_n
 # IDENT could only reach the expression branch via known patterns
 # (postfix-call args, assignment RHS, etc.), keep as IDENT.
 expression_position : expression assignment_expr conditional_expr logical_or_expr logical_and_expr inclusive_or_expr exclusive_or_expr and_expr equality_expr relational_expr spaceship_expr shift_expr additive_expr multiplicative_expr pm_expr cast_expr unary_expr postfix_expr primary_expr expression_list expression_list_opt
+# `template_arg_list_position` — states inside a template-arg-list
+# `Foo<...>`. The members are `<template_arg_list>` and `<template_arg>`
+# themselves; closure expansion drags in everything reachable from
+# `<type_id>` and `<conditional_expr>` so a state classifying an IDENT
+# inside `<...>` shows up here in addition to type/expression sets.
+# Lets the host classifier disambiguate: e.g. "promote known type
+# names, KEEP template-parameter-name IDENTs as IDENT, look for
+# overlap with `template_param_list_position` to decide".
+template_arg_list_position : template_arg_list template_arg
 
 %shift
 KW_ELSE
