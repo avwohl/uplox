@@ -151,7 +151,7 @@ DIALECTS: dict[str, Dialect] = {
 # Tokens that, when seen at the same paren-depth as the outermost
 # open `<`, indicate this can't be a generic-argument list. These are
 # the same set across all dialects we cover.
-_GENERIC_ABORT = frozenset({"SEMI", "RBRACE"})
+_GENERIC_ABORT = frozenset({"SEMI", "RBRACE", "LBRACE"})
 
 
 def rewrite_generics(
