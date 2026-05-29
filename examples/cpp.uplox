@@ -1186,6 +1186,7 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                 | <function_definition>
                 | <template_declaration>
                 | <forward_decl>
+                | <constructor_special_member>
                 ;
 
 # --- statements ----------------------------------------------------------
