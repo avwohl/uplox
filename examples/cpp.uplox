@@ -773,7 +773,6 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                 | <nested_name_spec> <unqualified_id>
                 | <nested_name_spec> '~' IDENT
                 | <nested_name_spec> '~' IDENT_TYPE
-                | IDENT LT_TEMPLATE <template_arg_list> GT_TEMPLATE
                 ;
 
 # Unqualified-id: the LHS of a declarator or RHS of a member-
