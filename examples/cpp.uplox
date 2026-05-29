@@ -947,6 +947,12 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                  | 'virtual' <type_name> ELLIPSIS
                  | 'virtual' <access_specifier> <type_name> ELLIPSIS
                  | <access_specifier> 'virtual' <type_name> ELLIPSIS
+                 | <decltype_spec>
+                 | <access_specifier> <decltype_spec>
+                 | 'virtual' <decltype_spec>
+                 | 'virtual' <access_specifier> <decltype_spec>
+                 | <access_specifier> 'virtual' <decltype_spec>
+                 | <decltype_spec> ELLIPSIS
                  ;
 
 <access_specifier> : 'public' | 'private' | 'protected'
