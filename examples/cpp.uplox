@@ -498,6 +498,10 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                | 'friend' <class_key> IDENT_TYPE ';'
                | 'friend' <class_key> IDENT LT_TEMPLATE <template_arg_list> GT_TEMPLATE ';'
                | 'friend' <class_key> IDENT_TYPE LT_TEMPLATE <template_arg_list> GT_TEMPLATE ';'
+               | 'friend' <class_key> <nested_name_spec> IDENT ';'
+               | 'friend' <class_key> <nested_name_spec> IDENT_TYPE ';'
+               | 'friend' <class_key> <nested_name_spec> IDENT LT_TEMPLATE <template_arg_list> GT_TEMPLATE ';'
+               | 'friend' <class_key> <nested_name_spec> IDENT_TYPE LT_TEMPLATE <template_arg_list> GT_TEMPLATE ';'
                ;
 
 <static_assert_decl> : 'static_assert' '(' <expression> ')' ';'
