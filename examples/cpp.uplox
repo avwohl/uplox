@@ -1453,12 +1453,14 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                | <postfix_expr> '.' 'template' IDENT_TYPE LT_TEMPLATE GT_TEMPLATE
                | <postfix_expr> '.' IDENT_TYPE LT_TEMPLATE <template_arg_list> GT_TEMPLATE
                | <postfix_expr> '.' IDENT_TYPE LT_TEMPLATE GT_TEMPLATE
+               | <postfix_expr> '.' IDENT_TYPE
                | <postfix_expr> ARROW_PTR <unqualified_id>
                | <postfix_expr> ARROW_PTR 'template' <unqualified_id>
                | <postfix_expr> ARROW_PTR 'template' IDENT_TYPE LT_TEMPLATE <template_arg_list> GT_TEMPLATE
                | <postfix_expr> ARROW_PTR 'template' IDENT_TYPE LT_TEMPLATE GT_TEMPLATE
                | <postfix_expr> ARROW_PTR IDENT_TYPE LT_TEMPLATE <template_arg_list> GT_TEMPLATE
                | <postfix_expr> ARROW_PTR IDENT_TYPE LT_TEMPLATE GT_TEMPLATE
+               | <postfix_expr> ARROW_PTR IDENT_TYPE
                | <postfix_expr> '++'
                | <postfix_expr> '--'
                | <simple_type_spec> '(' <expression_list_opt> ')'
