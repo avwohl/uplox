@@ -625,6 +625,10 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                        | 'typename' <nested_name_spec> IDENT_TYPE LT_TEMPLATE <template_arg_list> GT_TEMPLATE
                        | 'typename' <nested_name_spec> IDENT LT_TEMPLATE GT_TEMPLATE
                        | 'typename' <nested_name_spec> IDENT_TYPE LT_TEMPLATE GT_TEMPLATE
+                       | 'typename' <nested_name_spec> 'template' IDENT LT_TEMPLATE <template_arg_list> GT_TEMPLATE
+                       | 'typename' <nested_name_spec> 'template' IDENT_TYPE LT_TEMPLATE <template_arg_list> GT_TEMPLATE
+                       | 'typename' <nested_name_spec> 'template' IDENT LT_TEMPLATE GT_TEMPLATE
+                       | 'typename' <nested_name_spec> 'template' IDENT_TYPE LT_TEMPLATE GT_TEMPLATE
                        | <class_key> IDENT ?{class_is_elaborated_use}
                        | <class_key> IDENT_TYPE ?{class_is_elaborated_use}
                        ;
@@ -677,6 +681,7 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 <nested_name_spec> : IDENT_TYPE DCOLON
                    | IDENT DCOLON
                    | DCOLON
+                   | <decltype_spec> DCOLON
                    | <nested_name_spec> IDENT_TYPE DCOLON
                    | <nested_name_spec> IDENT DCOLON
                    | IDENT_TYPE LT_TEMPLATE <template_arg_list> GT_TEMPLATE DCOLON
