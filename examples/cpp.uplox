@@ -1538,6 +1538,8 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 
 <lambda_expression> : <lambda_introducer> <compound_statement>
                     | <lambda_introducer> '(' <parameter_declaration_clause> ')' <function_qualifiers> <compound_statement>
+                    | <lambda_introducer> LT_TEMPLATE <template_parameter_list> GT_TEMPLATE '(' <parameter_declaration_clause> ')' <function_qualifiers> <compound_statement>
+                    | <lambda_introducer> LT_TEMPLATE <template_parameter_list> GT_TEMPLATE <compound_statement>
                     ;
 
 <lambda_introducer> : '[' ']'
