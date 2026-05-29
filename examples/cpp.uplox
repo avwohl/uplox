@@ -496,6 +496,8 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                | 'enum' 'struct' IDENT_TYPE ';'
                | 'friend' <class_key> IDENT ';' !{register_type_from_class_head@3}
                | 'friend' <class_key> IDENT_TYPE ';'
+               | 'friend' <class_key> IDENT LT_TEMPLATE <template_arg_list> GT_TEMPLATE ';'
+               | 'friend' <class_key> IDENT_TYPE LT_TEMPLATE <template_arg_list> GT_TEMPLATE ';'
                ;
 
 <static_assert_decl> : 'static_assert' '(' <expression> ')' ';'
@@ -552,6 +554,8 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                     | 'using' 'namespace' <qualified_namespace_name> ';'
                     | 'using' 'typename' <nested_name_spec> IDENT ';' !{register_type_from_class_head@4}
                     | 'using' 'typename' <nested_name_spec> IDENT_TYPE ';' !{register_type_from_class_head@4}
+                    | 'using' <nested_name_spec> 'operator' <overloadable_operator> ';'
+                    | 'using' <nested_name_spec> 'operator' <conversion_type_id> ';'
                     ;
 
 <alias_declaration> : 'using' IDENT '=' <type_id> ';' !{register_type_from_using_alias@2}
@@ -613,6 +617,10 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                        | 'enum' <nested_name_spec> IDENT
                        | 'typename' <nested_name_spec> IDENT
                        | 'typename' <nested_name_spec> IDENT_TYPE
+                       | 'typename' <nested_name_spec> IDENT LT_TEMPLATE <template_arg_list> GT_TEMPLATE
+                       | 'typename' <nested_name_spec> IDENT_TYPE LT_TEMPLATE <template_arg_list> GT_TEMPLATE
+                       | 'typename' <nested_name_spec> IDENT LT_TEMPLATE GT_TEMPLATE
+                       | 'typename' <nested_name_spec> IDENT_TYPE LT_TEMPLATE GT_TEMPLATE
                        | <class_key> IDENT ?{class_is_elaborated_use}
                        | <class_key> IDENT_TYPE ?{class_is_elaborated_use}
                        ;
@@ -671,6 +679,8 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                    | IDENT_TYPE LT_TEMPLATE GT_TEMPLATE DCOLON
                    | <nested_name_spec> IDENT_TYPE LT_TEMPLATE <template_arg_list> GT_TEMPLATE DCOLON
                    | <nested_name_spec> IDENT_TYPE LT_TEMPLATE GT_TEMPLATE DCOLON
+                   | <nested_name_spec> 'template' IDENT_TYPE LT_TEMPLATE <template_arg_list> GT_TEMPLATE DCOLON
+                   | <nested_name_spec> 'template' IDENT_TYPE LT_TEMPLATE GT_TEMPLATE DCOLON
                    ;
 
 <nested_name_spec_opt> : <nested_name_spec>
@@ -752,6 +762,8 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 
 <declarator_id> : <unqualified_id>
                 | <nested_name_spec> <unqualified_id>
+                | <nested_name_spec> '~' IDENT
+                | <nested_name_spec> '~' IDENT_TYPE
                 ;
 
 # Unqualified-id: the LHS of a declarator or RHS of a member-
@@ -829,8 +841,12 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                         | <decl_specs> <abstract_declarator> '=' <conditional_expr>
                         | <decl_specs> '=' <conditional_expr>
                         | <decl_specs> ELLIPSIS <declarator>
+                        | <decl_specs> ELLIPSIS IDENT_TYPE
+                        | <decl_specs> ELLIPSIS
                         | <decl_specs> '&' ELLIPSIS IDENT
                         | <decl_specs> '&&' ELLIPSIS IDENT
+                        | <decl_specs> '&' ELLIPSIS IDENT_TYPE
+                        | <decl_specs> '&&' ELLIPSIS IDENT_TYPE
                         | <decl_specs> '&' ELLIPSIS
                         | <decl_specs> '&&' ELLIPSIS
                         ;
@@ -913,6 +929,11 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                  | 'virtual' <type_name>
                  | 'virtual' <access_specifier> <type_name>
                  | <access_specifier> 'virtual' <type_name>
+                 | <type_name> ELLIPSIS
+                 | <access_specifier> <type_name> ELLIPSIS
+                 | 'virtual' <type_name> ELLIPSIS
+                 | 'virtual' <access_specifier> <type_name> ELLIPSIS
+                 | <access_specifier> 'virtual' <type_name> ELLIPSIS
                  ;
 
 <access_specifier> : 'public' | 'private' | 'protected'
@@ -1062,12 +1083,18 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 
 <mem_initializer> : <mem_initializer_id> '(' <expression_list_opt> ')'
                   | <mem_initializer_id> '{' <expression_list_opt> '}'
+                  | <mem_initializer_id> '(' <expression_list_opt> ')' ELLIPSIS
+                  | <mem_initializer_id> '{' <expression_list_opt> '}' ELLIPSIS
                   ;
 
 <mem_initializer_id> : IDENT
                      | IDENT_TYPE
                      | <nested_name_spec> IDENT
                      | <nested_name_spec> IDENT_TYPE
+                     | IDENT_TYPE LT_TEMPLATE <template_arg_list> GT_TEMPLATE
+                     | IDENT_TYPE LT_TEMPLATE GT_TEMPLATE
+                     | <nested_name_spec> IDENT_TYPE LT_TEMPLATE <template_arg_list> GT_TEMPLATE
+                     | <nested_name_spec> IDENT_TYPE LT_TEMPLATE GT_TEMPLATE
                      ;
 
 # --- handlers ------------------------------------------------------------
@@ -1126,11 +1153,13 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                 <type_parameter> : 'typename'
                  | 'typename' IDENT !{register_type_from_template_param@2}
                  | 'typename' IDENT '=' <type_id> !{register_type_from_template_param@2}
+                 | 'typename' '=' <type_id>
                  | 'typename' ELLIPSIS
                  | 'typename' ELLIPSIS IDENT !{register_type_from_template_param@3}
                  | 'class'
                  | 'class' IDENT !{register_type_from_template_param@2}
                  | 'class' IDENT '=' <type_id> !{register_type_from_template_param@2}
+                 | 'class' '=' <type_id>
                  | 'class' ELLIPSIS
                  | 'class' ELLIPSIS IDENT !{register_type_from_template_param@3}
                  ;
@@ -1371,6 +1400,7 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
              | 'sizeof' <unary_expr>
              | 'sizeof' '(' <type_id> ')'
              | 'sizeof' ELLIPSIS '(' IDENT ')'
+             | 'sizeof' ELLIPSIS '(' IDENT_TYPE ')'
              | 'alignof' '(' <type_id> ')'
              | 'noexcept' '(' <expression> ')'
              | <new_expr>
@@ -1379,15 +1409,30 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
              | 'co_yield' <assignment_expr>
              ;
 
-<new_expr> : 'new' <type_id>
-           | 'new' <type_id> '(' <expression_list_opt> ')'
-           | 'new' <type_id> LPAREN_INIT <expression_list_opt> ')'
-           | 'new' <type_id> <braced_init_list>
-           | 'new' '(' <expression_list> ')' <type_id>
-           | 'new' '(' <expression_list> ')' <type_id> '(' <expression_list_opt> ')'
-           | 'new' '(' <expression_list> ')' <type_id> LPAREN_INIT <expression_list_opt> ')'
-           | 'new' '(' <expression_list> ')' <type_id> <braced_init_list>
+<new_expr> : 'new' <new_type_id>
+           | 'new' <new_type_id> '(' <expression_list_opt> ')'
+           | 'new' <new_type_id> LPAREN_INIT <expression_list_opt> ')'
+           | 'new' <new_type_id> <braced_init_list>
+           | 'new' '(' <expression_list> ')' <new_type_id>
+           | 'new' '(' <expression_list> ')' <new_type_id> '(' <expression_list_opt> ')'
+           | 'new' '(' <expression_list> ')' <new_type_id> LPAREN_INIT <expression_list_opt> ')'
+           | 'new' '(' <expression_list> ')' <new_type_id> <braced_init_list>
            ;
+
+# Restricted type-id for `new` (C++ standard's <new-type-id>):
+# `<decl_specs>` followed by optional `<new_declarator>` that allows
+# only pointer/ref operators and array brackets — NOT function-style
+# parens. This forces `new T(args)` to read `(args)` as the new-
+# initializer, not as part of an abstract function-type declarator.
+<new_type_id> : <decl_specs>
+              | <decl_specs> <new_declarator>
+              ;
+
+<new_declarator> : <ptr_operator>
+                 | <ptr_operator> <new_declarator>
+                 | <new_declarator> '[' <expression_opt> ']'
+                 | '[' <expression_opt> ']'
+                 ;
 
 <delete_expr> : 'delete' <cast_expr>
               | 'delete' '[' ']' <cast_expr>
@@ -1397,11 +1442,19 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                | <postfix_expr> '[' <expression> ']'
                | <postfix_expr> '(' <expression_list_opt> ')'
                | <postfix_expr> '.' <unqualified_id>
+               | <postfix_expr> '.' 'template' <unqualified_id>
+               | <postfix_expr> '.' IDENT_TYPE LT_TEMPLATE <template_arg_list> GT_TEMPLATE
+               | <postfix_expr> '.' IDENT_TYPE LT_TEMPLATE GT_TEMPLATE
                | <postfix_expr> ARROW_PTR <unqualified_id>
+               | <postfix_expr> ARROW_PTR 'template' <unqualified_id>
+               | <postfix_expr> ARROW_PTR IDENT_TYPE LT_TEMPLATE <template_arg_list> GT_TEMPLATE
+               | <postfix_expr> ARROW_PTR IDENT_TYPE LT_TEMPLATE GT_TEMPLATE
                | <postfix_expr> '++'
                | <postfix_expr> '--'
                | <simple_type_spec> '(' <expression_list_opt> ')'
                | <simple_type_spec> <braced_init_list>
+               | <elaborated_type_spec> '(' <expression_list_opt> ')'
+               | <elaborated_type_spec> <braced_init_list>
                | 'typeid' '(' <expression> ')'
                | 'typeid' '(' <type_id> ')'
                | 'static_cast' LT_TEMPLATE <type_id> GT_TEMPLATE '(' <expression> ')'
@@ -1448,6 +1501,10 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 
 <id_expression> : <unqualified_id>
                 | <nested_name_spec> <unqualified_id>
+                | <nested_name_spec> 'template' <unqualified_id>
+                | <nested_name_spec> 'template' IDENT_TYPE LT_TEMPLATE <template_arg_list> GT_TEMPLATE
+                | <nested_name_spec> 'template' IDENT_TYPE LT_TEMPLATE GT_TEMPLATE
+                | IDENT LT_TEMPLATE <template_arg_list> GT_TEMPLATE
                 ;
 
 # --- lambda expression ---------------------------------------------------
