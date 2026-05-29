@@ -1530,7 +1530,9 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                 | <nested_name_spec> 'template' IDENT_TYPE LT_TEMPLATE <template_arg_list> GT_TEMPLATE
                 | <nested_name_spec> 'template' IDENT_TYPE LT_TEMPLATE GT_TEMPLATE
                 | IDENT LT_TEMPLATE <template_arg_list> GT_TEMPLATE
+                | IDENT LT_TEMPLATE GT_TEMPLATE
                 | <nested_name_spec> IDENT LT_TEMPLATE <template_arg_list> GT_TEMPLATE
+                | <nested_name_spec> IDENT LT_TEMPLATE GT_TEMPLATE
                 ;
 
 # --- lambda expression ---------------------------------------------------
