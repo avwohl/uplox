@@ -257,7 +257,18 @@ def rewrite_generics(
                     abandon()
             continue
         if name == dialect.rshift and open_stack:
-            pop_n(i, 2)
+            popped = pop_n(i, 2)
+            if popped < 2:
+                # `<...>>` where only ONE `<` is open — the `>>`
+                # can't be both a template-close AND a binary
+                # right-shift. Most real-world parses have the
+                # `<` being binary comparison; abandon to keep
+                # `>>` as RSHIFT. This loses the very rare
+                # `Foo<Bar<int> >> 4` shape but breaks LOTS of
+                # spurious template-pairings in expression-heavy
+                # code.
+                abandon()
+                continue
             if not open_stack:
                 if follow_ok(i + 1):
                     commit()
