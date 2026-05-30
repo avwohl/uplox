@@ -284,7 +284,12 @@ def rewrite_generics(
                     abandon()
             continue
         if name in _GENERIC_ABORT and open_stack:
-            abandon()
+            # LBRACE / SEMI / RBRACE inside a balanced paren group
+            # (`(...{}...)`-style) is a temporary-object init or
+            # statement-expr, not a statement boundary — don't
+            # abandon. Only abandon when paren_depth is 0.
+            if paren_depth[0] == 0:
+                abandon()
             continue
 
     # Anything still pending at the end never closed — abandon.
