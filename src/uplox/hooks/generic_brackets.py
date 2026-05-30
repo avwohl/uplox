@@ -205,20 +205,37 @@ def rewrite_generics(
         tentative_opens.clear()
         tentative_closes.clear()
         open_stack.clear()
+        open_paren_depths.clear()
         paren_depth[0] = 0
 
     def abandon() -> None:
         tentative_opens.clear()
         tentative_closes.clear()
         open_stack.clear()
+        open_paren_depths.clear()
         paren_depth[0] = 0
 
+    # Track each open's paren_depth at the time it was opened.
+    open_paren_depths: list[int] = []
+
     def pop_n(close_idx: int, n: int) -> int:
-        """Pop up to ``n`` open `<` indices from the stack, record the
-        close at ``close_idx``, return the number actually popped."""
-        actually = min(n, len(open_stack))
-        for _ in range(actually):
+        """Pop up to ``n`` open `<` indices from the stack — only
+        when the topmost open is at the same paren_depth as the
+        close. A `>` at paren_depth X cannot close an open `<`
+        at a DIFFERENT paren_depth (a binary `>` inside `(...)`
+        is not the matching close of an outer `<` that was opened
+        at depth 0 — see
+        `__is_core_convertible_v<decltype(F<X>() > G<Y>())>`).
+        """
+        actually = 0
+        for _ in range(n):
+            if not open_stack:
+                break
+            if open_paren_depths[-1] != paren_depth[0]:
+                break
             open_stack.pop()
+            open_paren_depths.pop()
+            actually += 1
         if actually > 0:
             tentative_closes[close_idx] = (
                 tentative_closes.get(close_idx, 0) + actually
@@ -234,6 +251,7 @@ def rewrite_generics(
         name = tok.name
         if name == dialect.lt_token:
             open_stack.append(i)
+            open_paren_depths.append(paren_depth[0])
             tentative_opens.append(i)
             continue
         if name == "LPAREN" and open_stack:
@@ -247,6 +265,17 @@ def rewrite_generics(
                 abandon()
                 continue
             paren_depth[0] -= 1
+            # Any opens at deeper paren_depths can no longer close
+            # (their paren-group has ended). Abandon them. We pop
+            # only opens whose depth > current paren_depth.
+            while (open_paren_depths
+                   and open_paren_depths[-1] > paren_depth[0]):
+                open_stack.pop()
+                open_paren_depths.pop()
+                # Remove from tentative_opens too (so they don't
+                # get committed).
+                if tentative_opens:
+                    tentative_opens.pop()
             continue
         if name == dialect.gt_token and open_stack:
             pop_n(i, 1)
