@@ -555,11 +555,15 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                     | 'using' IDENT_TYPE ';'
                     | 'using' <nested_name_spec> IDENT ';' !{register_imported_name@3}
                     | 'using' <nested_name_spec> IDENT_TYPE ';' !{register_imported_name@3}
+                    | 'using' <nested_name_spec> IDENT ELLIPSIS ';' !{register_imported_name@3}
+                    | 'using' <nested_name_spec> IDENT_TYPE ELLIPSIS ';' !{register_imported_name@3}
                     | 'using' 'namespace' <qualified_namespace_name> ';'
                     | 'using' 'typename' <nested_name_spec> IDENT ';' !{register_type_from_class_head@4}
                     | 'using' 'typename' <nested_name_spec> IDENT_TYPE ';' !{register_type_from_class_head@4}
                     | 'using' <nested_name_spec> 'operator' <overloadable_operator> ';'
                     | 'using' <nested_name_spec> 'operator' <conversion_type_id> ';'
+                    | 'using' <nested_name_spec> 'operator' <overloadable_operator> ELLIPSIS ';'
+                    | 'using' <nested_name_spec> 'operator' <conversion_type_id> ELLIPSIS ';'
                     ;
 
 <alias_declaration> : 'using' IDENT '=' <type_id> ';' !{register_type_from_using_alias@2}
