@@ -190,6 +190,13 @@ def rewrite_generics(
     tentative_opens: list[int] = []
     tentative_closes: dict[int, int] = {}
     open_stack: list[int] = []
+    # Paren depth INSIDE the tentative span — incremented on LPAREN
+    # after the first tentative open `<`, decremented on RPAREN.
+    # A RPAREN at depth 0 means we hit a RPAREN that matches an
+    # LPAREN OUTSIDE the span (e.g. `if (a < b) x = (c >> d)` —
+    # the `<` is inside `if(...)`, the `>>` is inside its own
+    # `(...)`, and they were never meant to pair). Abandon.
+    paren_depth = [0]
 
     def commit() -> None:
         confirmed_opens.update(tentative_opens)
@@ -198,11 +205,13 @@ def rewrite_generics(
         tentative_opens.clear()
         tentative_closes.clear()
         open_stack.clear()
+        paren_depth[0] = 0
 
     def abandon() -> None:
         tentative_opens.clear()
         tentative_closes.clear()
         open_stack.clear()
+        paren_depth[0] = 0
 
     def pop_n(close_idx: int, n: int) -> int:
         """Pop up to ``n`` open `<` indices from the stack, record the
@@ -226,6 +235,18 @@ def rewrite_generics(
         if name == dialect.lt_token:
             open_stack.append(i)
             tentative_opens.append(i)
+            continue
+        if name == "LPAREN" and open_stack:
+            paren_depth[0] += 1
+            continue
+        if name == "RPAREN" and open_stack:
+            if paren_depth[0] == 0:
+                # RPAREN matches a LPAREN that was OUTSIDE the open
+                # `<` span — we've exited the enclosing expression.
+                # The pending `<` can't be a template open here.
+                abandon()
+                continue
+            paren_depth[0] -= 1
             continue
         if name == dialect.gt_token and open_stack:
             pop_n(i, 1)
