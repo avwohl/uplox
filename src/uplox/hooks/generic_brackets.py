@@ -278,12 +278,35 @@ def rewrite_generics(
                     tentative_opens.pop()
             continue
         if name == dialect.gt_token and open_stack:
-            pop_n(i, 1)
+            inner_open = open_stack[-1]
+            popped = pop_n(i, 1)
             if not open_stack:
                 if follow_ok(i + 1):
                     commit()
                 else:
                     abandon()
+                continue
+            # Inner `<…>` closed while an OUTER `<` is still open. If it
+            # is immediately followed by `::` / `(` it is unambiguously a
+            # template-id / qualified-name or functional-cast (`a <
+            # b<c>::d`, `a < b<c>(x)`) — a comparison can never produce
+            # `…>::` / `…>(`. Confirm THIS pairing on its own so the inner
+            # generics survive even though the outer `<` (a comparison)
+            # will be abandoned. Without this, `*p <
+            # numeric_limits<char>::max()` lost the `numeric_limits<char>`
+            # generics when the outer comparison `<` never closed.
+            if (popped == 1
+                    and i + 1 < len(tokens)
+                    and tokens[i + 1].name in ("DCOLON", "LPAREN")):
+                confirmed_opens.add(inner_open)
+                confirmed_closes[i] = confirmed_closes.get(i, 0) + 1
+                if inner_open in tentative_opens:
+                    tentative_opens.remove(inner_open)
+                c = tentative_closes.get(i, 0) - 1
+                if c <= 0:
+                    tentative_closes.pop(i, None)
+                else:
+                    tentative_closes[i] = c
             continue
         if name == dialect.rshift and open_stack:
             popped = pop_n(i, 2)
