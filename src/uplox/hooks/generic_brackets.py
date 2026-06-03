@@ -287,6 +287,16 @@ def rewrite_generics(
             continue
         if name == dialect.rshift and open_stack:
             popped = pop_n(i, 2)
+            if popped == 0:
+                # `>>` could not close ANY open `<`: the topmost open
+                # is at a SHALLOWER paren_depth, so this `>>` is nested
+                # inside a paren group the open `<` is not part of —
+                # it is a binary right-shift OPERATOR, not a generic
+                # close. Ignore it (do NOT abandon the pending opens),
+                # mirroring the single-`>` path. Without this,
+                # `Foo<decltype(declval<S>() >> declval<T>())>` would
+                # wrongly abandon the outer `Foo<...>`.
+                continue
             if popped < 2:
                 # `<...>>` where only ONE `<` is open — the `>>`
                 # can't be both a template-close AND a binary
