@@ -410,6 +410,7 @@ LT_TEMPLATE  = 'LT_TEMPLATE_SYNTHETIC_NEVER_EMITTED'
 GT_TEMPLATE  = 'GT_TEMPLATE_SYNTHETIC_NEVER_EMITTED'
 LPAREN_CAST  = 'LPAREN_CAST_SYNTHETIC_NEVER_EMITTED'
 LPAREN_INIT  = 'LPAREN_INIT_SYNTHETIC_NEVER_EMITTED'
+LPAREN_ABST  = 'LPAREN_ABST_SYNTHETIC_NEVER_EMITTED'
 LBRACE_FN    = 'LBRACE_FN_SYNTHETIC_NEVER_EMITTED'
 IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 
@@ -875,6 +876,7 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                       | <abstract_declarator> '[' <expression_opt> ']'
                       | <abstract_declarator> '(' <parameter_declaration_clause> ')' <function_qualifiers>
                       | '(' <abstract_declarator> ')'
+                      | LPAREN_ABST <abstract_declarator> ')'
                       | '[' <expression_opt> ']'
                       | '(' <parameter_declaration_clause> ')' <function_qualifiers>
                       ;
@@ -1035,12 +1037,12 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 # with virtual modifier. Defaulted special members
 # `= default` and deleted members `= delete` are explicit
 # alternatives because the keyword tokens distinguish them.
-<member_declarator> : <declarator>
-                    | <declarator> '=' <conditional_expr>
-                    | <declarator> '=' <braced_init_list>
-                    | <declarator> '{' <initializer_clause_list> '}'
-                    | <declarator> '=' 'default'
-                    | <declarator> '=' 'delete'
+<member_declarator> : <declarator> !{enter_init_decl_list}
+                    | <declarator> '=' <conditional_expr> !{enter_init_decl_list}
+                    | <declarator> '=' <braced_init_list> !{enter_init_decl_list}
+                    | <declarator> '{' <initializer_clause_list> '}' !{enter_init_decl_list}
+                    | <declarator> '=' 'default' !{enter_init_decl_list}
+                    | <declarator> '=' 'delete' !{enter_init_decl_list}
                     ;
 
 # --- enum specifier ------------------------------------------------------
