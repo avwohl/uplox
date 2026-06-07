@@ -528,7 +528,9 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
                        ;
 
 <qualified_namespace_name> : IDENT
+                           | IDENT_TYPE
                            | <qualified_namespace_name> DCOLON IDENT
+                           | <qualified_namespace_name> DCOLON IDENT_TYPE
                            ;
 
 # --- declarations --------------------------------------------------------
