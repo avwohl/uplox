@@ -1228,6 +1228,8 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 <declaration_statement> : <declaration>
                         | <static_assert_decl>
                         | <forward_decl>
+                        | 'namespace' IDENT '=' <qualified_namespace_name> ';' !{register_namespace@2}
+                        | 'namespace' IDENT_TYPE '=' <qualified_namespace_name> ';' !{register_namespace@2}
                         ;
 
 <selection_statement> : 'if' '(' <condition> ')' <statement>
