@@ -278,25 +278,12 @@ uplox-built bundles. Each one builds its grammar from `examples/<g>.uplox`
 and parses through the Python runtime, so these projects are the
 real-world test surface for the production-tested grammars listed above.
 
-- [uc_core](https://github.com/avwohl/uc_core) — shared C23 frontend
-  and AST-level optimizer. Consumes `c23.uplox`. The backend protocol
-  is target-agnostic; the targets that ride on top are:
-  - [uc80](https://github.com/avwohl/uc80) — C23 → Z80 / CP/M.
-  - [uc386](https://github.com/avwohl/uc386) — C23 → i386 / MS-DOS.
-    100% on `gcc-c-torture` (1514 tests) and `c-testsuite` (220 tests);
-    produces real DOS `.exe` files via NASM + PMODE/W.
-- [uplm80](https://github.com/avwohl/uplm80) — PL/M-80 → Z80 / 8080.
-  Consumes `plm_pre.uplox` (the LITERALLY / `$`-directive
-  preprocessor) followed by `plm_full.uplox`. Can rebuild original
-  CP/M utilities (BDOS etc.) from their PL/M source.
-- [uada80](https://github.com/avwohl/uada80) — Ada 2012 → Z80 /
-  CP/M 2.2 (+ MP/M II `.prl`). Consumes `ada_full.uplox`. 100% on
-  ACATS A/C/D/E/L (2846/2846) and 97.8% on the GNAT runtime
-  (1072/1096); see [WIP.md](WIP.md) for the corpus-by-corpus
-  numbers.
-- [ucow](https://github.com/avwohl/ucow) — Cowgol → Z80 / CP/M.
-  Consumes `cowgol.uplox` via an emitted-Python parser module
-  (`uplox_cowgol.py`).
+- [uc_core](https://github.com/avwohl/uc_core) — Shared C23 frontend and AST optimizer. It reads `c23.uplox`. The backend protocol is independent of the target, and these targets use it:
+- [uc80](https://github.com/avwohl/uc80) — C compiler for the Z80 processor and CP/M. It is the Z80 backend on this C23 frontend.
+- [uc386](https://github.com/avwohl/uc386) — C23 compiler for the i386 processor and MS-DOS. It scores 100 percent on `gcc-c-torture` (1514 tests) and `c-testsuite` (220 tests), and it writes real DOS `.exe` files with NASM and PMODE/W.
+- [uplm80](https://github.com/avwohl/uplm80) — PL/M-80 compiler for the Z80 processor and CP/M. It writes 8080 and Z80 assembly language. It reads `plm_pre.uplox`, the preprocessor for LITERALLY and the `$` directives, and then `plm_full.uplox`. It rebuilds original CP/M utilities such as the BDOS from their PL/M-80 source code.
+- [uada80](https://github.com/avwohl/uada80) — Ada compiler for the Z80 processor and CP/M 2.2. It compiles a subset of Ada 2012, writes MP/M II `.prl` files, and reads `ada_full.uplox`. It scores 100 percent on ACATS A/C/D/E/L (2846/2846) and 97.8 percent on the GNAT run time (1072/1096). [WIP.md](WIP.md) gives the numbers for each corpus.
+- [ucow](https://github.com/avwohl/ucow) — Cowgol compiler for the Z80 processor and CP/M. It reads `cowgol.uplox` through the Python parser module `uplox_cowgol.py` that uplox writes.
 
 ## License
 
