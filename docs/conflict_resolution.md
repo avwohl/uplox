@@ -45,7 +45,7 @@ When `uplox check` reports a conflict, ask in this order:
    so it isn't, or accept the ambiguity and use GLR (`uplox
    parse --glr`).
 2. **Is this dangling-else?** Use the matched/unmatched split
-   ([`cookbook.md`](cookbook.md#nested-if-then-else-the-dangling-else-problem)).
+   ([`cookbook.md`](cookbook.md#nested-ifthenelse--the-dangling-else-problem)).
    `%shift ELSE` is acceptable but lower quality.
 3. **Did the conflict appear when you switched to LALR?** Run
    the same `uplox check` with `%define lr.type canonical-lr`.
