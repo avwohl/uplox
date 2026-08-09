@@ -7,7 +7,10 @@ build-backend = "setuptools.build_meta"
 # squat on PyPI. PyPI dist, GitHub repo, Python module, CLI binary,
 # and .uplox grammar file extension all use the new name.
 name = "uplox"
-version = "3.2.0"
+# Read from src/uplox/__init__.py:__version__ (see [tool.setuptools.dynamic]).
+# Previously duplicated here, which drifted: 3.2.0 was bumped in this file but
+# not in __init__.py, so `uplox version` printed 3.1.1 for the 3.2.0 dist.
+dynamic = ["version"]
 description = "Compiler front-end generator: grammar source to canonical JSON tables plus C/C++/Python/Lua drivers"
 readme = "README.md"
 license = "GPL-3.0-or-later"
@@ -42,6 +45,9 @@ Issues = "https://github.com/avwohl/uplox/issues"
 
 [project.scripts]
 uplox = "uplox.cli.main:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "uplox.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
