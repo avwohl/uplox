@@ -1248,9 +1248,23 @@ IDENT_TYPE   = 'IDENT_TYPE_SYNTHETIC_NEVER_EMITTED'
 
 # C++17 condition forms: plain expression OR a declaration with an
 # initializer (`Type x = init`) evaluated for truthiness.
+#
+# [stmt.pre] spells the declaration form's initializer as a
+# brace-or-equal-initializer, which is `= initializer-clause` OR
+# `braced-init-list` — and an initializer-clause is itself either an
+# assignment-expression or a braced-init-list. So all three of
+#
+#     if (T x = e)        if (T x{a, b})        if (T x = {a, b})
+#
+# are conditions. The third (COPY-list-initialization) was missing:
+# googletest's EXPECT_TRUE/EXPECT_FALSE expand to
+# `if (AssertionResultExpectation gtest_are_ = {AssertionResult(e), false})`,
+# so its absence walled the parser at the `)` in EVERY test TU that
+# asserts anything.
 <condition> : <expression>
             | <decl_specs> <declarator> '=' <conditional_expr>
             | <decl_specs> <declarator> <braced_init_list>
+            | <decl_specs> <declarator> '=' <braced_init_list>
             ;
 
 # C++17 init-statement: appears before the condition in `if (init; cond)`
