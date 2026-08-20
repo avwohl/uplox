@@ -5,9 +5,100 @@ All notable changes to uplox land here. Format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) for the public
 surface (CLI, JSON bundle schema, Python API, hook firing points).
 
-## Unreleased
+## 3.3.0 — 2026-08-20
+
+Context-sensitive parsing: four grammar-level extensions —
+`%classifier`, `%actions`, `%predicates`, `%modes` — that hand the
+ambiguities a context-free LALR(1) grammar cannot express to host
+callbacks, plus the lookahead window and named state sets that make
+them usable on real C++. Additive for grammars that ignore them: one
+that declares none of the new sections builds a byte-identical bundle,
+and 3.2.0 bundles load unchanged. Only the in-process Python runtime
+consumes the new wiring — no emitted driver does, in any target
+language, and neither does GLR. `examples/cpp.uplox` does adopt it, and
+hosts driving that grammar have work to do; see Migration notes.
 
 ### Added
+
+- **Context-sensitive parsing: `%classifier`, `%actions`,
+  `%predicates`, `%modes`.** Four orthogonal grammar sections that
+  route the C typedef-name hack, the C++ template-id-vs-comparison
+  ambiguity, and the Fortran / COBOL mode-dependent-token problems
+  through host callbacks instead of a bespoke token-rewrite pass per
+  language.
+
+  `%classifier SOURCE -> ALT1 ALT2 …` declares that a terminal the DFA
+  matched may be re-labelled to one of a fixed set of alternatives. The
+  host registers a `(text, ctx) -> name` callable per source terminal
+  on a `ClassifierRegistry`; the runtime calls it on every lookahead
+  fetch and again after each reduce, so a name table a reduction just
+  updated is visible to the pending lookahead. Alternative names are
+  checked against the terminal set at build time, and classifier
+  alternatives now count as referenced for the unused-token check —
+  declaring a `TYPEDEF_NAME` that appears on no rule RHS no longer
+  fails the build.
+
+  `%actions` declares action names; a production annotated `!{name}`
+  fires the registered `(ctx, node)` callable once its reduce
+  completes, after any `post_reduce` hook on the same production.
+  `!{name@N}` passes RHS child `N` (1-indexed) instead of the whole
+  reduced subtree, so `!{register_type_from_class_head@2}` hands the
+  callback the class name alone; an `N` past the RHS length is a build
+  error.
+
+  `%predicates` declares predicate names, and productions that share an
+  LR shape may carry different `?{name}` annotations. Two actions
+  colliding in one ACTION cell where at least one side carries a
+  predicate no longer record a conflict — the cell becomes a
+  `PredicatedActions` holder, and at parse time the runtime evaluates
+  the predicates in declaration order and takes the first that returns
+  true, falling back to the unannotated alternative. A state holding a
+  predicated cell is excluded from default reductions, since the
+  lookahead is needed to choose.
+
+  `%modes` declares the lexer-mode domain and `ctx.mode_stack` tracks
+  it (`push` / `pop` / `current`, reset per parse) for classifier and
+  predicate callbacks to read. Mode-specific DFAs are not wired: one
+  DFA still runs for every mode, so this covers the COBOL-shaped case
+  where the mode decides which terminal name a matched text resolves
+  to, not the TeX-shaped case where each mode needs a different lexer.
+
+  `parse()` takes `classifiers=`, `actions=`, and `predicates=`
+  alongside the existing `token_filter=`, which still works — the
+  classifier runs first, then the filter. All three registries default
+  to `ignore_missing=False`, so a production naming an action or
+  predicate with no registered callback raises `ParseError` instead of
+  silently doing nothing, and a production naming an action or
+  predicate that no `%actions` / `%predicates` section declares is a
+  `GrammarError` at build time.
+
+  Only `uplox.parse.runtime.parse` reads this wiring, and only when the
+  host calls it directly. The C / C++ / Lua emitters decode bundle
+  action codes as strings and crash on the predicated-cell encoding, so
+  `uplox emit` fails outright on a grammar that uses `?{…}`
+  (`AttributeError: 'dict' object has no attribute 'startswith'`), and
+  `uplox parse --glr` fails on the same grammars in `glr_from_lr` with
+  `TypeError: unhandled action predicated(…)`. Grammars using only
+  `%classifier` / `%actions` / `%modes` emit C / C++ / Lua drivers, and
+  those drivers ignore the callbacks.
+
+  The Python emitter is not a way around this. The `parse()` it
+  generates takes `hooks=`, `semantic_actions=`, and `token_filter=`
+  only — there is no way to hand it a registry — so an emitted Python
+  driver cannot supply a classifier, action, or predicate callback
+  either. Because the registries are fatal on a missing callback, an
+  emitted Python driver and the `uplox parse` subcommand both raise
+  `ParseError` on the first annotated reduce rather than quietly
+  skipping it, so neither can parse a grammar that uses `%actions` or a
+  reachable `%predicates` at all.
+
+- **Bundle carries the context-sensitive wiring.** The parse section
+  picks up `classifiers`, `predicates`, `actions`, `modes`, and
+  `state_sets` blocks, per-production `predicate` / `post_action` /
+  `post_action_arg_pos` fields, and a per-state `state_sets` list.
+  Every one is emitted only when the grammar declared it, so a bundle
+  built from a grammar that uses none of them is byte-identical to what
+  3.2.0 produced, and bundles written by 3.2.0 load unchanged.
 
 - **Classifier lookahead window** (Phase 1 extension). A classifier
   callback may now accept a third positional parameter — a
@@ -19,10 +110,11 @@ surface (CLI, JSON bundle schema, Python API, hook firing points).
   cached per callback — existing two-arg `(text, ctx) -> name`
   callbacks are unaffected.
 
-  Unlocks classifier decisions that need to look INSIDE a token group
-  before committing — C-style cast `(type)expr` vs paren-expr `(expr)`,
-  C++ vexing-parse `T x(arg)` (fn-decl vs var-init), assignment-in-call
-  `f(x = 0)`, and other multi-token-lookahead disambiguations.
+  This unlocks classifier decisions that need to look inside a token
+  group before committing: C-style cast `(type)expr` versus
+  paren-expression `(expr)`, the C++ vexing parse `T x(arg)` (function
+  declaration versus variable initialisation), and assignment-in-call
+  `f(x = 0)`.
 
 - **Named LR-state sets** (Phase 1 extension). Grammars can declare
   `%state_set name : <lhs1> <lhs2>` directives that name groups of
@@ -52,9 +144,206 @@ surface (CLI, JSON bundle schema, Python API, hook firing points).
   table introduced a spurious conflict), predecessors of Y in the
   GOTO graph must also be split. Otherwise two same-LR(0)-core
   predecessors that share a merged ID can have disagreeing GOTO cells,
-  tripping the `apply_mapping` invariant assertion. The fix is a
+  tripping the `_apply_mapping` invariant assertion. The fix is a
   closure step that propagates splits backward through canonical-state
   GOTO predecessors until fixpoint.
+
+- **`examples/cpp.uplox` covers substantially more real C++.** New in
+  the example C++20 / C++23 grammar: C++17 structured bindings
+  (`auto [a, b] = e;`), the `if` / `while` / `switch` condition forms
+  that declare a variable, C++17 init-statements (`if (init; cond)`),
+  pointer-to-member `.*` and `->*` as their own precedence rung between
+  multiplicative and cast, C++11 user-defined literals, conversion
+  operators (`operator value_type()`), C++98 dynamic exception
+  specifications (`throw(A, B)`), `enum struct` forward declarations,
+  qualified and template `friend` declarations, pack expansions in base
+  specifiers / member initialisers / using-declarations, C++20 lambda
+  template-parameter lists, `decltype` in nested-name-specifiers and
+  base-specifiers, `.template` / `->template` member access, `va_arg`,
+  and the GCC / MSVC / Watcom extension keywords (`__cdecl`,
+  `__stdcall`, `__fastcall`, `__thiscall`, `__watcall`, `__far`,
+  `__near`, `__huge`, `__restrict`, `__restrict__`, `__forceinline`,
+  `__inline`, `__inline__`) as no-op `<storage_class_spec>`
+  alternatives. Four synthetic terminals join the existing
+  `LT_TEMPLATE` / `GT_TEMPLATE` / `LPAREN_CAST` / `IDENT_TYPE` set, all
+  host-emitted: `LPAREN_INIT` (the vexing-parse `T x(args)` and
+  `new T(args)`), `LPAREN_ABST` (parenthesised abstract declarator),
+  `LBRACE_FN` (empty function body, `int main() {}`), and `KW_VA_ARG`
+  (the `va_arg(ap, T)` builtin).
+
+  It is also the first grammar in the repo to use the new
+  context-sensitive surface. `%actions` with per-position targeting
+  drives host type registration (`register_type_from_using_alias`,
+  `register_type_from_class_head`, `register_type_from_template_param`,
+  `register_type_from_concept`, `register_namespace`,
+  `register_imported_name`, `enter_init_decl_list`); `%predicates`
+  (`enum_is_elaborated_use`, `class_is_elaborated_use`) separates the
+  elaborated-type-specifier alternatives; and four `%state_set` groups
+  (`declarator_position`, `type_position`, `expression_position`,
+  `template_arg_list_position`) let a host `IDENT` classifier tell an
+  identifier being introduced from one being used.
+
+### Changed
+
+- **`cpp.uplox` argument lists accept assignment-expressions.**
+  `<expression_list>` was built on `<conditional_expr>`, so `f(x = 0)`
+  did not parse at all and hosts had to wrap the argument in synthetic
+  parentheses before handing over the token stream. It now uses
+  `<assignment_expr>`, which is what the standard specifies.
+
+- **`cpp.uplox` `if` / `while` / `switch` heads take `<condition>`, and
+  `<enum_key_opt>` is gone.** The three statements previously took a
+  bare `<expression>`; they now take the new `<condition>`, which also
+  admits the declaration form. `enum`, `enum class`, and `enum struct`
+  heads are three explicit `<enum_head>` alternatives instead of one
+  alternative with an optional key. Parse trees produced by the example
+  grammar change shape accordingly.
+
+- **`cpp.uplox` now requires host callbacks to parse at all.** Seven
+  `%actions` names are annotated onto productions, and one of them —
+  `enter_init_decl_list` on `<init_declarator>` and
+  `<member_declarator>` — fires on essentially every declaration. The
+  registries are fatal on a missing callback, so a host that parsed
+  `cpp.uplox` in 3.2.0 without an `ActionRegistry` now stops at the
+  first declaration with `ParseError: action 'enter_init_decl_list'
+  referenced by a production but no callback registered`. The two
+  `%predicates` (`enum_is_elaborated_use`, `class_is_elaborated_use`)
+  have the same requirement wherever the parse reaches an
+  elaborated-type-specifier. Register all nine, or pass registries
+  built with `ignore_missing=True`.
+
+- **`cpp.uplox` `new` expressions go through a new `<new_type_id>`.**
+  The eight `<new_expr>` alternatives took `<type_id>`; they now take
+  `<new_type_id>`, and each of the `(args)` forms gains an
+  `LPAREN_INIT` twin for the host-disambiguated case.
+  `<elaborated_type_spec>`'s `enum` and `<class_key>` alternatives are
+  now predicated rather than split by token. Parse trees change shape
+  accordingly.
+
+- **IELR GOTO-disagreement assertion names the states that disagreed.**
+  When the merge invariant in `_apply_mapping` trips, the
+  `AssertionError` now lists which canonical states contributed which
+  GOTO target (`canonical[S]->canonical[T]=merged`) rather than only
+  the two conflicting merged ids, which was not enough to find the
+  merge at fault.
+
+### Fixed
+
+- **`uplox version` printed the wrong version.** `pyproject.toml` and
+  `src/uplox/__init__.py` each carried a version literal, and 3.2.0 was
+  bumped in `pyproject.toml` only — so the 3.2.0 distribution printed
+  `uplox 3.1.1 (schema 1)` and `uplox.__version__` read `3.1.1` for the
+  whole release. `pyproject.toml` now derives the version from the
+  module attribute via `[tool.setuptools.dynamic]`, making
+  `src/uplox/__init__.py` the only place to bump, and
+  `tests/test_smoke.py` asserts `__version__` matches the installed
+  distribution metadata; the old test only checked the string was
+  non-empty, which is why the drift went unnoticed.
+
+- **`rewrite_generics` paired `<` with a `>` across a parenthesis
+  boundary.** The pairing walk tracked no paren depth, so a `>` inside
+  `(…)` could close a `<` opened outside it. In
+  `__is_core_convertible_v<decltype(F<X>() > G<Y>())>` the binary `>`
+  between the two calls was taken as the close of the outer template
+  list; in `if (a < b) x = (c >> d)` the comparison `<` was paired with
+  the shift `>>` in the next expression. Each open `<` now records the
+  paren depth it opened at, a close pops only opens at that same depth,
+  opens whose paren group ends are dropped, and a `)` seen at depth
+  zero — one matching a `(` from before the open `<` — abandons the
+  pending group. Hosts driving `uplox.hooks.generic_brackets` were
+  getting `LT_GENERIC` / `GT_GENERIC` on tokens that were plain
+  comparison and shift operators.
+
+- **`rewrite_generics` abandoned a real template list on a nested
+  `>>`.** When the only open `<` sat at a shallower paren depth than a
+  `>>`, the `>>` branch abandoned the whole pending group instead of
+  ignoring the operator the way the single-`>` branch already did. So
+  `Foo<decltype(declval<S>() >> declval<T>())>` lost the `Foo<…>`
+  pairing, and libc++'s
+  `__is_istreamable<_Stream, _Tp, decltype(a >> b, void())>` failed to
+  parse. A `>>` that can close no open at its own depth is now left
+  alone as the binary operator it is.
+
+- **`rewrite_generics` dropped a `>` when `>>` closed a single open.**
+  With exactly one `<` open, a following `>>` popped that one open and
+  emitted a single `GT_GENERIC`, silently discarding the second `>`
+  from the token stream. The group is now abandoned instead, so both
+  characters survive as `RSHIFT` — the right reading for `a < b >> c`.
+  It gives up the rare `Foo<Bar<int> >> 4`, which real code writes as
+  `Foo<Bar<int>> >> 4` or `Foo<Bar<int> > >> 4`.
+
+- **`rewrite_generics` carried an unmatched `<` across a block
+  boundary.** `SEMI` and `RBRACE` ended a pending group but `LBRACE` did
+  not, so the `<` of a comparison in an `if` / `while` condition stayed
+  on the stack into the body and poisoned every legitimate template-id
+  inside it: the stack never drained, and the entire run was abandoned
+  at the eventual `;`. `LBRACE` joins the abort set, and all three
+  aborts now fire only at paren depth zero, so a temporary-object `{}`
+  nested in balanced parens — `Foo<((void)Bar<X>{}, Y)...>{}` — no
+  longer reads as a statement boundary.
+
+- **`rewrite_generics` lost an inner template-id under an unmatched
+  outer `<`.** In `*p < numeric_limits<char>::max()` the outer `<` is a
+  comparison and never closes, and abandoning it also threw away the
+  `numeric_limits<char>` pairing nested inside. An inner `<…>` that
+  closes while an outer `<` is still open and is immediately followed
+  by `::` or `(` — shapes a comparison can never produce — is now
+  confirmed on its own.
+
+### Documentation
+
+- **README's Related projects entries rewritten in Simplified Technical
+  English.** The list is now flat; `uc80` and `uc386` are no longer
+  nested under `uc_core`.
+
+- **`docs/conflict_resolution.md` dangling-else link fixed.** It
+  pointed at `cookbook.md#nested-if-then-else-the-dangling-else-problem`,
+  which is not the anchor GitHub derives from that heading, so the link
+  went nowhere.
+
+### Test surface
+
+`tests/test_context_sensitive.py` adds 18 tests: classifier relabelling
+with and without the lookahead window, state-set membership and its
+bundle round-trip, positional and whole-subtree actions, predicate
+selection and fallback, the mode stack, and an end-to-end C typedef-hack
+driver built from the three registries. `tests/test_cli_build.py` adds
+five for `explain-state` / `diff-states`, and `tests/test_smoke.py` one
+for the version / distribution-metadata match.
+
+### Migration notes
+
+The core is additive. Grammars that declare none of the new sections
+compile to byte-identical bundles, 3.2.0 bundles load unchanged, and
+`token_filter=` still works alongside the new registries. If you use
+your own grammar and do not drive `generic_brackets`, this is a no-op
+upgrade.
+
+- If you parse with `examples/cpp.uplox`, this release breaks you until
+  you register callbacks. The grammar now carries `!{…}` annotations
+  that fire on ordinary declarations, and an unregistered action is a
+  `ParseError`, not a no-op. Register the seven `%actions` and the two
+  `%predicates`, or construct `ActionRegistry(ignore_missing=True)` and
+  `PredicateRegistry(ignore_missing=True)` to get the old behaviour
+  back. Parse-tree shapes also change: `if` / `while` / `switch` heads,
+  `enum` heads, argument lists, and `new` expressions all moved.
+
+- If you drive `uplox.hooks.generic_brackets.rewrite_generics`, its
+  output changes on inputs the old pairing walk got wrong. That is the
+  point of the fixes, but if you have host code compensating for the
+  old behaviour, re-check it. The one deliberate regression is
+  `Foo<Bar<int> >> 4`, which now reads `>>` as a shift.
+
+- If you emit drivers in any target language, the context-sensitive
+  features are not available to you. `?{…}` grammars fail in
+  `uplox emit` for C, C++, and Lua; they emit for Python, but the
+  generated `parse()` has no way to take a registry. `%actions`
+  grammars are worse on the Python target — the emitted driver raises
+  `ParseError` on the first annotated reduce.
+
+- If you use GLR, `uplox parse --glr` fails on a `?{…}` grammar with
+  `TypeError: unhandled action predicated(…)`. Predicated cells and GLR
+  are not wired together yet.
 
 ## 3.2.0 — 2026-05-25
 
