@@ -53,7 +53,7 @@ NUMBER     = /[0-9][0-9A-Fa-f$]*[BbDdHhOoQq]?/
 # String literals can span multiple lines (LITERALLY bodies routinely
 # break into 4-byte groups across line ends). `''` is the escape for
 # a single quote.
-STRING     = /'([^'\\]|\\.|'')*'/
+STRING     = /'([^']|'')*'/
 
 # Note: PL/M-80 sources sometimes declare `EQU LITERALLY 'LITERALLY'` and
 # then use `EQU` as a macro alias. That requires running a macro expander

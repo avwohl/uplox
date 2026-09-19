@@ -5,6 +5,34 @@ All notable changes to uplox land here. Format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) for the public
 surface (CLI, JSON bundle schema, Python API, hook firing points).
 
+## 3.3.1 — 2026-09-19
+
+One grammar fix: the bundled PL/M grammars applied C escape semantics to
+PL/M string literals.
+
+### Fixed
+
+- **`examples/plm_full.uplox` and `examples/plm_pre.uplox`: `STRING` was
+  `/'([^'\\]|\\.|'')*'/`, which treats a backslash as an escape
+  introducer.** PL/M-80 has no backslash escape - a quote inside a string
+  is written `''`, and a backslash is an ordinary character - so a
+  one-character string holding a backslash was rejected outright with
+  `lexical error at byte 0x5c`. Any PL/M source that uses MBASIC's
+  integer-divide token or a DOS path hit the error. The rule is now
+  `/'([^']|'')*'/`.
+
+  Newlines stay legal inside a PL/M string, and deliberately so.
+  `examples/plm_subset.uplox` has the same rule wrong in the other
+  direction, as `/'([^'\n]|'')*'/`: real PL/M source does carry a string
+  across a line break, as the `LITERALLY` bodies in the MP/M 2 corpus do -
+  `UTIL2/MSBRS.PLM` holds a six-line one - and excluding `\n` drops two
+  files from what `test_mpm2_corpus_parses_majority` can parse. The subset
+  grammar is left as it is, because nothing but its own tests consumes it.
+
+  Found while compiling the BASIC detokeniser of the 80un CP/M unpacker,
+  whose `bas.plm` writes MBASIC's integer-divide token as a character
+  literal.
+
 ## 3.3.0 — 2026-08-20
 
 Context-sensitive parsing: four grammar-level extensions —

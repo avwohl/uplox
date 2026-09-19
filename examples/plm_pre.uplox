@@ -59,7 +59,7 @@ NUMBER     = /[0-9][0-9A-Fa-f$]*[BbDdHhOoQq]?/
 # String literals can span multiple lines in PL/M-80 — LITERALLY
 # bodies routinely break into 4-byte groups across line ends.
 # Doubled `''` is the escape for a single quote inside a string.
-STRING     = /'([^'\\]|\\.|'')*'/
+STRING     = /'([^']|'')*'/
 
 # Identifiers do *not* start with `$` here — that prefix is owned by
 # DOLLAR_DIR. PL/M-80 does allow `$` mid-identifier as a soft hyphen
