@@ -281,6 +281,15 @@ implements the entire classical hack on top of these primitives.
 For C/C++/Lua, wire `set_token_filter` and `set_post_reduce` on
 the emitted parser; see the per-backend docs.
 
+Both callbacks are exposed in all four backends. The Python runtime
+also ships two turnkey helpers built on these primitives:
+`uplox.hooks.TypedefTracker` for the full classical C typedef-name
+hack, and `uplox.hooks.generic_brackets.rewrite_generics(...,
+dialect=…)` for the `<…>`-vs-comparison ambiguity that `csharp`,
+`java`, `kotlin`, `swift`, `typescript`, and `tsx` all face. The
+generic-bracket filter ships dialect tables for those six languages;
+hosts pick the matching one (or supply a custom `Dialect`).
+
 **See:** `examples/c23.uplox` (the production target of this
 machinery), `src/uplox/hooks/` (the runtime), and the
 "Lexer feedback" section of [`grammar_format.md`](grammar_format.md#lexer-feedback-typedef-name-and-friends).
