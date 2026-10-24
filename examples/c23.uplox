@@ -662,6 +662,7 @@ KW_GENERIC KW_VA_ARG KW_OFFSETOF
     | <matched_switch_stmt>
     | IDENT@label COLON <matched_stmt>@stmt                        %ast=LabelStmt
     | IDENT@label COLON <declaration>@stmt                          %ast=LabelStmt
+    | IDENT@label COLON <asm_declaration>@stmt                      %ast=LabelStmt
     | 'case' <conditional_expr>@value COLON <matched_stmt>@stmt    %ast=CaseStmt
     | 'default' COLON <matched_stmt>@stmt                          %ast=DefaultStmt
     ;

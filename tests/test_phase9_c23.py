@@ -1089,3 +1089,10 @@ def test_uc80_example_parses_with_libc_typedefs(built, name, seeded):
     tree = parse(table, scanner.scan(path.read_text()), hooks=hooks, token_filter=tracker.filter)
     assert isinstance(tree, ParseNode) and tree.kind == "translation_unit"
     assert seeded <= tracker.names
+
+
+def test_c23_label_before_asm_statement(built):
+    scanner, table = built
+    src = 'int f(void) { LCONT: asm("nop"); return 0; }\n'
+    tree = parse_str(scanner, table, src)
+    assert isinstance(tree, ParseNode) and tree.kind == "translation_unit"
